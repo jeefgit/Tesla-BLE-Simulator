@@ -20,6 +20,100 @@ try:
 except ImportError:
     BlessServer = None
 
+try:
+    from bumble.device import Device as BumbleDevice
+    from bumble.gatt import Service as BumbleService, Characteristic as BumbleChar
+    from bumble.core import UUID as BumbleUUID
+    from bumble.transport import open_transport as bumble_open_transport
+    from bumble.host import Host as BumbleHost
+    from bumble.hci import OwnAddressType
+    HAS_BUMBLE = True
+except ImportError:
+    HAS_BUMBLE = False
+
+class BumbleTeslaServer:
+    def __init__(self, vin="LRWYGCFS2PC792568", usb_spec="usb:0a12:0001"):
+        self.vin = vin
+        self.usb_spec = usb_spec
+        sha1 = hashlib.sha1(vin.encode('utf-8')).hexdigest()
+        self.ble_name = "S" + sha1[:16] + "C"
+        
+        self.device = None
+        self.host = None
+        self.notify_char = None
+        self.write_char = None
+        self.connected_peers = set()
+        self.write_callback = None
+
+    async def start(self):
+        print(f"[Bumble] 正在初始化 CSR8510 USB 蓝牙适配器 ({self.usb_spec})...")
+        transport = await bumble_open_transport(self.usb_spec)
+        self.host = BumbleHost(transport.source, transport.sink)
+        
+        self.device = BumbleDevice(
+            address='F4:4E:FC:14:3C:A7',
+            name=self.ble_name,
+            host=self.host
+        )
+        
+        self.device.advertising_data = bytes(
+            [2, 0x01, 0x06] +
+            [17, 0x06] + list(bytes.fromhex('1eb9f8eb0c96889bf043d1b211020000'))
+        )
+        self.device.scan_response_data = bytes(
+            [len(self.ble_name) + 1, 0x09] + list(bytes(self.ble_name, 'utf-8'))
+        )
+        
+        self.write_char = BumbleChar(
+            BumbleUUID(WR_UUID),
+            BumbleChar.Properties.WRITE | BumbleChar.Properties.WRITE_WITHOUT_RESPONSE,
+            BumbleChar.Permissions.WRITEABLE,
+            bytes()
+        )
+        
+        if self.write_callback:
+            @self.write_char.on('write')
+            def _on_write(connection, value):
+                self.write_callback(self.write_char, value)
+
+        self.notify_char = BumbleChar(
+            BumbleUUID(RD_UUID),
+            BumbleChar.Properties.READ | BumbleChar.Properties.NOTIFY,
+            BumbleChar.Permissions.READABLE,
+            bytes()
+        )
+        
+        service = BumbleService(BumbleUUID(SVC_UUID), [self.write_char, self.notify_char])
+        self.device.add_service(service)
+        
+        @self.device.on('connection')
+        def on_connection(connection):
+            print(f"[Bumble] ESP32 已建立物理层 BLE 连接: {connection}")
+            self.connected_peers.add(connection)
+            
+        @self.device.on('disconnection')
+        def on_disconnection(connection, reason):
+            print(f"[Bumble] ESP32 断开 BLE 连接, 原因代码: {reason}")
+            self.connected_peers.discard(connection)
+
+        await self.device.power_on()
+        self.device.gatt_server.max_mtu = 256
+        await self.device.start_advertising(own_address_type=OwnAddressType.PUBLIC, auto_restart=True)
+        print(f"[Bumble] [+] 特斯拉 BLE 空中广播启动成功！广播名: {self.ble_name}")
+
+    async def is_connected(self):
+        return len(self.connected_peers) > 0
+
+    async def notify(self, payload_bytes):
+        if self.notify_char and self.connected_peers:
+            for conn in list(self.connected_peers):
+                await self.device.notify_subscriber(conn, self.notify_char, payload_bytes)
+
+    async def stop(self):
+        if self.device:
+            await self.device.stop_advertising()
+            print("[Bumble] BLE 广播服务已停止。")
+
 # Apply monkey patch to Bless WinRT BLEAdapter to handle name change hardware reset delay
 if BlessServer is not None:
     try:
@@ -380,8 +474,8 @@ class TeslaSimulatorGUI:
 
         # 配置 root 窗口属性
         self.root.title("Tesla BLE TFT 仪表盘 - 仿真控制器")
-        self.root.geometry("1120x720")
-        self.root.minsize(1050, 680)
+        self.root.geometry("1120x770")
+        self.root.minsize(1050, 730)
         self.root.config(bg=self.BG_MAIN)
         
         self.root.columnconfigure(0, weight=1)
@@ -1245,9 +1339,8 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
         except ImportError:
             has_bumble = False
 
-        if use_bumble or has_bumble:
+        if use_bumble or HAS_BUMBLE:
             log_queue.put("[+] 使用 Bumble (USB HCI 硬件模式) 启动 BLE 广播...")
-            from bumble_sim import BumbleTeslaServer
             server_obj = BumbleTeslaServer(vin=state.get_vin())
             server_obj.write_callback = on_write
             await server_obj.start()
