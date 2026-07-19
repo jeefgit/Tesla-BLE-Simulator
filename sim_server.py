@@ -371,7 +371,7 @@ async def run_ble_simulation(state: TelemetryState, stop_event: threading.Event,
             permissions=GATTAttributePermissions.readable
         )
         
-        server.write_callbacks[WR_UUID] = on_write
+        server.write_request_func = on_write
     except Exception as e:
         log_queue.put(f"[-] 创建 BLE 服务/特征值异常: {e}")
         return
