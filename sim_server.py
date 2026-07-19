@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import threading
 import queue
+import hashlib
 from datetime import datetime
 
 # BLE 模拟库导入保护
@@ -32,18 +33,6 @@ WR_UUID  = "00000212-b2d1-43f0-9b88-960cebf8b91e"
 RD_UUID  = "00000213-b2d1-43f0-9b88-960cebf8b91e"
 
 # ─── 数据载荷打包格式 ──────────────────────────────────────────
-# f: speed_kmh
-# f: motor_power_kw
-# i: battery_level
-# f: battery_range_km
-# c: gear
-# 6B: doors (fl, fr, rl, rr, frunk, trunk)
-# B: locked
-# B: charging
-# f: charge_power_kw
-# f: inside_temp
-# f: outside_temp
-# 4f: tpms (fl, fr, rl, rr)
 PAYLOAD_FORMAT = "<ffifc6BBfff4f"
 
 # ─── 线程安全共享遥测状态 ─────────────────────────────────────
@@ -53,7 +42,8 @@ class TelemetryState:
         self.use_script_mode = True   # 是否使用剧本模式 (默认为 True)
         self.ble_connected = False    # BLE 连接状态
         self.frame_counter = 0        # 剧本帧计数器
-        
+        self.vin = "LRWYGCFS2PC792568" # 默认匹配 ESP32 默认固件的 VIN
+
         # 初始车况数据
         self.data = {
             'speed_kmh': 0.0,
@@ -116,6 +106,14 @@ class TelemetryState:
     def reset_frame(self):
         with self.lock:
             self.frame_counter = 0
+
+    def get_vin(self):
+        with self.lock:
+            return self.vin
+
+    def set_vin(self, val):
+        with self.lock:
+            self.vin = val
 
 
 def pack_telemetry(data):
@@ -332,9 +330,18 @@ async def run_ble_simulation(state: TelemetryState, stop_event: threading.Event,
         log_queue.put("[-] 错误: 未安装 bless 蓝牙外设模拟库，请运行 pip install -r requirements.txt 安装。")
         return
 
+    vin = state.get_vin()
+    try:
+        sha1 = hashlib.sha1(vin.encode('utf-8')).hexdigest()
+        ble_name = "S" + sha1[:16] + "C"
+    except Exception as e:
+        ble_name = "Tesla-BLE-Simulation"
+        log_queue.put(f"[-] 计算 VIN 广播名失败，采用默认名字: {e}")
+
+    log_queue.put(f"[+] 特斯拉 BLE 广播名: {ble_name} (基于 VIN: {vin})")
     log_queue.put("[+] 正在配置 BLE 外设服务器...")
     try:
-        server = BlessServer(name="Tesla-BLE-Simulation")
+        server = BlessServer(name=ble_name)
     except Exception as e:
         log_queue.put(f"[-] 初始化 BLE 服务器失败: {e}")
         return
@@ -480,23 +487,77 @@ class TeslaSimulatorGUI:
 
     def create_top_panel(self):
         """
-        创建顶层控制栏：显示连接状态和模式切换
+        创建顶层控制栏：显示连接状态、VIN 配置和模式切换
         """
         top_frame = tk.Frame(self.root, bg=self.BG_CARD, height=60, bd=0, relief="flat")
         top_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
+        
         top_frame.columnconfigure(2, weight=1)
+        top_frame.columnconfigure(5, weight=1)
         
         # 标志 Title
-        lbl_title = tk.Label(top_frame, text="TESLA SIMULATOR", font=("Segoe UI", 12, "bold"), fg=self.COLOR_RED, bg=self.BG_CARD)
-        lbl_title.grid(row=0, column=0, padx=15, pady=15, sticky="w")
+        lbl_title = tk.Label(top_frame, text="TESLA SIMULATOR", font=("Segoe UI", 11, "bold"), fg=self.COLOR_RED, bg=self.BG_CARD)
+        lbl_title.grid(row=0, column=0, padx=10, pady=15, sticky="w")
         
-        # 蓝牙连接指示灯
-        self.status_canvas = tk.Canvas(top_frame, width=15, height=15, bg=self.BG_CARD, bd=0, highlightthickness=0)
-        self.status_canvas.grid(row=0, column=1, padx=(10, 5), sticky="w")
-        self.status_led = self.status_canvas.create_oval(2, 2, 13, 13, fill="#555555", width=0)
+        # 蓝牙连接指示灯子 Frame
+        status_sub = tk.Frame(top_frame, bg=self.BG_CARD)
+        status_sub.grid(row=0, column=1, padx=5, sticky="w")
         
-        self.lbl_status = tk.Label(top_frame, text="等待连接 (广播中...)", font=("Segoe UI", 10, "bold"), fg=self.FG_MUTED, bg=self.BG_CARD)
-        self.lbl_status.grid(row=0, column=2, padx=2, sticky="w")
+        self.status_canvas = tk.Canvas(status_sub, width=12, height=12, bg=self.BG_CARD, bd=0, highlightthickness=0)
+        self.status_canvas.pack(side="left", padx=(5, 3))
+        self.status_led = self.status_canvas.create_oval(2, 2, 10, 10, fill="#555555", width=0)
+        
+        self.lbl_status = tk.Label(status_sub, text="等待连接...", font=("Segoe UI", 9, "bold"), fg=self.FG_MUTED, bg=self.BG_CARD)
+        self.lbl_status.pack(side="left")
+        
+        # 占位 Space
+        lbl_spacer = tk.Label(top_frame, bg=self.BG_CARD)
+        lbl_spacer.grid(row=0, column=2, sticky="ew")
+        
+        # VIN 配置组件组
+        vin_frame = tk.Frame(top_frame, bg=self.BG_CARD)
+        vin_frame.grid(row=0, column=3, padx=10, sticky="e")
+        
+        lbl_vin = tk.Label(vin_frame, text="VIN:", font=("Segoe UI", 9, "bold"), fg=self.FG_MUTED, bg=self.BG_CARD)
+        lbl_vin.pack(side="left", padx=2)
+        
+        self.entry_vin = tk.Entry(
+            vin_frame,
+            font=("Consolas", 10),
+            bg=self.BG_INNER,
+            fg=self.FG_TEXT,
+            insertbackground=self.FG_TEXT,
+            bd=1,
+            relief="flat",
+            width=19
+        )
+        self.entry_vin.pack(side="left", padx=3)
+        self.entry_vin.insert(0, self.state.get_vin())
+        self.entry_vin.bind("<KeyRelease>", self.on_vin_key_release)
+        
+        # 实时计算广播名 Label
+        self.lbl_ble_name = tk.Label(vin_frame, text="", font=("Consolas", 9), fg=self.COLOR_GREEN, bg=self.BG_CARD)
+        self.lbl_ble_name.pack(side="left", padx=5)
+        self.update_ble_name_preview()
+        
+        # 重启广播按钮
+        self.btn_restart_ble = tk.Button(
+            vin_frame,
+            text="应用并重启广播",
+            font=("Segoe UI", 9),
+            bg=self.BG_BTN,
+            fg=self.FG_TEXT,
+            activebackground=self.BG_BTN_HOVER,
+            activeforeground=self.FG_TEXT,
+            bd=0,
+            relief="flat",
+            padx=10,
+            pady=3,
+            command=self.restart_ble_service
+        )
+        self.btn_restart_ble.pack(side="left", padx=5)
+        self.btn_restart_ble.bind("<Enter>", lambda e: self.btn_restart_ble.config(bg=self.BG_BTN_HOVER))
+        self.btn_restart_ble.bind("<Leave>", lambda e: self.btn_restart_ble.config(bg=self.BG_BTN))
         
         # 模式切换大 Toggle 按钮
         self.btn_mode = tk.Button(
@@ -513,9 +574,60 @@ class TeslaSimulatorGUI:
             pady=6,
             command=self.toggle_simulation_mode
         )
-        self.btn_mode.grid(row=0, column=3, padx=15, sticky="e")
+        self.btn_mode.grid(row=0, column=4, padx=10, sticky="e")
         self.btn_mode.bind("<Enter>", lambda e: self.btn_mode.config(bg=self.adjust_color_brightness(self.btn_mode['bg'], 1.2)))
         self.btn_mode.bind("<Leave>", lambda e: self.btn_mode.config(bg=self.get_current_mode_color()))
+
+    def update_ble_name_preview(self):
+        vin = self.entry_vin.get().strip()
+        if len(vin) == 17:
+            try:
+                sha1 = hashlib.sha1(vin.encode('utf-8')).hexdigest()
+                ble_name = "S" + sha1[:16] + "C"
+                self.lbl_ble_name.config(text=f"({ble_name})", fg=self.COLOR_GREEN)
+            except Exception:
+                self.lbl_ble_name.config(text="(计算错误)", fg=self.COLOR_RED)
+        else:
+            self.lbl_ble_name.config(text="(VIN必须17位)", fg=self.COLOR_RED)
+
+    def on_vin_key_release(self, event):
+        self.update_ble_name_preview()
+
+    def restart_ble_service(self):
+        new_vin = self.entry_vin.get().strip()
+        if not new_vin or len(new_vin) != 17:
+            messagebox.showerror("错误", "特斯拉 VIN 必须为 17 位字符！\n示例: LRWYGCFS2PC792568")
+            return
+        
+        self.state.set_vin(new_vin)
+        self.log_queue.put(f"[System] 正在请求重启蓝牙广播，新 VIN: {new_vin}")
+        
+        # 禁用重启按钮，防止重复点击
+        self.btn_restart_ble.config(state="disabled", text="重启中...")
+        
+        # 停止旧的线程
+        self.stop_event.set()
+        
+        def restart_worker():
+            if hasattr(self.root, 'ble_thread') and self.root.ble_thread.is_alive():
+                self.root.ble_thread.join(timeout=3.0)
+            
+            # 重置停止标志
+            self.stop_event.clear()
+            
+            # 启动新线程
+            self.root.ble_thread = threading.Thread(
+                target=ble_thread_worker, 
+                args=(self.state, self.stop_event, self.log_queue), 
+                daemon=True
+            )
+            self.root.ble_thread.start()
+            self.log_queue.put("[System] 蓝牙广播已重启完成。")
+            
+            # 恢复按钮状态
+            self.root.after(0, lambda: self.btn_restart_ble.config(state="normal", text="应用并重启广播"))
+            
+        threading.Thread(target=restart_worker, daemon=True).start()
 
     def create_main_content(self):
         """
@@ -559,7 +671,6 @@ class TeslaSimulatorGUI:
             relief="solid",
             highlightthickness=0
         )
-        # 用 label 的背景色隐藏默认边框线
         card.config(highlightbackground="#2D2D2D")
         card.grid(row=row, column=col, sticky="nsew", padx=5, pady=5)
         card.columnconfigure(0, weight=1)
@@ -573,7 +684,6 @@ class TeslaSimulatorGUI:
         container.pack(fill="both", expand=True, padx=15, pady=10)
         container.columnconfigure(1, weight=1)
         
-        # 存储 Label 以便实时刷新滑块数值
         self.slider_labels = {}
         self.sliders = {}
         
@@ -585,16 +695,13 @@ class TeslaSimulatorGUI:
         ]
         
         for idx, (name, label_text, min_val, max_val, resolution, fmt) in enumerate(slider_configs):
-            # 标题
             lbl_desc = tk.Label(container, text=label_text, font=("Segoe UI", 10), fg=self.FG_MUTED, bg=self.BG_CARD)
             lbl_desc.grid(row=idx*2, column=0, sticky="w", pady=(8, 2))
             
-            # 数值显示 Label
             lbl_val = tk.Label(container, text="", font=("Segoe UI", 11, "bold"), fg=self.FG_TEXT, bg=self.BG_CARD)
             lbl_val.grid(row=idx*2, column=1, sticky="e", pady=(8, 2))
             self.slider_labels[name] = (lbl_val, fmt)
             
-            # 滑块本体
             scale = tk.Scale(
                 container,
                 from_=min_val,
@@ -643,7 +750,6 @@ class TeslaSimulatorGUI:
                 command=lambda target_gear=g: self.set_gear_state(target_gear)
             )
             btn.pack(side="left", padx=5)
-            # 简易 Hover
             btn.bind("<Enter>", lambda e, b=btn: self.on_btn_hover_enter(b))
             btn.bind("<Leave>", lambda e, b=btn: self.on_btn_hover_leave(b, 'gear', btn['text']))
             self.gear_buttons[g] = btn
@@ -770,7 +876,7 @@ class TeslaSimulatorGUI:
             scale.grid(row=idx*2+1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
             self.env_sliders[name] = scale
             
-        # 2. 胎压滑块组 (2x2 网格)
+        # 2. 胎压滑块组
         tpms_title_frame = tk.Frame(container, bg=self.BG_CARD)
         tpms_title_frame.grid(row=4, column=0, columnspan=2, sticky="w", pady=(15, 2))
         lbl_tpms_title = tk.Label(tpms_title_frame, text="四轮实时胎压 (Bar, 正常范围 2.6 - 3.1)", font=("Segoe UI", 9, "bold"), fg=self.FG_MUTED, bg=self.BG_CARD)
@@ -828,7 +934,6 @@ class TeslaSimulatorGUI:
         container = tk.Frame(self.card_logs, bg=self.BG_CARD)
         container.pack(fill="both", expand=True, padx=15, pady=10)
         
-        # 终端文本展示框
         self.txt_log = tk.Text(
             container,
             bg="#08080A",
@@ -844,7 +949,6 @@ class TeslaSimulatorGUI:
         )
         self.txt_log.pack(side="left", fill="both", expand=True)
         
-        # 滚动条
         scrollbar = tk.Scrollbar(container, command=self.txt_log.yview, bg=self.BG_CARD, bd=0, highlightthickness=0)
         scrollbar.pack(side="right", fill="y")
         self.txt_log.config(yscrollcommand=scrollbar.set)
@@ -877,7 +981,6 @@ class TeslaSimulatorGUI:
         self.state.set_script_mode(new_mode)
         
         if new_mode:
-            # 切回剧本模式，重置剧本帧到0，以开始新的循环
             self.state.reset_frame()
             self.btn_mode.config(text="自动剧本模式 (PLAYING)", bg=self.COLOR_BLUE)
             self.log_queue.put("[System] 切换至：自动剧本模式。手动输入已停用。")
@@ -885,7 +988,6 @@ class TeslaSimulatorGUI:
             self.btn_mode.config(text="手动干预模式 (MANUAL)", bg=self.COLOR_RED)
             self.log_queue.put("[System] 切换至：手动干预模式。现在可通过控件调整车辆状态。")
         
-        # 更新各控件的禁用/启用状态
         self.update_controls_interactive_state()
 
     def update_controls_interactive_state(self):
@@ -895,29 +997,23 @@ class TeslaSimulatorGUI:
         is_manual = not self.state.is_script_mode()
         state_str = "normal" if is_manual else "disabled"
         
-        # 1. 驾驶滑块
         for s in self.sliders.values():
             s.config(state=state_str)
             
-        # 2. 档位按钮
         for b in self.gear_buttons.values():
             b.config(state=state_str)
             
-        # 3. 车门按钮
         for b in self.door_buttons.values():
             b.config(state=state_str)
             
-        # 4. 锁定与充电按钮
         self.btn_lock.config(state=state_str)
         self.btn_charge_plug.config(state=state_str)
         
-        # 5. 充电功率滑块
         if is_manual and self.state.get_data()['charging']:
             self.scale_charge_power.config(state="normal")
         else:
             self.scale_charge_power.config(state="disabled")
             
-        # 6. 环境与胎压
         for s in self.env_sliders.values():
             s.config(state=state_str)
         for s in self.tpms_sliders.values():
@@ -963,7 +1059,6 @@ class TeslaSimulatorGUI:
         f_val = float(val)
         lbl.config(text=f"{f_val:.1f} Bar")
         
-        # 根据胎压值标记异常颜色
         if f_val < 2.5 or f_val > 3.2:
             lbl.config(fg=self.COLOR_RED)
         else:
@@ -1048,7 +1143,6 @@ class TeslaSimulatorGUI:
             self.btn_charge_plug.config(text="充电枪插拔 [拔]", bg=self.BG_BTN)
             self.scale_charge_power.config(state="disabled")
             
-        # 同步数值
         self.is_syncing_ui = True
         try:
             self.scale_charge_power.set(power)
@@ -1105,17 +1199,12 @@ class TeslaSimulatorGUI:
         """
         GUI 每 100ms 进行一次的生命周期轮询，负责状态更新与日志提取
         """
-        # 1. 如果在自动剧本模式下，将最新的遥测参数映射到 UI 组件上
         if self.state.is_script_mode():
             self.sync_ui_from_data(self.state.get_data())
             
-        # 2. 定期刷新 BLE 连接状态
         self.update_connection_status()
-        
-        # 3. 从日志队列中刷新文本终端
         self.poll_log_queue()
         
-        # 4. 循环调用
         if not self.stop_event.is_set():
             self.root.after(100, self.periodic_gui_update)
 
@@ -1125,39 +1214,29 @@ class TeslaSimulatorGUI:
         """
         self.is_syncing_ui = True
         try:
-            # 时速、功率、电量、续航
             for name, scale in self.sliders.items():
                 scale.set(data[name])
                 lbl, fmt = self.slider_labels[name]
                 lbl.config(text=fmt % data[name])
                 
-            # 环境温度
             for name, scale in self.env_sliders.items():
                 scale.set(data[name])
                 lbl, fmt = self.env_labels[name]
                 lbl.config(text=fmt % data[name])
                 
-            # 胎压
             for name, scale in self.tpms_sliders.items():
                 scale.set(data[name])
                 lbl = self.tpms_labels[name]
                 lbl.config(text=f"{data[name]:.1f} Bar")
-                # 警报色判定
                 if data[name] < 2.5 or data[name] > 3.2:
                     lbl.config(fg=self.COLOR_RED)
                 else:
                     lbl.config(fg=self.FG_TEXT)
                     
-            # 挡位
             self.refresh_gear_ui(data['gear'])
-            
-            # 车锁
             self.refresh_lock_ui(data['locked'])
-            
-            # 充电状态与充电功率
             self.refresh_charge_ui(data['charging'], data['charge_power_kw'])
             
-            # 六车门
             for key in self.door_buttons.keys():
                 self.refresh_door_ui(key, data[key])
                 
@@ -1173,8 +1252,6 @@ class TeslaSimulatorGUI:
             self.status_canvas.itemconfigure(self.status_led, fill=self.COLOR_GREEN)
             self.lbl_status.config(text="已连接 (ESP32 配对成功)", fg=self.COLOR_GREEN)
         else:
-            # 未连接时闪烁或显示广播中
-            # 可以使用闪烁效果，本处直接展示为黄色以方便辨识
             self.status_canvas.itemconfigure(self.status_led, fill="#F59E0B")
             self.lbl_status.config(text="等待连接 (广播中...)", fg="#F59E0B")
 
@@ -1194,7 +1271,6 @@ class TeslaSimulatorGUI:
                 break
                 
         if lines_added:
-            # 限制控制台最大行数，防止内存溢出
             total_lines = int(self.txt_log.index('end-1c').split('.')[0])
             if total_lines > 200:
                 self.txt_log.delete("1.0", f"{total_lines - 200}.0")
@@ -1206,7 +1282,6 @@ class TeslaSimulatorGUI:
     def on_btn_hover_enter(self, btn):
         if btn['state'] == 'disabled':
             return
-        # 仅当按钮不是高亮红/绿时，修改背景为 Hover 灰色
         if btn['bg'] not in [self.COLOR_RED, self.COLOR_GREEN, self.COLOR_BLUE]:
             btn.config(bg=self.BG_BTN_HOVER)
 
@@ -1215,7 +1290,6 @@ class TeslaSimulatorGUI:
             return
         data = self.state.get_data()
         
-        # 还原默认底色
         if type_group == 'gear':
             if key == data['gear']:
                 btn.config(bg=self.COLOR_RED)
@@ -1231,9 +1305,6 @@ class TeslaSimulatorGUI:
         return self.COLOR_BLUE if self.state.is_script_mode() else self.COLOR_RED
 
     def adjust_color_brightness(self, hex_color, factor):
-        """
-        调整十六进制颜色的亮度 (用于 Hover 增强)
-        """
         hex_color = hex_color.lstrip('#')
         r = int(hex_color[0:2], 16)
         g = int(hex_color[2:4], 16)
@@ -1245,9 +1316,6 @@ class TeslaSimulatorGUI:
         return f"#{r:02x}{g:02x}{b:02x}"
 
     def on_close(self):
-        """
-        关闭窗口时，设置停止事件以让后台线程退出，然后销毁 GUI
-        """
         self.stop_event.set()
         self.root.destroy()
 
@@ -1259,13 +1327,11 @@ def run_cli_mode(state: TelemetryState, stop_event: threading.Event, log_queue: 
     """
     print("[+] 正在无 GUI 模式下启动 Tesla BLE 遥测仿真器...")
     
-    # 启动后台 BLE 线程
     ble_thread = threading.Thread(target=ble_thread_worker, args=(state, stop_event, log_queue), daemon=True)
     ble_thread.start()
     
     try:
         while True:
-            # 消费并打印队列中的日志
             while not log_queue.empty():
                 try:
                     log_line = log_queue.get_nowait()
@@ -1276,29 +1342,28 @@ def run_cli_mode(state: TelemetryState, stop_event: threading.Event, log_queue: 
     except KeyboardInterrupt:
         print("\n[+] 正在退出，正在停止 BLE 服务...")
         stop_event.set()
-        # 等待线程安全退场
         ble_thread.join(timeout=2.0)
         print("[+] 退出成功。")
 
 
 # ─── 程序主入口 ──────────────────────────────────────────────
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Tesla BLE TFT HMI Windows Simulator Control Server")
+    parser = argparse.ArgumentParser(description="Tesla BLE HMI Windows Simulator Control Server")
     parser.add_argument("--nogui", action="store_true", help="强制在纯命令行模式下运行（不启动 Tkinter 界面）")
+    parser.add_argument("--vin", type=str, default="LRWYGCFS2PC792568", help="设定模拟车型的 17 位 VIN 识别号（默认为 LRWYGCFS2PC792568）")
     args = parser.parse_args()
     
     print("==========================================================")
-    print("      Tesla BLE HMI Windows Simulator Server v2.0         ")
+    print("      Tesla BLE HMI Windows Simulator Server v2.1         ")
     print("==========================================================")
     
     state = TelemetryState()
+    # 依据参数（或GUI默认）初始化 VIN
+    state.set_vin(args.vin)
+    
     stop_event = threading.Event()
     log_queue = queue.Queue()
     
-    # 判定是否启动 GUI
-    # 1. 用户没有传入 --nogui
-    # 2. 本地具备 tkinter 库支持
-    # 3. 系统有视窗显示环境
     use_gui = not args.nogui and (tk is not None)
     
     if not use_gui:
@@ -1309,21 +1374,19 @@ if __name__ == "__main__":
         run_cli_mode(state, stop_event, log_queue)
     else:
         # GUI 模式运行
-        # 1. 先启动后台 BLE 线程
         ble_thread = threading.Thread(target=ble_thread_worker, args=(state, stop_event, log_queue), daemon=True)
         ble_thread.start()
         
-        # 2. 在主线程拉起 Tkinter 事件循环
         root = tk.Tk()
+        # 绑定蓝牙线程引用在 root 上，以便 GUI 内部执行重启服务
+        root.ble_thread = ble_thread
         gui = TeslaSimulatorGUI(root, state, stop_event, log_queue)
         
         try:
             root.mainloop()
         except KeyboardInterrupt:
-            # 捕获 Ctrl+C 的关闭，在 IDE 或控制台中同样生效
             stop_event.set()
             root.destroy()
         
-        # 3. 阻塞等待后台线程优雅退场后再行关闭
         ble_thread.join(timeout=2.0)
         print("[+] 仿真服务器已完全退出。")
