@@ -351,10 +351,10 @@ async def run_ble_simulation(state: TelemetryState, stop_event: threading.Event,
         log_queue.put(f"[BLE-Write] 接收到控制命令: {value.hex()}")
 
     try:
-        server.add_new_service(SVC_UUID)
+        await server.add_new_service(SVC_UUID)
         
         # Write Characteristic (可写特征值)
-        server.add_new_characteristic(
+        await server.add_new_characteristic(
             service_uuid=SVC_UUID,
             char_uuid=WR_UUID,
             properties=GATTCharacteristicProperties.write | GATTCharacteristicProperties.write_without_response,
@@ -363,7 +363,7 @@ async def run_ble_simulation(state: TelemetryState, stop_event: threading.Event,
         )
         
         # Notify Characteristic (主通道特征值)
-        server.add_new_characteristic(
+        await server.add_new_characteristic(
             service_uuid=SVC_UUID,
             char_uuid=RD_UUID,
             properties=GATTCharacteristicProperties.notify,
