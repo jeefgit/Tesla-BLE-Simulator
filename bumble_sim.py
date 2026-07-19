@@ -93,9 +93,14 @@ class BumbleTeslaServer:
             self.connected_peers.discard(connection)
 
         await self.device.power_on()
-        await self.device.start_advertising()
+        # 设置 GATT Server 最大 MTU 为 256（匹配 ESP32 请求的 256 字节 MTU）
+        self.device.gatt_server.max_mtu = 256
+        
+        # 使用 OwnAddressType.PUBLIC 公网地址进行广播（CSR8510 物理硬件 MAC），并开启自动重启广播
+        from bumble.hci import OwnAddressType
+        await self.device.start_advertising(own_address_type=OwnAddressType.PUBLIC, auto_restart=True)
         print(f"[Bumble] [+] 特斯拉 BLE 空中广播启动成功！广播名: {self.ble_name}")
-        print(f"[Bumble] [+] 物理广播数据已载入。ESP32 主机随时可扫出并发起连接。")
+        print(f"[Bumble] [+] 物理广播数据已载入 (Public MAC)。ESP32 主机随时可扫出并发起连接。")
 
     async def is_connected(self):
         return len(self.connected_peers) > 0
