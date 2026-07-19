@@ -33,16 +33,20 @@ WR_UUID  = "00000212-b2d1-43f0-9b88-960cebf8b91e"
 RD_UUID  = "00000213-b2d1-43f0-9b88-960cebf8b91e"
 
 # ─── 数据载荷打包格式 ──────────────────────────────────────────
+# f: speed_kmh, f: motor_power_kw, i: battery_level, f: battery_range_km, c: gear,
+# 6B: doors, B: locked, B: charging, f: charge_power_kw, f: inside_temp, f: outside_temp,
+# 4f: tpms[4] (53 bytes total)
 PAYLOAD_FORMAT = "<ffifc6BBBfff4f"
 
 # ─── 线程安全共享遥测状态 ─────────────────────────────────────
 class TelemetryState:
     def __init__(self):
         self.lock = threading.Lock()
-        self.use_script_mode = True   # 是否使用剧本模式 (默认为 True)
+        self.use_script_mode = False  # 默认为手动干预模式，应用户要求关闭自动剧本播放
         self.ble_connected = False    # BLE 连接状态
         self.frame_counter = 0        # 剧本帧计数器
         self.vin = "LRWYGCFS2PC792568" # 默认匹配 ESP32 默认固件的 VIN
+        self.request_restart = False  # 蓝牙广播重启标志位
 
         # 初始车况数据
         self.data = {
@@ -115,10 +119,20 @@ class TelemetryState:
         with self.lock:
             self.vin = val
 
+    def check_restart(self):
+        with self.lock:
+            val = self.request_restart
+            self.request_restart = False
+            return val
+
+    def set_restart(self, val):
+        with self.lock:
+            self.request_restart = val
+
 
 def pack_telemetry(data):
     """
-    将字典数据序列化为紧凑的二进制 SimPayload
+    将字典数据序列化为紧凑的二进制 SimPayload (53 bytes)
     """
     gear_byte = data['gear'].encode('ascii')
     doors = [
@@ -152,11 +166,9 @@ def pack_telemetry(data):
 def generate_mock_frame(frame_counter):
     """
     根据时间轴帧数（0 ~ 1030 帧）生成仿真的车机遥测状态数据。
-    20Hz 刷新下，全长剧本运行时间约为 51.5 秒。
     """
     loop_frame = frame_counter % 1030
     
-    # 默认基础状态
     data = {
         'speed_kmh': 0.0,
         'motor_power_kw': 0.0,
@@ -186,9 +198,9 @@ def generate_mock_frame(frame_counter):
         data['locked'] = False
         data['door_open_fl'] = True
         data['door_open_rl'] = True
-        data['tpms_fl'] = 2.4  # 低压报警
+        data['tpms_fl'] = 2.4
         data['tpms_fr'] = 2.8
-        data['tpms_rl'] = 3.3  # 高压报警
+        data['tpms_rl'] = 3.3
         data['tpms_rr'] = 2.9
         data['script_phase_desc'] = "阶段 0: 解锁上车 (车门开启, 胎压异常)"
 
@@ -240,11 +252,11 @@ def generate_mock_frame(frame_counter):
         if loop_frame < 410:
             ratio = (loop_frame - 360) / 50.0
             data['speed_kmh'] = 120.0 - ratio * 30.0
-            data['motor_power_kw'] = -12.5  # 轻度回收
+            data['motor_power_kw'] = -12.5
         else:
             ratio = (loop_frame - 410) / 50.0
             data['speed_kmh'] = 90.0 - ratio * 80.0
-            data['motor_power_kw'] = -12.5 - ratio * 47.5  # 强力回收
+            data['motor_power_kw'] = -12.5 - ratio * 47.5
         data['tpms_fl'] = 2.4
         data['tpms_fr'] = 3.1
         data['tpms_rl'] = 3.3
@@ -254,7 +266,7 @@ def generate_mock_frame(frame_counter):
     # 阶段 5：巡航模式 FSD (定速 80 ~ 85)（460 ~ 580帧）
     elif 580 > loop_frame >= 460:
         data['locked'] = False
-        data['gear'] = '?'  # 巡航档
+        data['gear'] = '?'
         if loop_frame < 500:
             data['speed_kmh'] = 80.0
             data['motor_power_kw'] = 8.5
@@ -321,137 +333,6 @@ def generate_mock_frame(frame_counter):
     return data
 
 
-# ─── 后台 BLE 广播任务 ──────────────────────────────────────
-async def run_ble_simulation(state: TelemetryState, stop_event: threading.Event, log_queue: queue.Queue):
-    """
-    低功耗蓝牙 BLE 广播仿真服务
-    """
-    if not BlessServer:
-        log_queue.put("[-] 错误: 未安装 bless 蓝牙外设模拟库，请运行 pip install -r requirements.txt 安装。")
-        return
-
-    vin = state.get_vin()
-    try:
-        sha1 = hashlib.sha1(vin.encode('utf-8')).hexdigest()
-        ble_name = "S" + sha1[:16] + "C"
-    except Exception as e:
-        ble_name = "Tesla-BLE-Simulation"
-        log_queue.put(f"[-] 计算 VIN 广播名失败，采用默认名字: {e}")
-
-    log_queue.put(f"[+] 特斯拉 BLE 广播名: {ble_name} (基于 VIN: {vin})")
-    log_queue.put("[+] 正在配置 BLE 外设服务器...")
-    try:
-        server = BlessServer(name=ble_name)
-    except Exception as e:
-        log_queue.put(f"[-] 初始化 BLE 服务器失败: {e}")
-        return
-
-    # 接收客户端写入控制
-    def on_write(characteristic, value):
-        log_queue.put(f"[BLE-Write] 接收到控制命令: {value.hex()}")
-
-    try:
-        await server.add_new_service(SVC_UUID)
-        
-        # Write Characteristic (可写特征值)
-        await server.add_new_characteristic(
-            service_uuid=SVC_UUID,
-            char_uuid=WR_UUID,
-            properties=GATTCharacteristicProperties.write | GATTCharacteristicProperties.write_without_response,
-            value=bytearray(),
-            permissions=GATTAttributePermissions.writeable
-        )
-        
-        # Notify Characteristic (主通道特征值)
-        await server.add_new_characteristic(
-            service_uuid=SVC_UUID,
-            char_uuid=RD_UUID,
-            properties=GATTCharacteristicProperties.notify,
-            value=bytearray(),
-            permissions=GATTAttributePermissions.readable
-        )
-        
-        server.write_request_func = on_write
-    except Exception as e:
-        log_queue.put(f"[-] 创建 BLE 服务/特征值异常: {e}")
-        return
-
-    log_queue.put(f"[+] 启动广播: Service UUID = {SVC_UUID}")
-    try:
-        await server.start()
-        log_queue.put("[+] 广播发布成功！等待 ESP32 蓝牙寻址连接...")
-    except Exception as e:
-        log_queue.put(f"[-] 启动 BLE 广播失败: {e}. 请检查您的电脑蓝牙是否已在系统设置中开启。")
-        return
-
-    frame_log_counter = 0
-    try:
-        while not stop_event.is_set():
-            is_conn = server.is_connected
-            state.set_connected(is_conn)
-            
-            if is_conn:
-                if state.is_script_mode():
-                    # 剧本模式下，自增帧数并更新遥测值
-                    frame = state.increment_frame()
-                    mock_data = generate_mock_frame(frame)
-                    state.update_data(**mock_data)
-                else:
-                    # 手动模式下，直接读取状态机中的当前值
-                    mock_data = state.get_data()
-                    mock_data['script_phase_desc'] = "手动干预模式"
-                
-                # 数据打包并发送
-                payload = pack_telemetry(mock_data)
-                server.get_characteristic(RD_UUID).value = payload
-                server.update_value(SVC_UUID, RD_UUID)
-                
-                # 每 2 秒 (40 帧) 在日志中输出一次信息
-                if frame_log_counter % 40 == 0:
-                    log_queue.put(f"[BLE-Notify] 推送: Speed={mock_data['speed_kmh']:.1f} KM/H, Gear={mock_data['gear']}, SOC={mock_data['battery_level']}%, Phase={mock_data.get('script_phase_desc', '手动')}")
-                frame_log_counter += 1
-            else:
-                if frame_log_counter > 0:
-                    log_queue.put("[-] ESP32 断开蓝牙连接，重新等待连接中...")
-                    frame_log_counter = 0
-            
-            await asyncio.sleep(0.05)  # 20Hz 发送频率 (50ms 周期)
-    except Exception as e:
-        log_queue.put(f"[-] BLE 主循环异常: {e}")
-    finally:
-        log_queue.put("[+] 正在停止 BLE 广播服务器...")
-        try:
-            await server.stop()
-            log_queue.put("[+] BLE 广播已安全关闭。")
-        except Exception as e:
-            log_queue.put(f"[-] 停止 BLE 服务时发生异常: {e}")
-
-
-def ble_thread_worker(state, stop_event, log_queue):
-    """
-    负责运行 asyncio 蓝牙事件循环的后台线程工作器
-    """
-    has_com = False
-    try:
-        import pythoncom
-        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
-        has_com = True
-    except Exception:
-        pass
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(run_ble_simulation(state, stop_event, log_queue))
-    finally:
-        loop.close()
-        if has_com:
-            try:
-                pythoncom.CoUninitialize()
-            except Exception:
-                pass
-
-
 # ─── 特斯拉深色主题 GUI 界面类 ────────────────────────────────
 class TeslaSimulatorGUI:
     def __init__(self, root, state: TelemetryState, stop_event: threading.Event, log_queue: queue.Queue):
@@ -460,7 +341,6 @@ class TeslaSimulatorGUI:
         self.stop_event = stop_event
         self.log_queue = log_queue
         
-        # 标志位：指示是否正在将后台数据同步到 UI，用以防止滑块的 Command 回调循环触发
         self.is_syncing_ui = False
         
         # 配色定义 (特斯拉暗黑风)
@@ -481,19 +361,11 @@ class TeslaSimulatorGUI:
         self.root.minsize(1050, 680)
         self.root.config(bg=self.BG_MAIN)
         
-        # 全局网格权重
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(1, weight=1)
         
-        # 初始化界面布局
         self.create_top_panel()
         self.create_main_content()
-        
-        # 绑定窗口关闭事件
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-        
-        # 启动 GUI 的定时轮询器 (100ms 刷新率)
-        self.root.after(100, self.periodic_gui_update)
         
         # 初始化 UI 的控件值
         self.sync_ui_from_data(self.state.get_data())
@@ -572,14 +444,14 @@ class TeslaSimulatorGUI:
         self.btn_restart_ble.bind("<Enter>", lambda e: self.btn_restart_ble.config(bg=self.BG_BTN_HOVER))
         self.btn_restart_ble.bind("<Leave>", lambda e: self.btn_restart_ble.config(bg=self.BG_BTN))
         
-        # 模式切换大 Toggle 按钮
+        # 模式切换大 Toggle 按钮 (依据当前默认的模式决定初始状态)
         self.btn_mode = tk.Button(
             top_frame,
-            text="自动剧本模式 (PLAYING)",
+            text="自动剧本模式 (PLAYING)" if self.state.is_script_mode() else "手动干预模式 (MANUAL)",
             font=("Segoe UI", 10, "bold"),
-            bg=self.COLOR_BLUE,
+            bg=self.get_current_mode_color(),
             fg=self.FG_TEXT,
-            activebackground=self.COLOR_BLUE,
+            activebackground=self.get_current_mode_color(),
             activeforeground=self.FG_TEXT,
             bd=0,
             relief="flat",
@@ -614,33 +486,8 @@ class TeslaSimulatorGUI:
         
         self.state.set_vin(new_vin)
         self.log_queue.put(f"[System] 正在请求重启蓝牙广播，新 VIN: {new_vin}")
-        
-        # 禁用重启按钮，防止重复点击
         self.btn_restart_ble.config(state="disabled", text="重启中...")
-        
-        # 停止旧的线程
-        self.stop_event.set()
-        
-        def restart_worker():
-            if hasattr(self.root, 'ble_thread') and self.root.ble_thread.is_alive():
-                self.root.ble_thread.join(timeout=3.0)
-            
-            # 重置停止标志
-            self.stop_event.clear()
-            
-            # 启动新线程
-            self.root.ble_thread = threading.Thread(
-                target=ble_thread_worker, 
-                args=(self.state, self.stop_event, self.log_queue), 
-                daemon=True
-            )
-            self.root.ble_thread.start()
-            self.log_queue.put("[System] 蓝牙广播已重启完成。")
-            
-            # 恢复按钮状态
-            self.root.after(0, lambda: self.btn_restart_ble.config(state="normal", text="应用并重启广播"))
-            
-        threading.Thread(target=restart_worker, daemon=True).start()
+        self.state.set_restart(True)
 
     def create_main_content(self):
         """
@@ -771,7 +618,7 @@ class TeslaSimulatorGUI:
         toggle_frame = tk.Frame(container, bg=self.BG_CARD)
         toggle_frame.pack(fill="x", pady=5)
         
-        self.btn_lock = self.create_toggle_btn(toggle_frame, "中控锁定 [关]", self.toggle_lock_state)
+        self.btn_lock = self.create_toggle_btn(toggle_frame, "中控锁定 [锁]", self.toggle_lock_state)
         self.btn_lock.pack(side="left", padx=(0, 10), expand=True, fill="x")
         
         self.btn_charge_plug = self.create_toggle_btn(toggle_frame, "充电枪插拔 [拔]", self.toggle_charge_plug)
@@ -1208,18 +1055,15 @@ class TeslaSimulatorGUI:
             btn.config(text=f"{clean_text} [关]", bg=self.BG_BTN)
 
     # ─── 后台通信同步逻辑 ────────────────────────────────────────
-    def periodic_gui_update(self):
+    def periodic_gui_update_tick(self):
         """
-        GUI 每 100ms 进行一次的生命周期轮询，负责状态更新与日志提取
+        GUI 每 50ms (20Hz) 进行一次生命周期更新，由主协程统一调度推动
         """
         if self.state.is_script_mode():
             self.sync_ui_from_data(self.state.get_data())
             
         self.update_connection_status()
         self.poll_log_queue()
-        
-        if not self.stop_event.is_set():
-            self.root.after(100, self.periodic_gui_update)
 
     def sync_ui_from_data(self, data):
         """
@@ -1328,35 +1172,165 @@ class TeslaSimulatorGUI:
         b = min(255, int(b * factor))
         return f"#{r:02x}{g:02x}{b:02x}"
 
-    def on_close(self):
-        self.stop_event.set()
-        self.root.destroy()
 
-
-# ─── 命令行无 GUI 主循环模式 ─────────────────────────────────
-def run_cli_mode(state: TelemetryState, stop_event: threading.Event, log_queue: queue.Queue):
+# ─── 主单线程协程异步服务逻辑 ──────────────────────────────────────
+async def async_main(args, state: TelemetryState, stop_event: threading.Event, log_queue: queue.Queue):
     """
-    原版无 GUI 兼容模式：直接拉起异步 BLE 服务器，并在主线程中消费队列打印日志
+    统一驱动 GUI 及 BLE 服务的单事件循环核心主协程
     """
-    print("[+] 正在无 GUI 模式下启动 Tesla BLE 遥测仿真器...")
-    
-    ble_thread = threading.Thread(target=ble_thread_worker, args=(state, stop_event, log_queue), daemon=True)
-    ble_thread.start()
-    
+    vin = state.get_vin()
     try:
-        while True:
-            while not log_queue.empty():
+        sha1 = hashlib.sha1(vin.encode('utf-8')).hexdigest()
+        ble_name = "S" + sha1[:16] + "C"
+    except Exception:
+        ble_name = "Tesla-BLE-Simulation"
+        
+    log_queue.put(f"[+] 特斯拉 BLE 广播名: {ble_name} (基于 VIN: {vin})")
+    log_queue.put("[+] 正在配置 BLE 外设服务器...")
+    
+    # BLE 客户端特征值写入事件回调
+    def on_write(characteristic, value):
+        log_queue.put(f"[BLE-Write] 接收到控制命令: {value.hex()}")
+
+    async def start_ble_server(name):
+        server_obj = BlessServer(name=name)
+        await server_obj.add_new_service(SVC_UUID)
+        
+        # Write Characteristic (可写特征值)
+        await server_obj.add_new_characteristic(
+            service_uuid=SVC_UUID,
+            char_uuid=WR_UUID,
+            properties=GATTCharacteristicProperties.write | GATTCharacteristicProperties.write_without_response,
+            value=bytearray(),
+            permissions=GATTAttributePermissions.writeable
+        )
+        
+        # Notify Characteristic (主通道特征值)
+        await server_obj.add_new_characteristic(
+            service_uuid=SVC_UUID,
+            char_uuid=RD_UUID,
+            properties=GATTCharacteristicProperties.notify,
+            value=bytearray(),
+            permissions=GATTAttributePermissions.readable
+        )
+        
+        server_obj.write_request_func = on_write
+        await server_obj.start()
+        return server_obj
+
+    # 启动蓝牙广播
+    try:
+        server = await start_ble_server(ble_name)
+        log_queue.put("[+] 广播发布成功！等待 ESP32 蓝牙寻址连接...")
+    except Exception as e:
+        log_queue.put(f"[-] 启动 BLE 广播失败: {e}. 请检查您的电脑蓝牙是否已在系统设置中开启。")
+        server = None
+
+    # 初始化 Tkinter 视窗（仅当环境允许且用户没有传递 --nogui 时）
+    use_gui = not args.nogui and (tk is not None)
+    gui = None
+    root = None
+    if use_gui:
+        root = tk.Tk()
+        gui = TeslaSimulatorGUI(root, state, stop_event, log_queue)
+        gui.update_controls_interactive_state()
+        
+        def on_close():
+            stop_event.set()
+            try:
+                root.destroy()
+            except Exception:
+                pass
+        root.protocol("WM_DELETE_WINDOW", on_close)
+
+    frame_log_counter = 0
+    try:
+        while not stop_event.is_set():
+            # 1. 推进 Tkinter 图形框架事件循环一次
+            if root is not None:
                 try:
-                    log_line = log_queue.get_nowait()
-                    print(log_line)
-                except queue.Empty:
+                    root.update()
+                except tk.TclError:
+                    stop_event.set()
                     break
-            time.sleep(0.1)
-    except KeyboardInterrupt:
-        print("\n[+] 正在退出，正在停止 BLE 服务...")
-        stop_event.set()
-        ble_thread.join(timeout=2.0)
-        print("[+] 退出成功。")
+
+            # 2. 消费并打印命令行模式下的日志队列
+            if not use_gui:
+                while not log_queue.empty():
+                    try:
+                        print(log_queue.get_nowait())
+                    except queue.Empty:
+                        break
+
+            # 3. 处理蓝牙广播动态重启（VIN 更改）
+            if state.check_restart():
+                log_queue.put("[System] 正在关闭现有蓝牙服务...")
+                if server is not None:
+                    await server.stop()
+                
+                new_vin = state.get_vin()
+                try:
+                    sha1 = hashlib.sha1(new_vin.encode('utf-8')).hexdigest()
+                    new_ble_name = "S" + sha1[:16] + "C"
+                except Exception:
+                    new_ble_name = "Tesla-BLE-Simulation"
+                
+                log_queue.put(f"[System] 重新配置蓝牙广播名: {new_ble_name}")
+                try:
+                    server = await start_ble_server(new_ble_name)
+                    log_queue.put("[+] 广播重启发布成功！等待连接...")
+                except Exception as e:
+                    log_queue.put(f"[-] 蓝牙广播重启失败: {e}")
+                    server = None
+                
+                if gui is not None:
+                    gui.btn_restart_ble.config(state="normal", text="应用并重启广播")
+
+            # 4. 20Hz 遥测数据推送机制
+            if server is not None:
+                is_conn = server.is_connected
+                state.set_connected(is_conn)
+                
+                if is_conn:
+                    if state.is_script_mode():
+                        frame = state.increment_frame()
+                        mock_data = generate_mock_frame(frame)
+                        state.update_data(**mock_data)
+                    else:
+                        mock_data = state.get_data()
+                        mock_data['script_phase_desc'] = "手动干预模式"
+                    
+                    payload = pack_telemetry(mock_data)
+                    try:
+                        server.get_characteristic(RD_UUID).value = payload
+                        server.update_value(SVC_UUID, RD_UUID)
+                    except Exception as e:
+                        log_queue.put(f"[-] 推送遥测数据出错: {e}")
+                    
+                    if frame_log_counter % 40 == 0:
+                        log_queue.put(f"[BLE-Notify] 推送: Speed={mock_data['speed_kmh']:.1f} KM/H, Gear={mock_data['gear']}, SOC={mock_data['battery_level']}%, Phase={mock_data.get('script_phase_desc', '手动')}")
+                    frame_log_counter += 1
+                else:
+                    if frame_log_counter > 0:
+                        log_queue.put("[-] ESP32 断开蓝牙连接，重新等待连接中...")
+                        frame_log_counter = 0
+
+            # 5. 更新 GUI 生命周期的定时状态
+            if gui is not None and not stop_event.is_set():
+                gui.periodic_gui_update_tick()
+
+            await asyncio.sleep(0.05)  # 20Hz 主循环周期 (50ms)
+            
+    except Exception as e:
+        log_queue.put(f"[-] 主协程循环发生异常: {e}")
+    finally:
+        if server is not None:
+            log_queue.put("[+] 正在停止 BLE 广播服务器...")
+            try:
+                await server.stop()
+                log_queue.put("[+] BLE 广播已安全关闭。")
+            except Exception as e:
+                log_queue.put(f"[-] 停止 BLE 服务时发生异常: {e}")
 
 
 # ─── 程序主入口 ──────────────────────────────────────────────
@@ -1367,39 +1341,23 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     print("==========================================================")
-    print("      Tesla BLE HMI Windows Simulator Server v2.1         ")
+    print("      Tesla BLE HMI Windows Simulator Server v2.2         ")
     print("==========================================================")
     
+    # 强制在 Windows 平台下将 asyncio loop 初始化为 SelectorLoop (防止 Proactor 冲突与死锁)
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        
     state = TelemetryState()
-    # 依据参数（或GUI默认）初始化 VIN
     state.set_vin(args.vin)
     
     stop_event = threading.Event()
     log_queue = queue.Queue()
     
-    use_gui = not args.nogui and (tk is not None)
-    
-    if not use_gui:
-        if args.nogui:
-            log_queue.put("[System] 用户指定了 --nogui，采用命令行运行。")
-        else:
-            log_queue.put("[System] 环境缺失 tkinter 组件，强制切换至命令行模式。")
-        run_cli_mode(state, stop_event, log_queue)
-    else:
-        # GUI 模式运行
-        ble_thread = threading.Thread(target=ble_thread_worker, args=(state, stop_event, log_queue), daemon=True)
-        ble_thread.start()
-        
-        root = tk.Tk()
-        # 绑定蓝牙线程引用在 root 上，以便 GUI 内部执行重启服务
-        root.ble_thread = ble_thread
-        gui = TeslaSimulatorGUI(root, state, stop_event, log_queue)
-        
-        try:
-            root.mainloop()
-        except KeyboardInterrupt:
-            stop_event.set()
-            root.destroy()
-        
-        ble_thread.join(timeout=2.0)
-        print("[+] 仿真服务器已完全退出。")
+    try:
+        asyncio.run(async_main(args, state, stop_event, log_queue))
+    except KeyboardInterrupt:
+        print("\n[+] 接收到 Ctrl+C 中断信号，正在安全退出...")
+    except Exception as e:
+        print(f"[-] 进程启动失败，异常原因: {e}")
+    print("[+] 仿真服务器已完全退出。")
