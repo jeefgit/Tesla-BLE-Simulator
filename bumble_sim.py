@@ -117,7 +117,9 @@ class BumbleTeslaServer:
 
 def pack_telemetry(data):
     gear_byte = data['gear'].encode('ascii') if isinstance(data['gear'], str) else data['gear']
-    doors_bytes = bytes(data['doors'])
+    doors = data.get('doors', [0, 0, 0, 0, 0, 0])
+    if len(doors) < 6:
+        doors = doors + [0] * (6 - len(doors))
     
     return struct.pack(
         PAYLOAD_FORMAT,
@@ -126,7 +128,7 @@ def pack_telemetry(data):
         int(data['battery_level']),
         float(data['battery_range_km']),
         gear_byte,
-        doors_bytes,
+        *doors,
         int(data['locked']),
         int(data['charging']),
         float(data['charge_power_kw']),
