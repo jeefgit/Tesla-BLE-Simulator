@@ -355,20 +355,20 @@ async def run_ble_simulation(state: TelemetryState, stop_event: threading.Event,
         
         # Write Characteristic (可写特征值)
         server.add_new_characteristic(
-            SVC_UUID,
-            WR_UUID,
-            GATTCharacteristicProperties.write | GATTCharacteristicProperties.write_without_response,
-            GATTAttributePermissions.writeable,
-            value=bytearray()
+            service_uuid=SVC_UUID,
+            char_uuid=WR_UUID,
+            properties=GATTCharacteristicProperties.write | GATTCharacteristicProperties.write_without_response,
+            value=bytearray(),
+            permissions=GATTAttributePermissions.writeable
         )
         
         # Notify Characteristic (主通道特征值)
         server.add_new_characteristic(
-            SVC_UUID,
-            RD_UUID,
-            GATTCharacteristicProperties.notify,
-            GATTAttributePermissions.readable,
-            value=bytearray()
+            service_uuid=SVC_UUID,
+            char_uuid=RD_UUID,
+            properties=GATTCharacteristicProperties.notify,
+            value=bytearray(),
+            permissions=GATTAttributePermissions.readable
         )
         
         server.write_callbacks[WR_UUID] = on_write
