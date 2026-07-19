@@ -33,7 +33,7 @@ WR_UUID  = "00000212-b2d1-43f0-9b88-960cebf8b91e"
 RD_UUID  = "00000213-b2d1-43f0-9b88-960cebf8b91e"
 
 # ─── 数据载荷打包格式 ──────────────────────────────────────────
-PAYLOAD_FORMAT = "<ffifc6BBfff4f"
+PAYLOAD_FORMAT = "<ffifc6BBBfff4f"
 
 # ─── 线程安全共享遥测状态 ─────────────────────────────────────
 class TelemetryState:
