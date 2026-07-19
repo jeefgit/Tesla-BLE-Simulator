@@ -1237,44 +1237,63 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
         log_queue.put(f"[BLE-Write] 接收到控制命令: {value.hex()}")
 
     async def start_ble_server(name):
-        import socket
-        pc_name = socket.gethostname()
-        if pc_name.lower() == name.lower():
-            log_queue.put(f"[+] 电脑名已匹配: {pc_name}，直接以普通模式启动 BLE 广播。")
-            server_obj = BlessServer(name=name, name_overwrite=False)
-        else:
-            log_queue.put(f"[+] 将 Windows 蓝牙设备名覆写为: {name} (需要管理员权限)")
-            server_obj = BlessServer(name=name, name_overwrite=True)
-        await server_obj.add_new_service(SVC_UUID)
-        
-        # Write Characteristic (可写特征值)
-        await server_obj.add_new_characteristic(
-            service_uuid=SVC_UUID,
-            char_uuid=WR_UUID,
-            properties=GATTCharacteristicProperties.write | GATTCharacteristicProperties.write_without_response,
-            value=bytearray(),
-            permissions=GATTAttributePermissions.writeable
-        )
-        
-        # Notify Characteristic (主通道特征值)
-        await server_obj.add_new_characteristic(
-            service_uuid=SVC_UUID,
-            char_uuid=RD_UUID,
-            properties=GATTCharacteristicProperties.notify,
-            value=bytearray(),
-            permissions=GATTAttributePermissions.readable
-        )
-        
-        server_obj.write_request_func = on_write
-        await server_obj.start()
-        return server_obj
+        use_bumble = getattr(args, 'bumble', False)
+        # 自动检测 Bumble 是否可用
+        try:
+            import bumble
+            has_bumble = True
+        except ImportError:
+            has_bumble = False
+
+        if use_bumble or (has_bumble and BlessServer is None):
+            log_queue.put("[+] 使用 Bumble (USB HCI 硬件模式) 启动 BLE 广播...")
+            from bumble_sim import BumbleTeslaServer
+            server_obj = BumbleTeslaServer(vin=state.get_vin())
+            server_obj.write_callback = on_write
+            await server_obj.start()
+            return server_obj
+
+        if BlessServer is not None:
+            import socket
+            pc_name = socket.gethostname()
+            if pc_name.lower() == name.lower():
+                log_queue.put(f"[+] 电脑名已匹配: {pc_name}，直接以普通模式启动 BLE 广播。")
+                server_obj = BlessServer(name=name, name_overwrite=False)
+            else:
+                log_queue.put(f"[+] 将 Windows 蓝牙设备名覆写为: {name} (需要管理员权限)")
+                server_obj = BlessServer(name=name, name_overwrite=True)
+            await server_obj.add_new_service(SVC_UUID)
+            
+            # Write Characteristic (可写特征值)
+            await server_obj.add_new_characteristic(
+                service_uuid=SVC_UUID,
+                char_uuid=WR_UUID,
+                properties=GATTCharacteristicProperties.write | GATTCharacteristicProperties.write_without_response,
+                value=bytearray(),
+                permissions=GATTAttributePermissions.writeable
+            )
+            
+            # Notify Characteristic (主通道特征值)
+            await server_obj.add_new_characteristic(
+                service_uuid=SVC_UUID,
+                char_uuid=RD_UUID,
+                properties=GATTCharacteristicProperties.notify,
+                value=bytearray(),
+                permissions=GATTAttributePermissions.readable
+            )
+            
+            server_obj.write_request_func = on_write
+            await server_obj.start()
+            return server_obj
+
+        raise RuntimeError("无可用 BLE 后端服务（请安装 bless 或 bumble 依赖）")
 
     # 启动蓝牙广播
     try:
         server = await start_ble_server(ble_name)
         log_queue.put("[+] 广播发布成功！等待 ESP32 蓝牙寻址连接...")
     except Exception as e:
-        log_queue.put(f"[-] 启动 BLE 广播失败: {e}. 请检查您的电脑蓝牙是否已在系统设置中开启。")
+        log_queue.put(f"[-] 启动 BLE 广播失败: {e}")
         server = None
 
     # 初始化 Tkinter 视窗（仅当环境允许且用户没有传递 --nogui 时）
@@ -1354,8 +1373,11 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                     
                     payload = pack_telemetry(mock_data)
                     try:
-                        server.get_characteristic(RD_UUID).value = payload
-                        server.update_value(SVC_UUID, RD_UUID)
+                        if hasattr(server, 'notify'):
+                            await server.notify(payload)
+                        else:
+                            server.get_characteristic(RD_UUID).value = payload
+                            server.update_value(SVC_UUID, RD_UUID)
                     except Exception as e:
                         log_queue.put(f"[-] 推送遥测数据出错: {e}")
                     
@@ -1394,6 +1416,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Tesla BLE HMI Windows Simulator Control Server")
     parser.add_argument("--nogui", action="store_true", help="强制在纯命令行模式下运行（不启动 Tkinter 界面）")
     parser.add_argument("--vin", type=str, default="LRWYGCFS2PC792568", help="设定模拟车型的 17 位 VIN 识别号（默认为 LRWYGCFS2PC792568）")
+    parser.add_argument("--bumble", action="store_true", help="使用 Bumble (CSR8510 USB HCI) 硬件物理广播模式")
     args = parser.parse_args()
     
     print("==========================================================")
