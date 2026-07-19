@@ -431,12 +431,25 @@ def ble_thread_worker(state, stop_event, log_queue):
     """
     负责运行 asyncio 蓝牙事件循环的后台线程工作器
     """
+    has_com = False
+    try:
+        import pythoncom
+        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
+        has_com = True
+    except Exception:
+        pass
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(run_ble_simulation(state, stop_event, log_queue))
     finally:
         loop.close()
+        if has_com:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
 
 
 # ─── 特斯拉深色主题 GUI 界面类 ────────────────────────────────
