@@ -1237,11 +1237,14 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
         log_queue.put(f"[BLE-Write] 接收到控制命令: {value.hex()}")
 
     async def start_ble_server(name):
-        # name_overwrite=True: 必须传入此参数！
-        # 否则 Windows 会将系统电脑名作为 BLE 广播名，而不是我们希望的特斯拉设备名。
-        # ESP32 扫描过滤器会检查广播名第一个字符是否为 'S' 且长度滤再，系统名匹配不上。
-        log_queue.put(f"[+] 将 Windows 蓝牙设备名覆写为: {name}")
-        server_obj = BlessServer(name=name, name_overwrite=True)
+        import socket
+        pc_name = socket.gethostname()
+        if pc_name.lower() == name.lower():
+            log_queue.put(f"[+] 电脑名已匹配: {pc_name}，直接以普通模式启动 BLE 广播。")
+            server_obj = BlessServer(name=name, name_overwrite=False)
+        else:
+            log_queue.put(f"[+] 将 Windows 蓝牙设备名覆写为: {name} (需要管理员权限)")
+            server_obj = BlessServer(name=name, name_overwrite=True)
         await server_obj.add_new_service(SVC_UUID)
         
         # Write Characteristic (可写特征值)
