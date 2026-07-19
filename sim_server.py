@@ -20,6 +20,29 @@ try:
 except ImportError:
     BlessServer = None
 
+# Apply monkey patch to Bless WinRT BLEAdapter to handle name change hardware reset delay
+if BlessServer is not None:
+    try:
+        from bless.backends.winrt.ble.adapter import BLEAdapter
+        _orig_set_local_name = BLEAdapter.set_local_name
+        def patched_set_local_name(self, local_name):
+            msg1 = f"[BLE] 正在写入 Windows 蓝牙广播名称: {local_name}"
+            msg2 = "[BLE] 已发送重置命令。正在等待 4 秒以使 Windows 蓝牙适配器重新载入新名称..."
+            print(msg1)
+            print(msg2)
+            try:
+                if 'log_queue' in globals():
+                    globals()['log_queue'].put(msg1)
+                    globals()['log_queue'].put(msg2)
+            except:
+                pass
+            _orig_set_local_name(self, local_name)
+            time.sleep(4.0)
+        BLEAdapter.set_local_name = patched_set_local_name
+        print("[BLE] Windows BLEAdapter 延迟补丁应用成功。")
+    except Exception as e:
+        print(f"[BLE] 警告: 无法应用 BLEAdapter 延迟补丁 ({e})")
+
 # Tkinter 导入保护
 try:
     import tkinter as tk
@@ -1313,7 +1336,8 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
 
             # 4. 20Hz 遥测数据推送机制
             if server is not None:
-                is_conn = server.is_connected
+                # is_connected is an async method, must be awaited
+                is_conn = await server.is_connected()
                 state.set_connected(is_conn)
                 
                 if is_conn:
@@ -1339,6 +1363,10 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                     if frame_log_counter > 0:
                         log_queue.put("[-] ESP32 断开蓝牙连接，重新等待连接中...")
                         frame_log_counter = 0
+                    
+                    # Optional debugging: print subscription client count periodically
+                    if hasattr(server, '_subscribed_clients') and len(server._subscribed_clients) > 0:
+                        log_queue.put(f"[BLE] Detected {len(server._subscribed_clients)} subscribed client(s). Waiting for is_connected confirmation.")
 
             # 5. 更新 GUI 生命周期的定时状态
             if gui is not None and not stop_event.is_set():
