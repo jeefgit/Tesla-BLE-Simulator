@@ -1245,7 +1245,7 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
         except ImportError:
             has_bumble = False
 
-        if use_bumble or (has_bumble and BlessServer is None):
+        if use_bumble or has_bumble:
             log_queue.put("[+] 使用 Bumble (USB HCI 硬件模式) 启动 BLE 广播...")
             from bumble_sim import BumbleTeslaServer
             server_obj = BumbleTeslaServer(vin=state.get_vin())
