@@ -595,24 +595,34 @@ class TeslaSimulatorGUI:
         lbl_gear.pack(side="left", padx=(0, 15))
         
         self.gear_buttons = {}
-        for g in ['P', 'R', 'N', 'D']:
+        # gear_map: 按钮显示名称 -> 实际发送给 ESP32 的字符
+        # SNA (Signal Not Available) 对应 ESP32 gear_from_shift_state 中的 '?' 字符，触发 AP/巡航界面
+        gear_display_map = [
+            ('P', 'P'),
+            ('R', 'R'),
+            ('N', 'N'),
+            ('D', 'D'),
+            ('SNA', '?'),  # 辅助驾驶档/信号未指定，蓝色高亮
+        ]
+        for display_label, char_val in gear_display_map:
+            is_sna = (char_val == '?')
             btn = tk.Button(
                 gear_frame,
-                text=g,
+                text=display_label,
                 font=("Segoe UI", 10, "bold"),
-                width=4,
+                width=4 if not is_sna else 5,
                 bg=self.BG_BTN,
                 fg=self.FG_TEXT,
-                activebackground=self.COLOR_RED,
+                activebackground=self.COLOR_BLUE if is_sna else self.COLOR_RED,
                 activeforeground=self.FG_TEXT,
                 bd=0,
                 relief="flat",
-                command=lambda target_gear=g: self.set_gear_state(target_gear)
+                command=lambda cv=char_val: self.set_gear_state(cv)
             )
             btn.pack(side="left", padx=5)
             btn.bind("<Enter>", lambda e, b=btn: self.on_btn_hover_enter(b))
-            btn.bind("<Leave>", lambda e, b=btn: self.on_btn_hover_leave(b, 'gear', btn['text']))
-            self.gear_buttons[g] = btn
+            btn.bind("<Leave>", lambda e, b=btn, cv=char_val: self.on_btn_hover_leave(b, 'gear', cv))
+            self.gear_buttons[char_val] = btn
             
         # 2. 中控锁与充电状态 Toggle 按钮
         toggle_frame = tk.Frame(container, bg=self.BG_CARD)
@@ -932,22 +942,31 @@ class TeslaSimulatorGUI:
 
     def set_gear_state(self, target_gear):
         """
-        设置挡位
+        设置挡位。target_gear 为实际传输的单字节字符值：
+          'P'/'R'/'N'/'D' 对应标准档位；
+          '?' 对应 SNA (Signal Not Available) = 特斯拉 AP 辅助驾驶激活状态。
         """
         if self.state.is_script_mode():
             return
         
+        # 档位存储为单字节字符，SNA 使用 '?' 以匹配 ESP32 gear_from_shift_state() 的映射
         self.state.update_data(gear=target_gear)
         self.refresh_gear_ui(target_gear)
-        self.log_queue.put(f"[Manual] 切换档位至: {target_gear}")
+        
+        display_name = 'SNA (AP)' if target_gear == '?' else target_gear
+        self.log_queue.put(f"[Manual] 切换档位至: {display_name}")
 
     def refresh_gear_ui(self, active_gear):
         """
-        更新挡位按钮的高亮指示
+        更新挡位按钮的高亮指示：
+          - SNA ('?') 激活时用蓝色高亮（区分于普通挡位的红色），代表 AP 辅助驾驶状态。
+          - 其余档位激活时用红色高亮。
         """
-        for g, btn in self.gear_buttons.items():
-            if g == active_gear:
-                btn.config(bg=self.COLOR_RED, fg=self.FG_TEXT)
+        for char_val, btn in self.gear_buttons.items():
+            if char_val == active_gear:
+                # SNA 用蓝色区分，其余档位用特斯拉红
+                active_color = self.COLOR_BLUE if char_val == '?' else self.COLOR_RED
+                btn.config(bg=active_color, fg=self.FG_TEXT)
             else:
                 btn.config(bg=self.BG_BTN, fg=self.FG_MUTED)
 
@@ -1149,7 +1168,9 @@ class TeslaSimulatorGUI:
         
         if type_group == 'gear':
             if key == data['gear']:
-                btn.config(bg=self.COLOR_RED)
+                # SNA ('?') 激活时恢复蓝色，其余档位恢复红色
+                restore_color = self.COLOR_BLUE if key == '?' else self.COLOR_RED
+                btn.config(bg=restore_color)
             else:
                 btn.config(bg=self.BG_BTN)
         elif type_group == 'door':
