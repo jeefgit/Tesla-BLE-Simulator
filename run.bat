@@ -2,34 +2,37 @@
 title Tesla Dash HMI Simulator Launcher
 color 0B
 
+:: ── Auto-elevate to Administrator ──────────────────────────────────
+:: Required because name_overwrite=True needs to rename the Windows BT adapter.
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [!] Requesting Administrator privileges...
+    powershell -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b
+)
+
 echo ==========================================================
-echo        Tesla BLE HMI Windows Simulator Launcher
+echo        Tesla BLE HMI Simulator  [Administrator Mode]
 echo ==========================================================
 echo.
 
-:: 1. Check Python Environment
+:: ── Check Python ──────────────────────────────────────────────────
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     color 0C
-    echo [-] Error: Python 3 was not detected on this system.
-    echo Please install Python 3 and add it to your system PATH.
+    echo [-] Error: Python 3 not found. Please install Python 3 and add to PATH.
     pause
     exit /b
 )
 
-:: 2. Verify and Install Dependencies
-echo [+] Validating and installing dependencies...
-python -m pip install -r requirements.txt
-if %errorlevel% neq 0 (
-    echo [-] Failed to install dependencies. Please check your network connection.
-    pause
-    exit /b
-)
+:: ── Install dependencies ──────────────────────────────────────────
+echo [+] Validating dependencies...
+python -m pip install -r requirements.txt -q
 echo.
 
-:: 3. Start BLE Simulation Service
-echo [+] Starting BLE Telemetry Simulation Service...
-echo [+] Please ensure Bluetooth is enabled in your Windows settings.
+:: ── Launch simulator ──────────────────────────────────────────────
+echo [+] Starting BLE Telemetry Simulation Service (Admin)...
+cd /d "%~dp0"
 python sim_server.py
 
 pause
