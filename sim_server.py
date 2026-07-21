@@ -161,6 +161,7 @@ class TelemetryState:
         self.lock = threading.Lock()
         self.use_script_mode = False  # 默认为手动干预模式，应用户要求关闭自动剧本播放
         self.ble_connected = False    # BLE 连接状态
+        self.ble_enabled = True       # BLE 蓝牙广播全局总开关 (默认开启)
         self.frame_counter = 0        # 剧本帧计数器
         self.vin = "LRWYGCFS2PC792568" # 默认匹配 ESP32 默认固件的 VIN
         self.request_restart = False  # 蓝牙广播重启标志位
@@ -245,6 +246,19 @@ class TelemetryState:
     def set_restart(self, val):
         with self.lock:
             self.request_restart = val
+
+    def is_ble_enabled(self):
+        with self.lock:
+            return self.ble_enabled
+
+    def set_ble_enabled(self, val: bool):
+        with self.lock:
+            self.ble_enabled = val
+
+    def toggle_ble_enabled(self):
+        with self.lock:
+            self.ble_enabled = not self.ble_enabled
+            return self.ble_enabled
 
 
 def pack_telemetry(data):
@@ -561,6 +575,23 @@ class TeslaSimulatorGUI:
         self.btn_restart_ble.bind("<Enter>", lambda e: self.btn_restart_ble.config(bg=self.BG_BTN_HOVER))
         self.btn_restart_ble.bind("<Leave>", lambda e: self.btn_restart_ble.config(bg=self.BG_BTN))
         
+        # 蓝牙广播总开关按钮
+        self.btn_toggle_ble = tk.Button(
+            vin_frame,
+            text="BLE广播: ON",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.COLOR_GREEN,
+            fg=self.FG_TEXT,
+            activebackground=self.COLOR_GREEN,
+            activeforeground=self.FG_TEXT,
+            bd=0,
+            relief="flat",
+            padx=10,
+            pady=3,
+            command=self.toggle_ble_switch
+        )
+        self.btn_toggle_ble.pack(side="left", padx=5)
+        
         # 模式切换大 Toggle 按钮 (依据当前默认的模式决定初始状态)
         self.btn_mode = tk.Button(
             top_frame,
@@ -605,6 +636,24 @@ class TeslaSimulatorGUI:
         self.log_queue.put(f"[System] 正在请求重启蓝牙广播，新 VIN: {new_vin}")
         self.btn_restart_ble.config(state="disabled", text="重启中...")
         self.state.set_restart(True)
+
+    def toggle_ble_switch(self):
+        is_on = self.state.toggle_ble_enabled()
+        self.update_ble_toggle_button_ui(is_on)
+
+    def update_ble_toggle_button_ui(self, is_on):
+        if is_on:
+            self.btn_toggle_ble.config(
+                text="BLE广播: ON",
+                bg=self.COLOR_GREEN,
+                activebackground=self.COLOR_GREEN
+            )
+        else:
+            self.btn_toggle_ble.config(
+                text="BLE广播: OFF",
+                bg=self.COLOR_RED,
+                activebackground=self.COLOR_RED
+            )
 
     def create_main_content(self):
         """
@@ -1240,6 +1289,11 @@ class TeslaSimulatorGUI:
         """
         刷新连接状态指示灯和标签
         """
+        if not self.state.is_ble_enabled():
+            self.status_canvas.itemconfigure(self.status_led, fill=self.COLOR_RED)
+            self.lbl_status.config(text="BLE 广播已关闭", fg=self.COLOR_RED)
+            return
+
         is_conn = self.state.is_connected()
         if is_conn:
             self.status_canvas.itemconfigure(self.status_led, fill=self.COLOR_GREEN)
@@ -1425,29 +1479,55 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                     except queue.Empty:
                         break
 
-            # 3. 处理蓝牙广播动态重启（VIN 更改）
-            if state.check_restart():
-                log_queue.put("[System] 正在关闭现有蓝牙服务...")
-                if server is not None:
+            # 3. 处理蓝牙广播开关与动态重启（VIN 更改）
+            ble_enabled = state.is_ble_enabled()
+            if not ble_enabled and server is not None:
+                log_queue.put("[System] 用户手运关闭了 BLE 蓝牙广播...")
+                try:
                     await server.stop()
-                
-                new_vin = state.get_vin()
-                try:
-                    sha1 = hashlib.sha1(new_vin.encode('utf-8')).hexdigest()
-                    new_ble_name = "S" + sha1[:16] + "C"
-                except Exception:
-                    new_ble_name = "Tesla-BLE-Simulation"
-                
-                log_queue.put(f"[System] 重新配置蓝牙广播名: {new_ble_name}")
-                try:
-                    server = await start_ble_server(new_ble_name)
-                    log_queue.put("[+] 广播重启发布成功！等待连接...")
                 except Exception as e:
-                    log_queue.put(f"[-] 蓝牙广播重启失败: {e}")
+                    log_queue.put(f"[-] 停止 BLE 服务时发生异常: {e}")
+                server = None
+                state.set_connected(False)
+            elif ble_enabled and server is None and not state.check_restart():
+                log_queue.put("[System] 用户开启了 BLE 蓝牙广播，正在启动广播服务...")
+                try:
+                    server = await start_ble_server(ble_name)
+                    log_queue.put("[+] 广播开启成功！等待 ESP32 蓝牙寻址连接...")
+                except Exception as e:
+                    log_queue.put(f"[-] 启动 BLE 广播失败: {e}")
                     server = None
-                
-                if gui is not None:
-                    gui.btn_restart_ble.config(state="normal", text="应用并重启广播")
+
+            if state.check_restart():
+                if not ble_enabled:
+                    log_queue.put("[System] 提示: 蓝牙广播当前为关闭状态。已保存新 VIN，开启广播后生效。")
+                    if gui is not None:
+                        gui.btn_restart_ble.config(state="normal", text="应用并重启广播")
+                else:
+                    log_queue.put("[System] 正在关闭现有蓝牙服务...")
+                    if server is not None:
+                        try:
+                            await server.stop()
+                        except Exception:
+                            pass
+                    
+                    new_vin = state.get_vin()
+                    try:
+                        sha1 = hashlib.sha1(new_vin.encode('utf-8')).hexdigest()
+                        new_ble_name = "S" + sha1[:16] + "C"
+                    except Exception:
+                        new_ble_name = "Tesla-BLE-Simulation"
+                    
+                    log_queue.put(f"[System] 重新配置蓝牙广播名: {new_ble_name}")
+                    try:
+                        server = await start_ble_server(new_ble_name)
+                        log_queue.put("[+] 广播重启发布成功！等待连接...")
+                    except Exception as e:
+                        log_queue.put(f"[-] 蓝牙广播重启失败: {e}")
+                        server = None
+                    
+                    if gui is not None:
+                        gui.btn_restart_ble.config(state="normal", text="应用并重启广播")
 
             # 4. 20Hz 遥测数据推送机制
             if server is not None:
