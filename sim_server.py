@@ -40,6 +40,7 @@ class BumbleTeslaServer:
         
         self.device = None
         self.host = None
+        self.transport = None
         self.notify_char = None
         self.write_char = None
         self.connected_peers = set()
@@ -47,8 +48,8 @@ class BumbleTeslaServer:
 
     async def start(self):
         print(f"[Bumble] 正在初始化 CSR8510 USB 蓝牙适配器 ({self.usb_spec})...")
-        transport = await bumble_open_transport(self.usb_spec)
-        self.host = BumbleHost(transport.source, transport.sink)
+        self.transport = await bumble_open_transport(self.usb_spec)
+        self.host = BumbleHost(self.transport.source, self.transport.sink)
         
         self.device = BumbleDevice(
             address='F4:4E:FC:14:3C:A7',
@@ -95,11 +96,23 @@ class BumbleTeslaServer:
         def on_disconnection(connection, reason):
             print(f"[Bumble] ESP32 断开 BLE 连接, 原因代码: {reason}")
             self.connected_peers.discard(connection)
+            if self.device and self.transport:
+                asyncio.create_task(self._safe_restart_advertising())
 
         await self.device.power_on()
         self.device.gatt_server.max_mtu = 256
-        await self.device.start_advertising(own_address_type=OwnAddressType.PUBLIC, auto_restart=True)
+        # BLE 4.0 芯片在连接建立后不支持同时广播，auto_restart 设为 False 避免硬件返回 COMMAND_DISALLOWED
+        await self.device.start_advertising(own_address_type=OwnAddressType.PUBLIC, auto_restart=False)
         print(f"[Bumble] [+] 特斯拉 BLE 空中广播启动成功！广播名: {self.ble_name}")
+
+    async def _safe_restart_advertising(self):
+        try:
+            await asyncio.sleep(0.5)
+            if self.device and self.transport and len(self.connected_peers) == 0:
+                await self.device.start_advertising(own_address_type=OwnAddressType.PUBLIC, auto_restart=False)
+                print(f"[Bumble] [+] ESP32 断开后已重新自动拉起 BLE 广播: {self.ble_name}")
+        except Exception:
+            pass
 
     async def is_connected(self):
         return len(self.connected_peers) > 0
@@ -111,8 +124,20 @@ class BumbleTeslaServer:
 
     async def stop(self):
         if self.device:
-            await self.device.stop_advertising()
-            print("[Bumble] BLE 广播服务已停止。")
+            try:
+                await self.device.stop_advertising()
+            except Exception:
+                pass
+        if self.transport:
+            try:
+                await self.transport.close()
+                print("[Bumble] USB HCI 接口已安全关闭并释放。")
+            except Exception as e:
+                print(f"[Bumble] 关闭 USB 接口提示: {e}")
+            self.transport = None
+        self.device = None
+        self.host = None
+        self.connected_peers.clear()
 
 # Apply monkey patch to Bless WinRT BLEAdapter to handle name change hardware reset delay
 if BlessServer is not None:
@@ -1461,6 +1486,7 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
         root.protocol("WM_DELETE_WINDOW", on_close)
 
     frame_log_counter = 0
+    last_ble_start_attempt = 0.0
     try:
         while not stop_event.is_set():
             # 1. 推进 Tkinter 图形框架事件循环一次
@@ -1482,7 +1508,7 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
             # 3. 处理蓝牙广播开关与动态重启（VIN 更改）
             ble_enabled = state.is_ble_enabled()
             if not ble_enabled and server is not None:
-                log_queue.put("[System] 用户手运关闭了 BLE 蓝牙广播...")
+                log_queue.put("[System] 用户关闭了 BLE 蓝牙广播...")
                 try:
                     await server.stop()
                 except Exception as e:
@@ -1490,13 +1516,16 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                 server = None
                 state.set_connected(False)
             elif ble_enabled and server is None and not state.check_restart():
-                log_queue.put("[System] 用户开启了 BLE 蓝牙广播，正在启动广播服务...")
-                try:
-                    server = await start_ble_server(ble_name)
-                    log_queue.put("[+] 广播开启成功！等待 ESP32 蓝牙寻址连接...")
-                except Exception as e:
-                    log_queue.put(f"[-] 启动 BLE 广播失败: {e}")
-                    server = None
+                now_t = time.time()
+                if now_t - last_ble_start_attempt >= 2.0:
+                    last_ble_start_attempt = now_t
+                    log_queue.put("[System] 正在启动 BLE 蓝牙广播服务...")
+                    try:
+                        server = await start_ble_server(ble_name)
+                        log_queue.put("[+] 广播开启成功！等待 ESP32 蓝牙寻址连接...")
+                    except Exception as e:
+                        log_queue.put(f"[-] 启动 BLE 广播失败: {e}")
+                        server = None
 
             if state.check_restart():
                 if not ble_enabled:
