@@ -792,7 +792,7 @@ class TeslaSimulatorGUI:
         
         self.scale_delay_mult = tk.Scale(
             bar_frame,
-            from_=0.5,
+            from_=0.2,
             to=3.0,
             resolution=0.1,
             orient="horizontal",
@@ -853,7 +853,7 @@ class TeslaSimulatorGUI:
                 bg=self.COLOR_BLUE,
                 activebackground=self.COLOR_BLUE
             )
-            self.log_queue.put("[System] 通讯模式切至: 真实车机问答响应模式 (600~1000ms 延迟与队列排队)")
+            self.log_queue.put("[System] 通讯模式切至: 真实车机问答响应模式 (150~300ms 真实行车延时与队列排队)")
         else:
             self.btn_comm_mode.config(
                 text="理想主动推送 (IDEAL)",
@@ -1807,8 +1807,8 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                             q_len = req_queue.qsize()
                             state.set_queue_depth(q_len)
 
-                            # 计算拟真延迟 (基础 600ms ~ 1000ms)
-                            base_delay = random.uniform(0.6, 1.0)
+                            # 计算拟真延迟 (真实行车热态下 BLE 问答基础延迟为 150ms ~ 300ms)
+                            base_delay = random.uniform(0.15, 0.30)
                             
                             # 5% 概率触发长尾抖动 (延迟翻倍)
                             if random.random() < 0.05:
