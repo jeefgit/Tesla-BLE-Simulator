@@ -1624,53 +1624,21 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
     log_queue.put(f"[+] 特斯拉 BLE 广播名: {ble_name} (基于 VIN: {vin})")
     log_queue.put("[+] 正在配置 BLE 外设服务器...")
     
-    req_queue = asyncio.Queue(maxsize=32)
-    pending_write_bytes = bytearray()
-    write_debounce_task = None
-
-    async def _flush_write_buffer(ts):
-        nonlocal pending_write_bytes, write_debounce_task
-        await asyncio.sleep(0.04)  # 40ms 静默窗口等待 MTU 分包完成
-        if pending_write_bytes:
-            data = bytes(pending_write_bytes)
-            pending_write_bytes = bytearray()
-            try:
-                req_queue.put_nowait((data, ts))
-                q_len = req_queue.qsize()
-                state.set_queue_depth(q_len)
-                log_queue.put(f"[BLE-Write] 📥 接收 ESP32 分包重组指令 ({len(data)}B) -> 压入队列 (深度: {q_len}/32)")
-            except asyncio.QueueFull:
-                log_queue.put(f"[BLE-Write] ❌ 队列已满 (32/32)! 拒绝 ESP32 请求")
+    last_push_time = 0.0
+    current_target_interval = 0.8
 
     # BLE 客户端特征值写入事件回调
     def on_write(characteristic, value):
-        nonlocal pending_write_bytes, write_debounce_task
+        nonlocal last_push_time
         now_ts = time.time()
         fault_until = state.get_fault_drop_until()
         if now_ts < fault_until:
             log_queue.put(f"[BLE-Write] ⚠️ [故障注入中] 丢弃 ESP32 写入请求: {value.hex()[:16]}...")
             return
 
-        if state.get_comm_mode() == "REALISTIC":
-            pending_write_bytes.extend(value)
-            if write_debounce_task is not None and not write_debounce_task.done():
-                write_debounce_task.cancel()
-            
-            # 如果接收到的切片 < 18B (说明是最后一个尾包)，立即提交组包；否则启动 40ms 组包定时器
-            if len(value) < 18:
-                data = bytes(pending_write_bytes)
-                pending_write_bytes = bytearray()
-                try:
-                    req_queue.put_nowait((data, now_ts))
-                    q_len = req_queue.qsize()
-                    state.set_queue_depth(q_len)
-                    log_queue.put(f"[BLE-Write] 📥 接收 ESP32 指令包重组完成 ({len(data)}B) -> 压入队列 (深度: {q_len}/32)")
-                except asyncio.QueueFull:
-                    log_queue.put(f"[BLE-Write] ❌ 队列已满 (32/32)! 拒绝 ESP32 请求: {value.hex()[:16]}...")
-            else:
-                write_debounce_task = asyncio.create_task(_flush_write_buffer(now_ts))
-        else:
-            log_queue.put(f"[BLE-Write] 理想模式接收指令: {value.hex()[:16]}...")
+        log_queue.put(f"[BLE-Write] 📥 接收 ESP32 指令包 ({len(value)}B): {value.hex()[:16]}...")
+        # 触发即时更新
+        last_push_time = 0.0
 
     async def start_ble_server(name):
         use_bumble = getattr(args, 'bumble', False)
@@ -1821,63 +1789,53 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                     if gui is not None:
                         gui.btn_restart_ble.config(state="normal", text="应用并重启广播")
 
-            # 4. 遥测数据响应/推送机制 (支持真车问答模式 vs 理想推送模式)
+            # 4. 遥测数据推送机制 (支持真车节奏分批推送 vs 理想 20Hz 连续推送)
             if server is not None:
                 is_conn = await server.is_connected()
                 state.set_connected(is_conn)
                 
                 if is_conn:
+                    now_t = time.time()
                     if state.get_comm_mode() == "REALISTIC":
-                        # 真实问答模式：按 ESP32 请求队列逐个回复，带有真实车机延时
-                        if not req_queue.empty():
-                            cmd_data, req_ts = req_queue.get_nowait()
-                            q_len = req_queue.qsize()
-                            state.set_queue_depth(q_len)
+                        # 真实车机节奏模式 (方案 A)：按 800ms 基础间隔 (带延迟/抖动/丢包) 分批推送 53 字节 SimPayload
+                        if now_t - last_push_time >= current_target_interval:
+                            last_push_time = now_t
 
-                            # 计算拟真延迟 (真实行车热态下 BLE 问答基础延迟为 150ms ~ 300ms)
-                            base_delay = random.uniform(0.15, 0.30)
-                            
-                            # 5% 概率触发长尾抖动 (延迟翻倍)
+                            # 基础推送间隔 800ms
+                            base_interval = 0.8
                             if random.random() < 0.05:
-                                base_delay *= 2.0
-                                log_queue.put("[BLE-Server] ⚡ 触发 5% BLE 链路长尾抖动 (延时翻倍)")
+                                base_interval *= 2.0
+                                log_queue.put("[BLE-Server] ⚡ 触发 5% BLE 链路长尾抖动 (推送间隔翻倍)")
 
-                            multiplier = state.get_delay_multiplier()
-                            actual_delay = base_delay * multiplier
+                            current_target_interval = base_interval * state.get_delay_multiplier()
 
-                            await asyncio.sleep(actual_delay)
-
+                            # 检查故障注入/闪断
+                            if now_t < state.get_fault_drop_until():
+                                log_queue.put("[BLE-Server] ⚠️ [故障注入中] 暂停遥测数据推送")
                             # 模拟丢包
-                            loss_rate = state.get_loss_rate()
-                            if loss_rate > 0 and random.random() < loss_rate:
-                                log_queue.put(f"[BLE-Server] 📉 模拟 BLE 无线链路丢包, 放弃响应 (耗时: {actual_delay*1000:.0f}ms)")
-                                req_queue.task_done()
-                                continue
-
-                            # 构造遥测响应数据包
-                            if state.is_script_mode():
-                                frame = state.increment_frame()
-                                mock_data = generate_mock_frame(frame)
-                                state.update_data(**mock_data)
+                            elif state.get_loss_rate() > 0 and random.random() < state.get_loss_rate():
+                                log_queue.put(f"[BLE-Server] 📉 模拟 BLE 无线链路丢包, 本批次跳过推送")
                             else:
-                                mock_data = state.get_data()
-                                mock_data['script_phase_desc'] = "真实问答模式"
-
-                            payload = pack_telemetry(mock_data)
-                            try:
-                                if hasattr(server, 'notify'):
-                                    await server.notify(payload)
+                                if state.is_script_mode():
+                                    frame = state.increment_frame()
+                                    mock_data = generate_mock_frame(frame)
+                                    state.update_data(**mock_data)
                                 else:
-                                    server.get_characteristic(RD_UUID).value = payload
-                                    server.update_value(SVC_UUID, RD_UUID)
-                                
-                                total_lat = (time.time() - req_ts) * 1000
-                                state.add_latency_record(total_lat)
-                                log_queue.put(f"[BLE-Notify] 📤 响应发送完成 (延迟: {total_lat:.0f}ms, 剩余队列: {q_len}/32)")
-                            except Exception as e:
-                                log_queue.put(f"[-] 发送遥测响应出错: {e}")
-                            
-                            req_queue.task_done()
+                                    mock_data = state.get_data()
+                                    mock_data['script_phase_desc'] = "真实节奏模式"
+
+                                payload = pack_telemetry(mock_data)
+                                try:
+                                    if hasattr(server, 'notify'):
+                                        await server.notify(payload)
+                                    else:
+                                        server.get_characteristic(RD_UUID).value = payload
+                                        server.update_value(SVC_UUID, RD_UUID)
+                                    
+                                    state.add_latency_record(current_target_interval * 1000)
+                                    log_queue.put(f"[BLE-Notify] 📤 真实节奏推送完成: Speed={mock_data['speed_kmh']:.1f} KM/H, Gear={mock_data['gear']} (下次间隔: {current_target_interval*1000:.0f}ms)")
+                                except Exception as e:
+                                    log_queue.put(f"[-] 推送遥测数据出错: {e}")
                     else:
                         # 理想 20Hz 主动推送模式
                         if state.is_script_mode():
