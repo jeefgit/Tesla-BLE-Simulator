@@ -169,6 +169,8 @@ try:
 except ImportError:
     tk = None
 
+import random
+
 # ─── 特斯拉自定义 BLE UUID ──────────────────────────────────────
 SVC_UUID = "00000211-b2d1-43f0-9b88-960cebf8b91e"
 WR_UUID  = "00000212-b2d1-43f0-9b88-960cebf8b91e"
@@ -190,6 +192,14 @@ class TelemetryState:
         self.frame_counter = 0        # 剧本帧计数器
         self.vin = "LRWYGCFS2PC792568" # 默认匹配 ESP32 默认固件的 VIN
         self.request_restart = False  # 蓝牙广播重启标志位
+
+        # 真实车机 BLE 模拟扩展参数
+        self.comm_mode = "REALISTIC"   # "REALISTIC" (真实车机问答模式) 或 "IDEAL" (理想20Hz主动推送)
+        self.delay_multiplier = 1.0    # 延迟倍率 (0.5x ~ 3.0x)
+        self.loss_rate = 0.0           # 模拟丢包率 (0.0 ~ 0.20)
+        self.queue_depth = 0           # 实时命令队列深度
+        self.fault_drop_until = 0.0    # 故障注入截止时间戳
+        self.recent_latencies = []     # 近期响应延迟历史 (ms)
 
         # 初始车况数据
         self.data = {
@@ -284,6 +294,63 @@ class TelemetryState:
         with self.lock:
             self.ble_enabled = not self.ble_enabled
             return self.ble_enabled
+
+    def get_comm_mode(self):
+        with self.lock:
+            return self.comm_mode
+
+    def set_comm_mode(self, mode):
+        with self.lock:
+            self.comm_mode = mode
+
+    def toggle_comm_mode(self):
+        with self.lock:
+            self.comm_mode = "IDEAL" if self.comm_mode == "REALISTIC" else "REALISTIC"
+            return self.comm_mode
+
+    def get_delay_multiplier(self):
+        with self.lock:
+            return self.delay_multiplier
+
+    def set_delay_multiplier(self, val: float):
+        with self.lock:
+            self.delay_multiplier = float(val)
+
+    def get_loss_rate(self):
+        with self.lock:
+            return self.loss_rate
+
+    def set_loss_rate(self, val: float):
+        with self.lock:
+            self.loss_rate = float(val)
+
+    def set_queue_depth(self, val: int):
+        with self.lock:
+            self.queue_depth = val
+
+    def get_queue_depth(self):
+        with self.lock:
+            return self.queue_depth
+
+    def inject_fault(self, duration=5.0):
+        with self.lock:
+            self.fault_drop_until = time.time() + duration
+
+    def get_fault_drop_until(self):
+        with self.lock:
+            return self.fault_drop_until
+
+    def add_latency_record(self, lat_ms: float):
+        with self.lock:
+            self.recent_latencies.append(lat_ms)
+            if len(self.recent_latencies) > 10:
+                self.recent_latencies.pop(0)
+
+    def get_avg_latency(self):
+        with self.lock:
+            if not self.recent_latencies:
+                return 0.0
+            return sum(self.recent_latencies) / len(self.recent_latencies)
 
 
 def pack_telemetry(data):
@@ -512,15 +579,16 @@ class TeslaSimulatorGUI:
         self.BG_BTN_HOVER = "#3F3F46"   # 悬停颜色
 
         # 配置 root 窗口属性
-        self.root.title("Tesla BLE TFT 仪表盘 - 仿真控制器")
-        self.root.geometry("1120x770")
-        self.root.minsize(1050, 730)
+        self.root.title("Tesla BLE TFT 仪表盘 - 仿真控制器 (真车拟真增强版)")
+        self.root.geometry("1120x820")
+        self.root.minsize(1050, 760)
         self.root.config(bg=self.BG_MAIN)
         
         self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(1, weight=1)
+        self.root.rowconfigure(2, weight=1)
         
         self.create_top_panel()
+        self.create_emulation_bar()
         self.create_main_content()
         
         # 初始化 UI 的控件值
@@ -680,12 +748,136 @@ class TeslaSimulatorGUI:
                 activebackground=self.COLOR_RED
             )
 
+    def create_emulation_bar(self):
+        """
+        创建真车 BLE 通讯拟真控制栏（问答模式切换、延迟/丢包控制、故障注入）
+        """
+        bar_frame = tk.Frame(self.root, bg=self.BG_CARD, height=42, bd=0, relief="flat")
+        bar_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
+        
+        # 1. 标题与模式 Toggle
+        lbl_tag = tk.Label(bar_frame, text="真车BLE拟真:", font=("Segoe UI", 9, "bold"), fg=self.COLOR_BLUE, bg=self.BG_CARD)
+        lbl_tag.pack(side="left", padx=(10, 5), pady=6)
+        
+        mode_text = "问答响应模式 (REALISTIC)" if self.state.get_comm_mode() == "REALISTIC" else "理想主动推送 (IDEAL)"
+        self.btn_comm_mode = tk.Button(
+            bar_frame,
+            text=mode_text,
+            font=("Segoe UI", 9, "bold"),
+            bg=self.COLOR_BLUE if self.state.get_comm_mode() == "REALISTIC" else self.BG_BTN,
+            fg=self.FG_TEXT,
+            activebackground=self.COLOR_BLUE,
+            activeforeground=self.FG_TEXT,
+            bd=0,
+            relief="flat",
+            padx=8,
+            pady=2,
+            command=self.toggle_comm_mode_switch
+        )
+        self.btn_comm_mode.pack(side="left", padx=5)
+
+        # 2. 实时链路监控 Label
+        self.lbl_emulation_monitor = tk.Label(
+            bar_frame,
+            text="[REAL] 队列: 0/32 | 延时: ~0ms",
+            font=("Consolas", 9, "bold"),
+            fg=self.COLOR_GREEN,
+            bg=self.BG_CARD
+        )
+        self.lbl_emulation_monitor.pack(side="left", padx=12)
+
+        # 3. 延时倍率 Slider
+        lbl_delay = tk.Label(bar_frame, text="延时倍率:", font=("Segoe UI", 8, "bold"), fg=self.FG_MUTED, bg=self.BG_CARD)
+        lbl_delay.pack(side="left", padx=(10, 2))
+        
+        self.scale_delay_mult = tk.Scale(
+            bar_frame,
+            from_=0.5,
+            to=3.0,
+            resolution=0.1,
+            orient="horizontal",
+            showvalue=True,
+            font=("Segoe UI", 8),
+            bg=self.BG_CARD,
+            fg=self.FG_TEXT,
+            highlightthickness=0,
+            length=90,
+            command=self.on_delay_mult_change
+        )
+        self.scale_delay_mult.set(self.state.get_delay_multiplier())
+        self.scale_delay_mult.pack(side="left", padx=2)
+
+        # 4. 模拟丢包率 Slider
+        lbl_loss = tk.Label(bar_frame, text="丢包率:", font=("Segoe UI", 8, "bold"), fg=self.FG_MUTED, bg=self.BG_CARD)
+        lbl_loss.pack(side="left", padx=(10, 2))
+        
+        self.scale_loss = tk.Scale(
+            bar_frame,
+            from_=0,
+            to=20,
+            resolution=1,
+            orient="horizontal",
+            showvalue=True,
+            font=("Segoe UI", 8),
+            bg=self.BG_CARD,
+            fg=self.FG_TEXT,
+            highlightthickness=0,
+            length=80,
+            command=self.on_loss_rate_change
+        )
+        self.scale_loss.set(int(self.state.get_loss_rate() * 100))
+        self.scale_loss.pack(side="left", padx=2)
+
+        # 5. 故障注入 Button
+        btn_fault = tk.Button(
+            bar_frame,
+            text="⚡ 注入 5s 信号闪断",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.COLOR_RED,
+            fg=self.FG_TEXT,
+            activebackground=self.COLOR_RED,
+            activeforeground=self.FG_TEXT,
+            bd=0,
+            relief="flat",
+            padx=10,
+            pady=2,
+            command=self.inject_fault_blackout
+        )
+        btn_fault.pack(side="right", padx=10)
+
+    def toggle_comm_mode_switch(self):
+        new_mode = self.state.toggle_comm_mode()
+        if new_mode == "REALISTIC":
+            self.btn_comm_mode.config(
+                text="问答响应模式 (REALISTIC)",
+                bg=self.COLOR_BLUE,
+                activebackground=self.COLOR_BLUE
+            )
+            self.log_queue.put("[System] 通讯模式切至: 真实车机问答响应模式 (600~1000ms 延迟与队列排队)")
+        else:
+            self.btn_comm_mode.config(
+                text="理想主动推送 (IDEAL)",
+                bg=self.BG_BTN,
+                activebackground=self.BG_BTN
+            )
+            self.log_queue.put("[System] 通讯模式切至: 理想 20Hz 主动推送模式")
+
+    def on_delay_mult_change(self, val):
+        self.state.set_delay_multiplier(float(val))
+
+    def on_loss_rate_change(self, val):
+        self.state.set_loss_rate(float(val) / 100.0)
+
+    def inject_fault_blackout(self):
+        self.state.inject_fault(5.0)
+        self.log_queue.put("[System] ⚠️ 触发故障注入：模拟 BLE 无线信号闪断 5 秒！")
+
     def create_main_content(self):
         """
         创建中部核心网格布局
         """
         main_frame = tk.Frame(self.root, bg=self.BG_MAIN)
-        main_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
+        main_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
         
         main_frame.columnconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
@@ -1273,7 +1465,34 @@ class TeslaSimulatorGUI:
             self.sync_ui_from_data(self.state.get_data())
             
         self.update_connection_status()
+        self.update_emulation_status_ui()
         self.poll_log_queue()
+
+    def update_emulation_status_ui(self):
+        q_depth = self.state.get_queue_depth()
+        avg_lat = self.state.get_avg_latency()
+        fault_until = self.state.get_fault_drop_until()
+        now_ts = time.time()
+        
+        if now_ts < fault_until:
+            rem = int(fault_until - now_ts) + 1
+            self.lbl_emulation_monitor.config(
+                text=f"⚠️ 信号闪断中 ({rem}s) | 队列: {q_depth}/32",
+                fg=self.COLOR_RED
+            )
+        else:
+            mode_str = "REAL" if self.state.get_comm_mode() == "REALISTIC" else "IDEAL"
+            if q_depth >= 25:
+                q_color = self.COLOR_RED
+            elif q_depth > 0:
+                q_color = "#F59E0B"
+            else:
+                q_color = self.COLOR_GREEN
+            
+            self.lbl_emulation_monitor.config(
+                text=f"[{mode_str}] 队列: {q_depth}/32 | 延时: ~{int(avg_lat)}ms",
+                fg=q_color
+            )
 
     def sync_ui_from_data(self, data):
         """
@@ -1405,9 +1624,26 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
     log_queue.put(f"[+] 特斯拉 BLE 广播名: {ble_name} (基于 VIN: {vin})")
     log_queue.put("[+] 正在配置 BLE 外设服务器...")
     
+    req_queue = asyncio.Queue(maxsize=32)
+
     # BLE 客户端特征值写入事件回调
     def on_write(characteristic, value):
-        log_queue.put(f"[BLE-Write] 接收到控制命令: {value.hex()}")
+        now_ts = time.time()
+        fault_until = state.get_fault_drop_until()
+        if now_ts < fault_until:
+            log_queue.put(f"[BLE-Write] ⚠️ [故障注入中] 丢弃 ESP32 写入请求: {value.hex()[:16]}...")
+            return
+
+        if state.get_comm_mode() == "REALISTIC":
+            try:
+                req_queue.put_nowait((value, now_ts))
+                q_len = req_queue.qsize()
+                state.set_queue_depth(q_len)
+                log_queue.put(f"[BLE-Write] 📥 接收 ESP32 请求 ({len(value)}B) -> 压入队列 (深度: {q_len}/32)")
+            except asyncio.QueueFull:
+                log_queue.put(f"[BLE-Write] ❌ 队列已满 (32/32)! 拒绝 ESP32 请求: {value.hex()[:16]}...")
+        else:
+            log_queue.put(f"[BLE-Write] 理想模式接收指令: {value.hex()[:16]}...")
 
     async def start_ble_server(name):
         use_bumble = getattr(args, 'bumble', False)
@@ -1558,42 +1794,98 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                     if gui is not None:
                         gui.btn_restart_ble.config(state="normal", text="应用并重启广播")
 
-            # 4. 20Hz 遥测数据推送机制
+            # 4. 遥测数据响应/推送机制 (支持真车问答模式 vs 理想推送模式)
             if server is not None:
-                # is_connected is an async method, must be awaited
                 is_conn = await server.is_connected()
                 state.set_connected(is_conn)
                 
                 if is_conn:
-                    if state.is_script_mode():
-                        frame = state.increment_frame()
-                        mock_data = generate_mock_frame(frame)
-                        state.update_data(**mock_data)
+                    if state.get_comm_mode() == "REALISTIC":
+                        # 真实问答模式：按 ESP32 请求队列逐个回复，带有真实车机延时
+                        if not req_queue.empty():
+                            cmd_data, req_ts = req_queue.get_nowait()
+                            q_len = req_queue.qsize()
+                            state.set_queue_depth(q_len)
+
+                            # 计算拟真延迟 (基础 600ms ~ 1000ms)
+                            base_delay = random.uniform(0.6, 1.0)
+                            
+                            # 5% 概率触发长尾抖动 (延迟翻倍)
+                            if random.random() < 0.05:
+                                base_delay *= 2.0
+                                log_queue.put("[BLE-Server] ⚡ 触发 5% BLE 链路长尾抖动 (延时翻倍)")
+
+                            multiplier = state.get_delay_multiplier()
+                            actual_delay = base_delay * multiplier
+
+                            await asyncio.sleep(actual_delay)
+
+                            # 模拟丢包
+                            loss_rate = state.get_loss_rate()
+                            if loss_rate > 0 and random.random() < loss_rate:
+                                log_queue.put(f"[BLE-Server] 📉 模拟 BLE 无线链路丢包, 放弃响应 (耗时: {actual_delay*1000:.0f}ms)")
+                                req_queue.task_done()
+                                continue
+
+                            # 构造遥测响应数据包
+                            if state.is_script_mode():
+                                frame = state.increment_frame()
+                                mock_data = generate_mock_frame(frame)
+                                state.update_data(**mock_data)
+                            else:
+                                mock_data = state.get_data()
+                                mock_data['script_phase_desc'] = "真实问答模式"
+
+                            payload = pack_telemetry(mock_data)
+                            try:
+                                if hasattr(server, 'notify'):
+                                    await server.notify(payload)
+                                else:
+                                    server.get_characteristic(RD_UUID).value = payload
+                                    server.update_value(SVC_UUID, RD_UUID)
+                                
+                                total_lat = (time.time() - req_ts) * 1000
+                                state.add_latency_record(total_lat)
+                                log_queue.put(f"[BLE-Notify] 📤 响应发送完成 (延迟: {total_lat:.0f}ms, 剩余队列: {q_len}/32)")
+                            except Exception as e:
+                                log_queue.put(f"[-] 发送遥测响应出错: {e}")
+                            
+                            req_queue.task_done()
                     else:
-                        mock_data = state.get_data()
-                        mock_data['script_phase_desc'] = "手动干预模式"
-                    
-                    payload = pack_telemetry(mock_data)
-                    try:
-                        if hasattr(server, 'notify'):
-                            await server.notify(payload)
+                        # 理想 20Hz 主动推送模式
+                        if state.is_script_mode():
+                            frame = state.increment_frame()
+                            mock_data = generate_mock_frame(frame)
+                            state.update_data(**mock_data)
                         else:
-                            server.get_characteristic(RD_UUID).value = payload
-                            server.update_value(SVC_UUID, RD_UUID)
-                    except Exception as e:
-                        log_queue.put(f"[-] 推送遥测数据出错: {e}")
-                    
-                    if frame_log_counter % 40 == 0:
-                        log_queue.put(f"[BLE-Notify] 推送: Speed={mock_data['speed_kmh']:.1f} KM/H, Gear={mock_data['gear']}, SOC={mock_data['battery_level']}%, Phase={mock_data.get('script_phase_desc', '手动')}")
-                    frame_log_counter += 1
+                            mock_data = state.get_data()
+                            mock_data['script_phase_desc'] = "手动干预模式"
+                        
+                        payload = pack_telemetry(mock_data)
+                        try:
+                            if hasattr(server, 'notify'):
+                                await server.notify(payload)
+                            else:
+                                server.get_characteristic(RD_UUID).value = payload
+                                server.update_value(SVC_UUID, RD_UUID)
+                        except Exception as e:
+                            log_queue.put(f"[-] 推送遥测数据出错: {e}")
+                        
+                        if frame_log_counter % 40 == 0:
+                            log_queue.put(f"[BLE-Notify] 理想推送: Speed={mock_data['speed_kmh']:.1f} KM/H, Gear={mock_data['gear']}")
+                        frame_log_counter += 1
                 else:
                     if frame_log_counter > 0:
                         log_queue.put("[-] ESP32 断开蓝牙连接，重新等待连接中...")
                         frame_log_counter = 0
-                    
-                    # Optional debugging: print subscription client count periodically
-                    if hasattr(server, '_subscribed_clients') and len(server._subscribed_clients) > 0:
-                        log_queue.put(f"[BLE] Detected {len(server._subscribed_clients)} subscribed client(s). Waiting for is_connected confirmation.")
+                    # 断连时清空队列
+                    while not req_queue.empty():
+                        try:
+                            req_queue.get_nowait()
+                            req_queue.task_done()
+                        except (asyncio.QueueEmpty, ValueError):
+                            break
+                    state.set_queue_depth(0)
 
             # 5. 更新 GUI 生命周期的定时状态
             if gui is not None and not stop_event.is_set():
