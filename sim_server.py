@@ -1865,14 +1865,6 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                     if frame_log_counter > 0:
                         log_queue.put("[-] ESP32 断开蓝牙连接，重新等待连接中...")
                         frame_log_counter = 0
-                    # 断连时清空队列
-                    while not req_queue.empty():
-                        try:
-                            req_queue.get_nowait()
-                            req_queue.task_done()
-                        except (asyncio.QueueEmpty, ValueError):
-                            break
-                    state.set_queue_depth(0)
 
             # 5. 更新 GUI 生命周期的定时状态
             if gui is not None and not stop_event.is_set():
