@@ -1718,6 +1718,8 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
 
     frame_log_counter = 0
     last_ble_start_attempt = 0.0
+    last_push_time = 0.0
+    current_target_interval = 0.8
     try:
         while not stop_event.is_set():
             # 1. 推进 Tkinter 图形框架事件循环一次
