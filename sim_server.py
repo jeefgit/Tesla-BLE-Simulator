@@ -579,7 +579,7 @@ class TeslaSimulatorGUI:
         self.BG_BTN_HOVER = "#3F3F46"   # 悬停颜色
 
         # 配置 root 窗口属性
-        self.root.title("Tesla BLE TFT 仪表盘 - 仿真控制器 (真车拟真增强版)")
+        self.root.title("Tesla BLE TFT 仪表盘 - 仿真控制器 v2.0 稳定版")
         self.root.geometry("1120x820")
         self.root.minsize(1050, 760)
         self.root.config(bg=self.BG_MAIN)
@@ -1893,7 +1893,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     print("==========================================================")
-    print("      Tesla BLE HMI Windows Simulator Server v2.2         ")
+    print("      Tesla BLE HMI Windows Simulator Server v2.0 Stable  ")
     print("==========================================================")
     
     # 强制在 Windows 平台下将 asyncio loop 初始化为 SelectorLoop (防止 Proactor 冲突与死锁)
