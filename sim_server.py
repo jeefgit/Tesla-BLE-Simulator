@@ -1625,9 +1625,26 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
     log_queue.put("[+] 正在配置 BLE 外设服务器...")
     
     req_queue = asyncio.Queue(maxsize=32)
+    pending_write_bytes = bytearray()
+    write_debounce_task = None
+
+    async def _flush_write_buffer(ts):
+        nonlocal pending_write_bytes, write_debounce_task
+        await asyncio.sleep(0.04)  # 40ms 静默窗口等待 MTU 分包完成
+        if pending_write_bytes:
+            data = bytes(pending_write_bytes)
+            pending_write_bytes = bytearray()
+            try:
+                req_queue.put_nowait((data, ts))
+                q_len = req_queue.qsize()
+                state.set_queue_depth(q_len)
+                log_queue.put(f"[BLE-Write] 📥 接收 ESP32 分包重组指令 ({len(data)}B) -> 压入队列 (深度: {q_len}/32)")
+            except asyncio.QueueFull:
+                log_queue.put(f"[BLE-Write] ❌ 队列已满 (32/32)! 拒绝 ESP32 请求")
 
     # BLE 客户端特征值写入事件回调
     def on_write(characteristic, value):
+        nonlocal pending_write_bytes, write_debounce_task
         now_ts = time.time()
         fault_until = state.get_fault_drop_until()
         if now_ts < fault_until:
@@ -1635,13 +1652,23 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
             return
 
         if state.get_comm_mode() == "REALISTIC":
-            try:
-                req_queue.put_nowait((value, now_ts))
-                q_len = req_queue.qsize()
-                state.set_queue_depth(q_len)
-                log_queue.put(f"[BLE-Write] 📥 接收 ESP32 请求 ({len(value)}B) -> 压入队列 (深度: {q_len}/32)")
-            except asyncio.QueueFull:
-                log_queue.put(f"[BLE-Write] ❌ 队列已满 (32/32)! 拒绝 ESP32 请求: {value.hex()[:16]}...")
+            pending_write_bytes.extend(value)
+            if write_debounce_task is not None and not write_debounce_task.done():
+                write_debounce_task.cancel()
+            
+            # 如果接收到的切片 < 18B (说明是最后一个尾包)，立即提交组包；否则启动 40ms 组包定时器
+            if len(value) < 18:
+                data = bytes(pending_write_bytes)
+                pending_write_bytes = bytearray()
+                try:
+                    req_queue.put_nowait((data, now_ts))
+                    q_len = req_queue.qsize()
+                    state.set_queue_depth(q_len)
+                    log_queue.put(f"[BLE-Write] 📥 接收 ESP32 指令包重组完成 ({len(data)}B) -> 压入队列 (深度: {q_len}/32)")
+                except asyncio.QueueFull:
+                    log_queue.put(f"[BLE-Write] ❌ 队列已满 (32/32)! 拒绝 ESP32 请求: {value.hex()[:16]}...")
+            else:
+                write_debounce_task = asyncio.create_task(_flush_write_buffer(now_ts))
         else:
             log_queue.put(f"[BLE-Write] 理想模式接收指令: {value.hex()[:16]}...")
 
