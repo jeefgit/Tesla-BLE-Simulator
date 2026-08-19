@@ -41,7 +41,5 @@
 ## 🗂️ 附带完整原始对话归档
 
 原始全量对话记录已保存在本目录下：
-* **[docs/conversation_logs/transcript.jsonl](conversation_logs/transcript.jsonl)** (Compact JSONL)
-* **[docs/conversation_logs/transcript_full.jsonl](conversation_logs/transcript_full.jsonl)** (Full Untruncated JSONL)
 * **[docs/conversation_logs/walkthrough.md](conversation_logs/walkthrough.md)** (v2.0 发布记录)
 * **[docs/conversation_logs/implementation_plan.md](conversation_logs/implementation_plan.md)** (实现设计文档)
