@@ -4,3 +4,4 @@ __pycache__/
 .idea/
 .vscode/
 *.log
+docs/conversation_logs/*.jsonl
