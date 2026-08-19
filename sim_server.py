@@ -32,7 +32,7 @@ except ImportError:
     HAS_BUMBLE = False
 
 class BumbleTeslaServer:
-    def __init__(self, vin="LRWYGCFS2PC792568", usb_spec="usb:0a12:0001"):
+    def __init__(self, vin="5YJ3E1EA0KF000000", usb_spec="usb:0a12:0001"):
         self.vin = vin
         self.usb_spec = usb_spec
         sha1 = hashlib.sha1(vin.encode('utf-8')).hexdigest()
@@ -52,7 +52,7 @@ class BumbleTeslaServer:
         self.host = BumbleHost(self.transport.source, self.transport.sink)
         
         self.device = BumbleDevice(
-            address='F4:4E:FC:14:3C:A7',
+            address='F4:4E:FC:00:00:01',
             name=self.ble_name,
             host=self.host
         )
@@ -190,7 +190,7 @@ class TelemetryState:
         self.ble_connected = False    # BLE 连接状态
         self.ble_enabled = True       # BLE 蓝牙广播全局总开关 (默认开启)
         self.frame_counter = 0        # 剧本帧计数器
-        self.vin = "LRWYGCFS2PC792568" # 默认匹配 ESP32 默认固件的 VIN
+        self.vin = "5YJ3E1EA0KF000000" # 默认示例 VIN (用户可在界面/命令行自行填入)
         self.request_restart = False  # 蓝牙广播重启标志位
 
         # 真实车机 BLE 模拟扩展参数
@@ -722,7 +722,7 @@ class TeslaSimulatorGUI:
     def restart_ble_service(self):
         new_vin = self.entry_vin.get().strip()
         if not new_vin or len(new_vin) != 17:
-            messagebox.showerror("错误", "特斯拉 VIN 必须为 17 位字符！\n示例: LRWYGCFS2PC792568")
+            messagebox.showerror("错误", "特斯拉 VIN 必须为 17 位字符！\n示例: 5YJ3E1EA0KF000000")
             return
         
         self.state.set_vin(new_vin)
@@ -1888,7 +1888,7 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Tesla BLE HMI Windows Simulator Control Server")
     parser.add_argument("--nogui", action="store_true", help="强制在纯命令行模式下运行（不启动 Tkinter 界面）")
-    parser.add_argument("--vin", type=str, default="LRWYGCFS2PC792568", help="设定模拟车型的 17 位 VIN 识别号（默认为 LRWYGCFS2PC792568）")
+    parser.add_argument("--vin", type=str, default="5YJ3E1EA0KF000000", help="设定模拟车型的 17 位 VIN 识别号（示例: 5YJ3E1EA0KF000000）")
     parser.add_argument("--bumble", action="store_true", help="使用 Bumble (CSR8510 USB HCI) 硬件物理广播模式")
     args = parser.parse_args()
     

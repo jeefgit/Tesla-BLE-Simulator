@@ -1,57 +1,102 @@
-# Tesla BLE TFT HMI - Windows Simulator (Simulation_app)
+# Tesla BLE Simulator (v2.0 Stable Release) 🚗⚡
 
-这是一个专为“特斯拉 BLE TFT 仪表盘”开发的 Windows 端车机低功耗蓝牙 (BLE) 遥测仿真器。它可以在 Windows 10/11 主机上扮演特斯拉官方车机的 Peripheral 角色，广播指定的 BLE 遥测服务属性，从而无线驱动 ESP32 仪表的页面跳转与所有遥测动画的流畅渲染。
+[![Version](https://img.shields.io/badge/version-2.0%20Stable-brightgreen.svg)](https://github.com/elementchen/Tesla-BLE-Simulator)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue.svg)](https://github.com/elementchen/Tesla-BLE-Simulator)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-未来，该模拟器可以作为一个独立的 Python 仿真套件单独进行对外发布与迭代。
+一个专为“特斯拉 BLE TFT 仪表盘 (ESP32-S3)”打造的 Windows 端特斯拉车机低功耗蓝牙 (BLE) 遥测与控制仿真器。
 
----
-
-## 💻 运行环境与硬件要求
-
-* **操作系统**：Windows 10 / Windows 11 (依赖 Windows 蓝牙 WinRT 接口)
-* **硬件支持**：电脑需具备低功耗蓝牙 (BLE) 适配器，并在系统设置中开启蓝牙
-* **软件依赖**：Python 3.8 或更高版本
+本仿真器可以在 Windows 10/11 主机上扮演特斯拉官方车机的 Peripheral 外设角色，广播基于 VIN SHA-1 计算的空中 BLE 广播包，提供高拟真度的行车遥测数据灌入，免去连接真实特斯拉车辆的门槛，无线驱动 ESP32 仪表盘的页面跳转、HMI 动画与逻辑状态机。
 
 ---
 
-## 🚀 极速安装与启动
+## 🌟 核心特性 (v2.0 Highlights)
 
-### 💡 方式一：一键批处理启动 (推荐)
-直接在资源管理器中双击：
-👉 **[run.bat](file:///e:/AI_coding_test/_Gemini/TESLA_BLE_TFT/Simulation_app/run.bat)**
+* **真车级 BLE 通讯拟真 (Real-Car BLE Pacing)**：
+  * **800ms 真实分批推送**：完美模拟特斯拉真实行车 `DriveState` 的 800ms 遥测刷新周期，解决 ESP32 握手卡死与 `SYNC_TIMEOUT_MS = 25000` (25s) 超时复位问题。
+  * **网络抖动与延迟模拟**：包含 150ms ~ 300ms 拟真响应延迟、5% 概率长尾链路抖动。
+  * **丢包率与故障注入**：支持 0% ~ 20% 动态丢包率测试，以及一键 5 秒 BLE 信号闪断/断连故障注入。
+  * **双通信模式无缝切换**：支持 **`问答/分批模式 (REALISTIC 800ms)`** 与 **`理想主动推送 (IDEAL 20Hz)`** 随时切换。
+* **硬件级 Bumble USB HCI 蓝牙直控 (CSR8510 Dongle)**：
+  * 基于 `Bumble` + `WinUSB` 原生 USB 接口直控（绕过 Windows UWP 蓝牙限制），支持普通 15 元 USB 蓝牙接收器物理广播。
+  * 动态 VIN 计算：用户输入 17 位 VIN 码后，实时计算 `S<sha1_prefix>C` 标准特斯拉空中广播包名称。
+  * 硬件级广播总开关（`BLE广播: ON / OFF`）与连接状态显示。
+* **可视化暗黑风 Tkinter 操控台**：
+  * **核心驾控参数**：车速（0~200 km/h）、电机功率（-100~300 kW，带能量回收进度条高亮）、电池 SOC（0~100%）、续航里程（KM）、PRND/SNA 档位控制。
+  * **车身与充电**：4 门 + 前后备箱开口开闭、中控锁锁定、充电枪插拔与充电功率调节（0~250 kW）。
+  * **环境与胎压监测**：车内/车外温度控制、四轮实时胎压 (TPMS，带异常红字告警)。
+  * **自动化剧本播放引擎**：内置 9 阶段经典行车闭环剧本（解锁上车 -> 挂档加速 -> 强力超车 -> 动能回收 -> 倒车入库 -> 插枪充电），支持一键脚本自动播放。
 
-它将自动为您校准 Python 依赖环境，并在完成后直接拉起仿真服务器广播。
+---
 
-### 💡 方式二：终端命令行启动
-打开命令行或 PowerShell，进入 `Simulation_app` 目录后运行：
-```powershell
-# 1. 安装核心依赖
-pip install -r requirements.txt
+## 🖥️ 界面展示
 
-# 2. 启动仿真服务
-python sim_server.py
+```text
++-----------------------------------------------------------------------------------+
+|  Tesla BLE TFT 仪表盘 - 仿真控制器 v2.0 稳定版                                    |
++-----------------------------------------------------------------------------------+
+|  [VIN 码]: [ 5YJ3E1EA0KF000000 ]  广播名: (S7e6a716c52bbcd2cC)  [应用并重启广播]   |
+|  [BLE 广播: ON]  [问答/分批模式 (REALISTIC 800ms)]  [⚡ 注入 5s 信号闪断]           |
+|  状态: [REAL] 周期: ~800ms | 延时倍率: 1.0x | 丢包率: 0%                              |
++-----------------------------------------------------------------------------------+
+|  [车速滑块 (KM/H)] ========> 65.0       [电机功率 (kW)] ========> 25.0              |
+|  [电量 SOC (%)]   ========> 85         [续航里程 (KM)] ========> 420               |
+|  [档位选择]: ( P )  ( R )  ( N )  [ D ]  ( ?巡航 )                                 |
+|  [车门控制]: [主驾门: 关] [副驾门: 关] [左后门: 关] [右后门: 关] [前备箱: 关] [后备箱: 关] |
++-----------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 🗃️ 二进制数据格式：`SimPayload`
+## 🚀 极速安装与使用指南
 
-本模拟器与 ESP32 仪表端采用定制的紧凑二进制字节包进行高频通信，单包大小为 **53 字节**，规避了 JSON 或 Protobuf 在单片机上的序列化计算负担。
+### 1. 硬件准备（强烈推荐使用 USB 蓝牙接收器）
+为了获得最真实的物理层空中广播体验，建议准备一个低成本（约 10~15 元）的 **CSR8510 A10 USB 蓝牙接收器**。
+按说明文档配置 Zadig WinUSB 驱动：
+👉 **[普通 USB 蓝牙接收器配置指南 (docs/USB_BLUETOOTH_DONGLE_SETUP.md)](docs/USB_BLUETOOTH_DONGLE_SETUP.md)**
 
-在 Python 端，它使用 `struct.pack` 按照以下格式编码：
-* **结构体格式串**：`"<ffifc6BBfff4f"`
-* **字段说明表**：
+### 2. 方式一：一键批处理启动 (Windows 推荐)
+直接在资源管理器中双击：
+👉 **`run.bat`**
+
+（脚本会自动检查并安装 `requirements.txt` 依赖，以管理员模式拉起仿真服务）
+
+### 3. 方式二：终端命令行启动
+打开 PowerShell 或 CMD，在当前目录运行：
+
+```powershell
+# 1. 安装核心依赖
+pip install -r requirements.txt
+
+# 2. 启动图形化仿真服务
+python sim_server.py
+
+# (可选) 强制使用 Bumble CSR8510 USB HCI 模式
+python sim_server.py --bumble
+
+# (可选) 纯命令行模式 (无 GUI 界面)
+python sim_server.py --nogui --vin 5YJ3E1EA0KF000000
+```
+
+---
+
+## 🗃️ 协议规范：`SimPayload` (53 Bytes)
+
+本模拟器与 ESP32 仪表端采用定制的紧凑二进制字节包进行高频通信，单包大小固定为 **53 字节**。ESP32NimBLE 接收层在 `ble_adapter.cpp` 中感知到 53 字节长度后，会自动跳过 ECDH 握手与 Protobuf 解密，直接打包传入 UI 渲染流。
+
+Python 侧使用 `struct.pack("<ffifc6BBfff4f", ...)` 编码，结构对齐如下：
 
 | 偏移量 (Byte) | 字段名称 | 数据类型 | 作用描述 |
 | :--- | :--- | :--- | :--- |
 | `0 - 3` | `speed_kmh` | `float` | 实时时速 (KM/H) |
-| `4 - 7` | `motor_power_kw` | `float` | 电机输出功率 (正值为输出，负值代表动能回收) |
+| `4 - 7` | `motor_power_kw` | `float` | 电机输出功率 (正值为输出，负值代表能量回收) |
 | `8 - 11` | `battery_level` | `int32_t` | 剩余电量 SOC (%) |
 | `12 - 15` | `battery_range_km` | `float` | 估计续航里程 (KM) |
 | `16` | `gear` | `char` | 当前档位 (`P`, `R`, `N`, `D`, `?`巡航) |
 | `17 - 22` | `doors[6]` | `uint8_t[6]` | 车身开口状态 (fl, fr, rl, rr, frunk, trunk) |
-| `23` | `locked` | `uint8_t` | 整车中控锁定状态 |
-| `24` | `charging` | `uint8_t` | 充电状态指示 |
+| `23` | `locked` | `uint8_t` | 整车中控锁定状态 (0解锁, 1锁定) |
+| `24` | `charging` | `uint8_t` | 充电枪连接状态 (0未充电, 1充电中) |
 | `25 - 28` | `charge_power_kw` | `float` | 实时充电功率 (kW) |
 | `29 - 32` | `inside_temp` | `float` | 车内环境温度 (℃) |
 | `33 - 36` | `outside_temp` | `float` | 车外环境温度 (℃) |
@@ -59,16 +104,14 @@ python sim_server.py
 
 ---
 
-## 🎭 仿真遥测演进剧本（20Hz 循环）
+## 📚 文档目录 (Docs Directory)
 
-仿真器启动后，会以 20Hz (每 50ms 一帧) 的高频在空中向连接的 ESP32 发送遥测数据，按照以下 9 个典型的车机状态周期循环演进，完美仿真了特斯拉从解锁、行驶到充电的完整闭环流程：
+更多架构设计与硬件指南请参考 `docs/` 文件夹：
+* 📖 **[USB_BLUETOOTH_DONGLE_SETUP.md](docs/USB_BLUETOOTH_DONGLE_SETUP.md)**：普通 USB 蓝牙接收器 (CSR8510) + Zadig WinUSB 驱动一步一步配置指南。
+* 📖 **[HANDOVER.md](docs/HANDOVER.md)**：模拟器架构设计、旁路劫持原理与二次开发指南。
 
-1. **解锁上车（0 ~ 5秒）**：整车解锁，主驾门与左后门开启，仪表点亮并高亮显示开门警示。
-2. **准备起步（5 ~ 8秒）**：车门关闭，空调自动出风调温，档位处于 P 档。
-3. **挂档轻踩起步（8 ~ 12秒）**：挂入 D 档，时速平滑加速至 30 KM/H。
-4. **强力加速超车（12 ~ 18秒）**：大功率输出，时速飙升至 120 KM/H，车内温度骤降，胎压因热摩擦生热升压。
-5. **动能回收与重踩刹车（18 ~ 23秒）**：电机功率变负（动能回收进度条瞬间向左拉满），时速从 120 回收滑行减速至 10 KM/H。
-6. **自动驾驶巡航（23 ~ 29秒）**：挂入巡航档，FSD 标志亮起，时速稳定在 80 ~ 85 KM/H 巡航。
-7. **倒车入库（29 ~ 35秒）**：挂入 R 档，时速倒车至 6 KM/H。
-8. **停车开门（35 ~ 39秒）**：挂入 P 档，主驾驶开门。
-9. **插枪充电（39 ~ 51.5秒）**：锁车并启动 7.2 kW 慢充，SOC 电量从 99% 跃升至 100%，充电进度条和充电波纹高亮渲染。
+---
+
+## 📜 开源协议
+
+本项目采用 **MIT License** 开源协议。欢迎提交 Pull Request 和 Issue！
