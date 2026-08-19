@@ -35,7 +35,8 @@
 1. 点击顶部菜单栏的 **`Options`**。
 2. 勾选 **`List All Devices`**（列出所有设备）。
 
-![Zadig Options List All Devices](https://zadig.akeo.ie/pics/zadig_main.png)
+<img width="596" height="260" alt="20260819194904_19_341" src="https://github.com/user-attachments/assets/b086a94a-3c56-4d76-9964-38dcc0712c46" />
+
 
 ### 第四步：选择蓝牙适配器并替换驱动
 1. 在下拉选择框中，选中您的 USB 蓝牙接收器，通常显示为 **`CSR8510 A10`** 或 **`Generic Bluetooth Adapter`**。
