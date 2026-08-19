@@ -41,8 +41,12 @@
 ### 第四步：选择蓝牙适配器并替换驱动
 1. 在下拉选择框中，选中您的 USB 蓝牙接收器，通常显示为 **`CSR8510 A10`** 或 **`Generic Bluetooth Adapter`**。
    > ⚠️ **注意**：请仔细核对 USB ID，通常为 `0A12 0001`。切勿误选鼠标、键盘或系统主卡！
+   <img width="631" height="295" alt="20260819195050_20_341" src="https://github.com/user-attachments/assets/cb30408b-a5ff-4512-9567-74535eda0981" />
+
 2. 在 **`Driver`** 对应的右侧目标驱动下拉框中，选择 **`WinUSB (v6.1.7600.16385)`**。
+
 3. 点击大大的 **`Replace Driver`**（或 `Install Driver`）按钮。
+
 4. 等待 10~30 秒，直到弹窗提示 **“The driver was successfully updated.”**，即代表硬件改造成功！
 
 ---
