@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Tesla ESP32 2.8" 仪表盘 UI 原型 · 320×240</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0B0D11;color:#D9DEE9;font-family:"Inter","Segoe UI",-apple-system,Roboto,Helvetica,Arial,sans-serif}
+body{padding:28px 32px;display:flex;gap:36px;align-items:flex-start;flex-wrap:wrap}
+
+/* ---------- 展示外壳 ---------- */
+.stage{display:flex;flex-direction:column;gap:10px}
+.bezel{width:656px;height:496px;background:linear-gradient(160deg,#1B1F27,#0D1015);border:1px solid #262C37;border-radius:14px;padding:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 20px 50px rgba(0,0,0,.55)}
+.scaler{width:640px;height:480px;transform:scale(2);transform-origin:top left}
+.scaler.x1{transform:scale(1)}
+.cap{font-size:12px;color:#6C7688;letter-spacing:.4px}
+.bezel.x1{width:352px;height:272px}
+.scaler.x1{width:320px;height:240px}
+
+/* ---------- 屏幕本体 (320×240) ---------- */
+.screen{
+  --bg:#000; --fg:#FFFFFF; --dim:#8A93A6; --faint:#5A6377; --line:#14181F;
+  --blue:#3E6AE1; --green:#21C15E; --red:#FF453A; --amber:#FFB340;
+  position:relative;width:320px;height:240px;background:var(--bg);overflow:hidden;
+  color:var(--fg);font-size:12px;-webkit-font-smoothing:antialiased;
+}
+
+/* 顶部状态条 h=24 */
+.hdr{position:absolute;top:0;left:0;right:0;height:24px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;border-bottom:1px solid var(--line)}
+.gear{display:flex;gap:5px;font-size:13px;font-weight:700;letter-spacing:1px;width:74px}
+.gear span{color:#333A47;transition:color .2s}
+.gear span.on{color:var(--fg)}
+.temps{display:flex;align-items:center;gap:5px;font-size:11px;color:#C9D1E0}
+.temps .k{font-size:8.5px;letter-spacing:.8px;color:var(--faint);font-weight:600}
+.temps i{display:block;width:1px;height:9px;background:#252B36}
+.sys{display:flex;align-items:center;gap:7px}
+.sys svg{display:block}
+.lock{opacity:.9}
+.ble{display:flex;align-items:center;gap:4px;font-size:9.5px;color:var(--dim);letter-spacing:.3px}
+.ble.off{color:var(--red)}
+
+/* 告警条 (覆盖在主区顶部) */
+.banner{position:absolute;top:24px;left:0;right:0;height:20px;display:none;align-items:center;gap:6px;padding:0 9px;
+  background:rgba(255,69,58,.16);border-bottom:1px solid rgba(255,69,58,.55);color:var(--red);font-size:10.5px;font-weight:700;letter-spacing:.6px}
+.banner.show{display:flex;animation:blink 1s steps(2,end) infinite}
+.banner.amber{background:rgba(255,179,64,.14);border-color:rgba(255,179,64,.55);color:var(--amber)}
+@keyframes blink{50%{opacity:.45}}
+
+/* 主区 y=24..184 */
+.col{position:absolute;top:24px;height:160px;width:84px;display:flex;flex-direction:column;align-items:center;padding-top:10px}
+.col.left{left:0}
+.col.right{left:236px}
+.soc{font-size:34px;font-weight:600;line-height:1;letter-spacing:-1px}
+.soc span{font-size:15px;font-weight:500;color:var(--dim);margin-left:1px}
+.pw{height:34px;display:flex;align-items:center;font-size:21px;font-weight:600;line-height:1;letter-spacing:-.5px;color:var(--blue)}
+.pw span{font-size:11px;font-weight:500;color:var(--dim);margin-left:2px}
+.pw.neg{color:var(--green)}
+.gauge{position:relative;width:14px;height:60px;border-radius:7px;background:#0E1219;border:1px solid #1E2430;margin:8px 0 6px;overflow:hidden}
+/* 功率计量程刻度 (右侧列) */
+.ticks{position:absolute;left:52px;top:0;width:26px;height:160px;pointer-events:none}
+.ticks span{position:absolute;left:0;font-size:7px;letter-spacing:.3px;color:#4A5163;font-weight:600}
+.ticks .t1{top:51px}
+.ticks .t2{top:92px}
+.ticks .t3{top:105px}
+.gauge .fill{position:absolute;left:0;right:0;bottom:0;border-radius:7px;background:var(--fg);transition:height .3s cubic-bezier(.22,1,.36,1)}
+.gauge .fill.green{background:var(--green)}
+.gauge .fill.red{background:var(--red)}
+/* 功率计：-100..+300 kW，零点在 25% */
+.pwg .zero{position:absolute;left:0;right:0;bottom:15px;height:1px;background:#4A5163;z-index:2}
+.pwg .out{position:absolute;left:1px;right:1px;bottom:15px;border-radius:6px 6px 2px 2px;background:linear-gradient(180deg,#5B85F0,var(--blue));transition:height .3s cubic-bezier(.22,1,.36,1)}
+.pwg .reg{position:absolute;left:1px;right:1px;bottom:1px;border-radius:2px 2px 6px 6px;background:linear-gradient(180deg,var(--green),#149B4C);transition:height .3s cubic-bezier(.22,1,.36,1)}
+.range{font-size:16px;font-weight:500;letter-spacing:-.2px}
+.range span{font-size:11px;color:var(--dim);margin-left:2px}
+.cap{font-size:8px;letter-spacing:1.4px;color:var(--faint);font-weight:600;margin-top:3px}
+.col .cap{position:absolute;bottom:6px}
+
+/* 中央车速 */
+.hero{position:absolute;left:84px;top:24px;width:152px;height:160px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.spd{font-size:74px;font-weight:250;line-height:1;letter-spacing:-4px;font-variant-numeric:tabular-nums}
+.unit{font-size:12px;letter-spacing:3.5px;color:var(--dim);text-transform:uppercase;margin-top:4px}
+.spd.dim,.unit.dim{color:#4A5163}
+
+/* 充电面板 (替换中央车速) */
+.charge{display:none;flex-direction:column;align-items:center;gap:6px}
+.charge.show{display:flex}
+.cbolt{filter:drop-shadow(0 0 6px rgba(33,193,94,.55));animation:glow 1.6s ease-in-out infinite}
+@keyframes glow{50%{filter:drop-shadow(0 0 12px rgba(33,193,94,.9))}}
+.cw{font-size:38px;font-weight:600;color:var(--green);letter-spacing:-1.5px;line-height:1}
+.cw span{font-size:15px;font-weight:500;color:var(--dim);margin-left:3px}
+.cbar{width:120px;height:5px;border-radius:3px;background:#0E1219;border:1px solid #1E2430;overflow:hidden}
+.cbar i{display:block;height:100%;background:var(--green);border-radius:3px;transition:width .4s ease}
+.cmeta{font-size:11px;color:var(--dim);letter-spacing:.4px}
+
+/* 底部 y=184..240 */
+.ftr{position:absolute;left:0;right:0;top:184px;height:56px;border-top:1px solid var(--line);display:flex;align-items:center}
+.car{position:absolute;left:7px;top:7px;width:90px;height:42px}
+.car .zone{fill:rgba(255,255,255,.035);stroke:#39414F;stroke-width:1;transition:fill .2s,stroke .2s}
+.car .zone.open{fill:rgba(255,69,58,.88);stroke:var(--red);animation:blink 1s steps(2,end) infinite}
+.car .glass{fill:#171C26;stroke:#252C3A;stroke-width:1}
+.car .body{fill:#080A0E;stroke:#4A5163;stroke-width:1.2}
+.vr{position:absolute;left:107px;top:9px;bottom:9px;width:1px;background:#1A1F28}
+.tpms{position:absolute;left:116px;top:0;right:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:3px}
+.tpms .cap{margin:0}
+.cells{display:flex;gap:4px}
+.cell{width:47px}
+.cell .t{font-size:8.5px;letter-spacing:.8px;color:var(--faint);font-weight:600}
+.cell .v{font-size:15px;font-weight:500;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+.cell.warn .v{color:var(--red);font-weight:700}
+.cell.warn .t{color:var(--red)}
+
+/* 断连遮罩 */
+.offline{position:absolute;left:0;top:24px;right:0;bottom:0;background:rgba(0,0,0,.82);display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;z-index:9}
+.offline.show{display:flex}
+.offline h3{font-size:15px;font-weight:600;letter-spacing:.5px}
+.offline p{font-size:10px;color:var(--dim);letter-spacing:.5px}
+.dots{display:flex;gap:5px}
+.dots i{width:5px;height:5px;border-radius:50%;background:var(--blue);animation:pulse 1.2s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
+@keyframes pulse{0%,100%{opacity:.25;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
+
+/* ---------- 控制面板 ---------- */
+.ctl{flex:1;min-width:340px;max-width:520px;display:flex;flex-direction:column;gap:18px}
+.ctl h1{font-size:20px;font-weight:650;letter-spacing:.2px}
+.ctl .sub{font-size:12.5px;color:#7B8497;line-height:1.7}
+.grp{display:flex;flex-direction:column;gap:9px}
+.grp h2{font-size:11px;letter-spacing:1.6px;color:#6C7688;font-weight:700;text-transform:uppercase}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+button{background:#151A22;color:#C9D1E0;border:1px solid #262D39;border-radius:8px;padding:8px 13px;font-size:12.5px;cursor:pointer;transition:.15s}
+button:hover{background:#1C222C;border-color:#39424F}
+button.on{background:#3E6AE1;border-color:#3E6AE1;color:#fff;font-weight:600}
+table{border-collapse:collapse;font-size:12px;width:100%}
+td,th{padding:6px 8px;border-bottom:1px solid #1A1F28;text-align:left;vertical-align:middle}
+th{color:#6C7688;font-weight:600;font-size:11px}
+td:first-child{color:#8A93A6}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:7px;vertical-align:-2px;border:1px solid rgba(255,255,255,.15)}
+.notes{font-size:12.5px;color:#98A1B3;line-height:1.85}
+.notes b{color:#D9DEE9;font-weight:600}
+kbd{background:#151A22;border:1px solid #262D39;border-radius:4px;padding:1px 5px;font-size:11px;color:#C9D1E0}
+</style>
+</head>
+<body>
+
+<!-- ================= 显示区 ================= -->
+<div class="stage">
+  <div class="bezel" id="bezel">
+    <div class="scaler" id="scaler">
+      <div class="screen" id="screen">
+
+        <!-- 顶部状态条 -->
+        <header class="hdr">
+          <div class="gear" id="gear">
+            <span data-g="P">P</span><span data-g="R">R</span><span data-g="N">N</span><span data-g="D">D</span>
+          </div>
+          <div class="temps">
+            <span class="k">OUT</span><b id="tOut">23.5°</b>
+            <i></i>
+            <span class="k">IN</span><b id="tIn">25.0°</b>
+          </div>
+          <div class="sys">
+            <span class="lock" id="lockWrap">
+              <svg width="10" height="12" viewBox="0 0 10 12" fill="none">
+                <path id="lockBody" d="M2 5V3.2A3 3 0 0 1 8 3.2V5" stroke="#C9D1E0" stroke-width="1.3" stroke-linecap="round"/>
+                <rect id="lockRect" x="1" y="5" width="8" height="6" rx="1.4" stroke="#C9D1E0" stroke-width="1.3"/>
+              </svg>
+            </span>
+            <span class="ble" id="ble">
+              <svg width="12" height="11" viewBox="0 0 12 11" fill="none">
+                <rect x="0"  y="7"  width="2" height="4"  rx="1" fill="currentColor"/>
+                <rect x="3.3" y="5" width="2" height="6"  rx="1" fill="currentColor"/>
+                <rect x="6.6" y="2.5" width="2" height="8.5" rx="1" fill="currentColor"/>
+                <rect x="9.9" y="0"  width="2" height="11" rx="1" fill="currentColor" opacity=".35"/>
+              </svg>
+              <span id="bleTxt">-61 dBm</span>
+            </span>
+          </div>
+        </header>
+
+        <!-- 告警条 -->
+        <div class="banner" id="banner"><span>⚠</span><span id="bannerTxt">FRUNK OPEN</span></div>
+
+        <!-- 左：电池 -->
+        <section class="col left">
+          <div class="soc"><b id="soc">78</b><span>%</span></div>
+          <div class="gauge"><i class="fill" id="socFill" style="height:78%"></i></div>
+          <div class="range"><b id="range">312</b><span>km</span></div>
+          <div class="cap">RANGE</div>
+        </section>
+
+        <!-- 中：车速 / 充电 -->
+        <section class="hero">
+          <div id="spdBox">
+            <div class="spd" id="spd">128</div>
+            <div class="unit" id="unit" style="text-align:center">km/h</div>
+          </div>
+          <div class="charge" id="chargeBox">
+            <svg class="cbolt" width="26" height="34" viewBox="0 0 26 34" fill="#21C15E">
+              <path d="M15 0 0 20h9l-3 14L26 13h-9l4-13z"/>
+            </svg>
+            <div class="cw"><b id="cKw">110</b><span>kW</span></div>
+            <div class="cbar"><i id="cBar" style="width:45%"></i></div>
+            <div class="cmeta" id="cMeta">45 min → 80%</div>
+          </div>
+        </section>
+
+        <!-- 右：电机功率 -->
+        <section class="col right">
+          <div class="pw" id="pwWrap"><b id="pwVal">+45</b><span>kW</span></div>
+          <div class="gauge pwg">
+            <i class="out" id="pwOut" style="height:7px"></i>
+            <i class="reg" id="pwReg" style="height:0px"></i>
+            <i class="zero"></i>
+          </div>
+          <div class="ticks"><span class="t1">300</span><span class="t2">0</span><span class="t3">-100</span></div>
+          <div class="cap">MOTOR</div>
+        </section>
+
+        <!-- 底部：车身状态 + 胎压 -->
+        <footer class="ftr">
+          <svg class="car" viewBox="0 0 90 42">
+            <rect class="body" x="1.5" y="1.5" width="87" height="39" rx="13"/>
+            <rect class="glass" x="27" y="9" width="37" height="24" rx="6"/>
+            <rect class="zone" id="z-frunk" x="3" y="7.5" width="21" height="27" rx="8"/>
+            <rect class="zone" id="z-trunk"  x="67" y="7.5" width="20" height="27" rx="8"/>
+            <rect class="zone" id="z-fl" x="27" y="2.5" width="17" height="7" rx="2.5"/>
+            <rect class="zone" id="z-rl" x="46" y="2.5" width="16" height="7" rx="2.5"/>
+            <rect class="zone" id="z-fr" x="27" y="32.5" width="17" height="7" rx="2.5"/>
+            <rect class="zone" id="z-rr" x="46" y="32.5" width="16" height="7" rx="2.5"/>
+          </svg>
+          <div class="vr"></div>
+          <div class="tpms">
+            <div class="cap">TPMS · BAR</div>
+            <div class="cells">
+              <div class="cell" id="tp-fl"><div class="t">FL</div><div class="v">2.45</div></div>
+              <div class="cell" id="tp-fr"><div class="t">FR</div><div class="v">2.42</div></div>
+              <div class="cell" id="tp-rl"><div class="t">RL</div><div class="v">2.40</div></div>
+              <div class="cell" id="tp-rr"><div class="t">RR</div><div class="v">2.38</div></div>
+            </div>
+          </div>
+        </footer>
+
+        <!-- 断连遮罩 -->
+        <div class="offline" id="offline">
+          <h3>未连接车辆</h3>
+          <div class="dots"><i></i><i></i><i></i></div>
+          <p>Searching for Tesla BLE broadcast…</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+  <div class="cap">320 × 240 px · 横屏 · 实际像素渲染（当前按所选倍率缩放显示）</div>
+</div>
+
+<!-- ================= 控制面板 ================= -->
+<div class="ctl">
+  <div>
+    <h1>ESP32 2.8" 特斯拉仪表盘 · 界面原型</h1>
+    <p class="sub">数据源：Tesla-BLE-Simulator 的 <b>SimPayload (53 字节)</b> — 车速 / 功率 / SOC / 续航 / 档位 / 6 车门 / 中控锁 / 充电 / 内外温 / 四轮胎压。渲染框架：<b>LVGL 9</b>。</p>
+  </div>
+
+  <div class="grp">
+    <h2>状态演示</h2>
+    <div class="btns" id="stateBtns">
+      <button data-s="drive" class="on">行驶</button>
+      <button data-s="regen">动能回收</button>
+      <button data-s="charging">充电</button>
+      <button data-s="doors">车门告警</button>
+      <button data-s="tpms">胎压告警</button>
+      <button data-s="low">低电量</button>
+      <button data-s="offline">BLE 断连</button>
+    </div>
+    <div class="btns">
+      <button id="scaleBtn">放大倍率：2:1</button>
+      <button id="liveBtn" class="on">数据模拟（800ms 节拍）</button>
+    </div>
+  </div>
+
+  <div class="grp">
+    <h2>布局分区 (320×240)</h2>
+    <table>
+      <tr><th>区域</th><th>像素范围</th><th>内容</th></tr>
+      <tr><td>状态条</td><td>y 0–24</td><td>档位 P R N D · 内外温 · 锁 · BLE 信号</td></tr>
+      <tr><td>左列</td><td>x 0–84 / y 24–184</td><td>SOC 大字 + 竖向电量条 + 续航</td></tr>
+      <tr><td>中区</td><td>x 84–236 / y 24–184</td><td>车速大字（充电时切换为充电面板）</td></tr>
+      <tr><td>右列</td><td>x 236–320 / y 24–184</td><td>电机功率，中零点上蓝(输出)/下绿(回收)</td></tr>
+      <tr><td>底部</td><td>y 184–240</td><td>车身俯视 6 开口状态 + TPMS 四轮胎压</td></tr>
+    </table>
+  </div>
+
+  <div class="grp">
+    <h2>色彩规范</h2>
+    <table>
+      <tr><td><span class="sw" style="background:#000"></span>背景 Background</td><td><code>#000000</code></td><td>纯黑，深色车舱沉浸</td></tr>
+      <tr><td><span class="sw" style="background:#FFF"></span>主文本 Primary</td><td><code>#FFFFFF</code></td><td>车速、SOC 等关键值</td></tr>
+      <tr><td><span class="sw" style="background:#8A93A6"></span>次级 Dim</td><td><code>#8A93A6</code></td><td>单位、辅助信息</td></tr>
+      <tr><td><span class="sw" style="background:#5A6377"></span>弱化 Faint</td><td><code>#5A6377</code></td><td>区域标签 RANGE / TPMS</td></tr>
+      <tr><td><span class="sw" style="background:#14181F"></span>分割线 Line</td><td><code>#14181F</code></td><td>1px 分区线</td></tr>
+      <tr><td><span class="sw" style="background:#3E6AE1"></span>功率输出</td><td><code>#3E6AE1</code></td><td>驱动功率 &gt; 0</td></tr>
+      <tr><td><span class="sw" style="background:#21C15E"></span>能量流入</td><td><code>#21C15E</code></td><td>动能回收 &lt; 0、充电中</td></tr>
+      <tr><td><span class="sw" style="background:#FF453A"></span>告警 Alert</td><td><code>#FF453A</code></td><td>开口未关、胎压异常、低电</td></tr>
+      <tr><td><span class="sw" style="background:#FFB340"></span>警示 Caution</td><td><code>#FFB340</code></td><td>胎压临界等二级警告</td></tr>
+    </table>
+  </div>
+
+  <div class="grp">
+    <h2>设计要点</h2>
+    <div class="notes">
+      <b>① 扫视优先</b>：车速 74px 置中，电量左、功率右，三者一屏读取，无需翻页。<br>
+      <b>② 零点功率计</b>：右侧竖条以 <kbd>-100…+300 kW</kbd> 全量程映射，零线在 25% 高度——上蓝为驱动、下绿为回收，能量方向一眼可辨。<br>
+      <b>③ 状态机驱动</b>：SimPayload 的 <kbd>charging</kbd> / <kbd>doors[6]</kbd> / <kbd>SOC</kbd> 自动触发页面与告警条，与仿真器 9 阶段剧本对应。<br>
+      <b>④ 800ms 节拍</b>：数值按真实 DriveState 节奏刷新，UI 层做 200ms 插值补间，避免跳变；告警 1Hz 闪烁。<br>
+      <b>⑤ 全英文标注</b>：屏幕文字只用数字与 ASCII，免去 CJK 点阵字库占用的 Flash（需中文时用 <kbd>lv_font_conv</kbd> 只打包用到的字）。
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------------- 状态数据（对应 SimPayload 字段） ---------------- */
+const STATES = {
+  drive: {
+    gear:'D', spd:128, soc:78, range:312, pw:45, tOut:23.5, tIn:25.0,
+    doors:{}, locked:true, charging:false, ble:'-61 dBm',
+    tpms:[2.45,2.42,2.40,2.38], banner:null
+  },
+  regen: {
+    gear:'D', spd:42, soc:76, range:305, pw:-38, tOut:23.5, tIn:24.6,
+    doors:{}, locked:true, charging:false, ble:'-58 dBm',
+    tpms:[2.45,2.42,2.40,2.38], banner:null
+  },
+  charging: {
+    gear:'P', spd:0, soc:45, range:184, pw:0, tOut:18.2, tIn:21.0,
+    doors:{}, locked:false, charging:true, chargeKw:110, eta:'45 min → 80%', ble:'-47 dBm',
+    tpms:[2.45,2.42,2.40,2.38], banner:null
+  },
+  doors: {
+    gear:'P', spd:0, soc:64, range:261, pw:0, tOut:26.1, tIn:27.4,
+    doors:{frunk:true, fl:true}, locked:false, charging:false, ble:'-63 dBm',
+    tpms:[2.45,2.42,2.40,2.38], banner:'FRUNK + FRONT LEFT DOOR OPEN', bannerLevel:'red'
+  },
+  tpms: {
+    gear:'D', spd:76, soc:71, range:290, pw:31, tOut:26.1, tIn:27.4,
+    doors:{}, locked:true, charging:false, ble:'-55 dBm',
+    tpms:[2.45,2.42,1.90,2.38], banner:'RL TIRE LOW · 1.90 bar', bannerLevel:'red'
+  },
+  low: {
+    gear:'D', spd:63, soc:12, range:48, pw:52, tOut:9.8, tIn:17.2,
+    doors:{}, locked:true, charging:false, ble:'-59 dBm',
+    tpms:[2.45,2.42,2.40,2.38], banner:'LOW BATTERY · 48 km RANGE', bannerLevel:'amber'
+  },
+  offline: {
+    gear:null, spd:null, soc:null, range:null, pw:null, tOut:null, tIn:null,
+    doors:{}, locked:false, charging:false, ble:null,
+    tpms:null, banner:null, offline:true
+  }
+};
+
+const $ = id => document.getElementById(id);
+let cur = 'drive', live = true, timer = null;
+
+/* ---------------- 渲染 ---------------- */
+function render(name, jitter = 0){
+  const s = STATES[name];
+  const off = !!s.offline;
+
+  // 档位
+  document.querySelectorAll('#gear span').forEach(el =>
+    el.classList.toggle('on', el.dataset.g === s.gear));
+
+  // 温度
+  $('tOut').textContent = off ? '--.-°' : s.tOut.toFixed(1) + '°';
+  $('tIn').textContent  = off ? '--.-°' : s.tIn.toFixed(1) + '°';
+
+  // 锁 & BLE
+  const locked = !!s.locked;
+  $('lockBody').setAttribute('d', locked ? 'M2 5V3.2A3 3 0 0 1 8 3.2V5' : 'M2 5V3.2A3 3 0 0 1 8 4.6');
+  document.querySelectorAll('.ble rect').forEach((r,i) => r.setAttribute('opacity', off ? (i===0?'.35':'.15') : (i===3?'.35':'1')));
+  $('ble').classList.toggle('off', off);
+  $('bleTxt').textContent = off ? 'NO SIG' : s.ble;
+
+  // 告警条
+  const b = $('banner');
+  if (s.banner && !off){ b.classList.add('show'); $('bannerTxt').textContent = s.banner;
+    b.classList.toggle('amber', s.bannerLevel === 'amber'); }
+  else { b.classList.remove('show'); $('bannerTxt').textContent = ''; }
+
+  // 电量
+  const charging = !!s.charging;
+  $('soc').textContent = off ? '--' : s.soc;
+  const fill = $('socFill');
+  fill.style.height = off ? '0%' : s.soc + '%';
+  fill.className = 'fill' + (charging ? ' green' : (s.soc <= 15 && !off ? ' red' : ''));
+  $('range').textContent = off ? '--' : s.range;
+
+  // 中央：车速 / 充电面板
+  $('chargeBox').classList.toggle('show', charging && !off);
+  $('spdBox').style.display = (charging && !off) ? 'none' : '';
+  if (charging){
+    $('cKw').textContent = s.chargeKw;
+    $('cBar').style.width = s.soc + '%';
+    $('cMeta').textContent = s.eta;
+  } else {
+    $('spd').textContent = off ? '--' : Math.round(s.spd + jitter);
+    $('spd').classList.toggle('dim', off);
+    $('unit').classList.toggle('dim', off);
+  }
+
+  // 功率：-100..+300 → 高度 0..60（零点 15px）
+  const pw = s.pw;
+  if (off || pw === null){ $('pwVal').textContent = '--'; $('pwOut').style.height='0'; $('pwReg').style.height='0'; $('pwWrap').classList.remove('neg'); }
+  else {
+    const v = pw + (jitter ? jitter * 0.6 : 0);
+    $('pwVal').textContent = (v >= 0 ? '+' : '') + Math.round(v);
+    $('pwWrap').classList.toggle('neg', v < 0);
+    $('pwOut').style.height = v > 0 ? Math.min(v / 300, 1) * 43 + 'px' : '0px';
+    $('pwReg').style.height = v < 0 ? Math.min(-v / 100, 1) * 14 + 'px' : '0px';
+  }
+
+  // 车身 6 开口
+  ['fl','fr','rl','rr','frunk','trunk'].forEach(z =>
+    $('z-' + z).classList.toggle('open', !!s.doors[z]));
+
+  // 胎压
+  document.querySelectorAll('.cell').forEach((c,i) => {
+    const t = s.tpms ? s.tpms[i] : null;
+    c.querySelector('.v').textContent = t === null ? '--' : t.toFixed(2);
+    c.classList.toggle('warn', t !== null && (t < 2.2 || t > 2.8));
+  });
+
+  // 断连遮罩
+  $('offline').classList.toggle('show', off);
+}
+
+/* ---------------- 交互 ---------------- */
+document.querySelectorAll('#stateBtns button').forEach(btn => btn.addEventListener('click', () => {
+  document.querySelectorAll('#stateBtns button').forEach(x => x.classList.remove('on'));
+  btn.classList.add('on');
+  cur = btn.dataset.s;
+  render(cur, 0);
+}));
+
+$('scaleBtn').addEventListener('click', e => {
+  const s = $('scaler'), x1 = s.classList.toggle('x1');
+  $('bezel').classList.toggle('x1', x1);
+  e.target.textContent = '放大倍率：' + (x1 ? '1:1' : '2:1');
+});
+
+$('liveBtn').addEventListener('click', e => {
+  live = !live; e.target.classList.toggle('on', live);
+  if (live) startLive(); else { clearInterval(timer); render(cur, 0); }
+});
+
+/* 800ms 数据节拍：模拟真实 DriveState 刷新，UI 层做轻微插值抖动 */
+function startLive(){
+  clearInterval(timer);
+  timer = setInterval(() => {
+    if (!live) return;
+    const s = STATES[cur];
+    if (s.offline || s.charging || s.banner) return;
+    const jitter = s.spd ? (Math.random() * 4 - 2) : 0;
+    render(cur, jitter);
+  }, 800);
+}
+
+render(cur, 0);
+startLive();
+</script>
+</body>
+</html>
