@@ -25,6 +25,10 @@ body{padding:28px 32px;display:flex;gap:36px;align-items:flex-start;flex-wrap:wr
   color:var(--fg);font-size:12px;-webkit-font-smoothing:antialiased;
 }
 
+/* 充电模式：右侧整块（x104–320 全宽）替换为充电面板，隐藏 SOC / 电机功率列 */
+.screen.mode-charge .col{display:none}
+.screen.mode-charge .hero{left:104px;width:216px}
+
 /* 顶部状态条 h=24 */
 .hdr{position:absolute;top:0;left:0;right:0;height:24px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;border-bottom:1px solid var(--line)}
 .gear{display:flex;gap:5px;font-size:13px;font-weight:700;letter-spacing:1px;width:74px}
@@ -47,66 +51,64 @@ body{padding:28px 32px;display:flex;gap:36px;align-items:flex-start;flex-wrap:wr
 @keyframes blink{50%{opacity:.45}}
 
 /* 主区 y=24..184 */
-.col{position:absolute;top:24px;height:160px;width:84px;display:flex;flex-direction:column;align-items:center;padding-top:10px}
-.col.left{left:0}
-.col.right{left:236px}
-.soc{font-size:34px;font-weight:600;line-height:1;letter-spacing:-1px}
-.soc span{font-size:15px;font-weight:500;color:var(--dim);margin-left:1px}
-.pw{height:34px;display:flex;align-items:center;font-size:21px;font-weight:600;line-height:1;letter-spacing:-.5px;color:var(--blue)}
-.pw span{font-size:11px;font-weight:500;color:var(--dim);margin-left:2px}
-.pw.neg{color:var(--green)}
-.gauge{position:relative;width:14px;height:60px;border-radius:7px;background:#0E1219;border:1px solid #1E2430;margin:8px 0 6px;overflow:hidden}
-/* 功率计量程刻度 (右侧列) */
-.ticks{position:absolute;left:52px;top:0;width:26px;height:160px;pointer-events:none}
-.ticks span{position:absolute;left:0;font-size:7px;letter-spacing:.3px;color:#4A5163;font-weight:600}
-.ticks .t1{top:51px}
-.ticks .t2{top:92px}
-.ticks .t3{top:105px}
-.gauge .fill{position:absolute;left:0;right:0;bottom:0;border-radius:7px;background:var(--fg);transition:height .3s cubic-bezier(.22,1,.36,1)}
-.gauge .fill.green{background:var(--green)}
-.gauge .fill.red{background:var(--red)}
-/* 功率计：-100..+300 kW，零点在 25% */
-.pwg .zero{position:absolute;left:0;right:0;bottom:15px;height:1px;background:#4A5163;z-index:2}
-.pwg .out{position:absolute;left:1px;right:1px;bottom:15px;border-radius:6px 6px 2px 2px;background:linear-gradient(180deg,#5B85F0,var(--blue));transition:height .3s cubic-bezier(.22,1,.36,1)}
-.pwg .reg{position:absolute;left:1px;right:1px;bottom:1px;border-radius:2px 2px 6px 6px;background:linear-gradient(180deg,var(--green),#149B4C);transition:height .3s cubic-bezier(.22,1,.36,1)}
+.col{position:absolute;top:24px;height:216px;width:70px;display:flex;flex-direction:column;align-items:center;padding-top:10px}
+.col.batt{left:250px}
+.soc{font-size:26px;font-weight:600;line-height:1;letter-spacing:-.5px}
+.soc span{font-size:12px;font-weight:500;color:var(--dim);margin-left:1px}
+.gauge{position:relative;width:14px;height:110px;border-radius:7px;background:#1A1F28;margin:8px 0 6px;overflow:hidden}
+.gauge .fill{position:absolute;left:0;right:0;bottom:0;border-radius:7px;background:linear-gradient(180deg,#FFFFFF,#C2CBDC);transition:height .3s cubic-bezier(.22,1,.36,1)}
+.gauge .fill.green{background:linear-gradient(180deg,#3ED57F,#1AA354);border-radius:7px}
+.gauge .fill.red{background:linear-gradient(180deg,#FF6B61,#E0362A);border-radius:7px}
 .range{font-size:16px;font-weight:500;letter-spacing:-.2px}
 .range span{font-size:11px;color:var(--dim);margin-left:2px}
 .cap{font-size:8px;letter-spacing:1.4px;color:var(--faint);font-weight:600;margin-top:3px}
 .col .cap{position:absolute;bottom:6px}
 
 /* 中央车速 */
-.hero{position:absolute;left:84px;top:24px;width:152px;height:160px;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.spd{font-size:74px;font-weight:250;line-height:1;letter-spacing:-4px;font-variant-numeric:tabular-nums}
+.hero{position:absolute;left:104px;top:24px;width:146px;height:216px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.spd{font-size:56px;font-weight:250;line-height:1;letter-spacing:-3px;font-variant-numeric:tabular-nums}
 .unit{font-size:12px;letter-spacing:3.5px;color:var(--dim);text-transform:uppercase;margin-top:4px}
 .spd.dim,.unit.dim{color:#4A5163}
 
-/* 充电面板 (替换中央车速) */
-.charge{display:none;flex-direction:column;align-items:center;gap:6px}
+/* 充电面板 (充电时：隐藏电量列，占据右侧全宽) */
+.charge{display:none;flex-direction:column;align-items:center;gap:8px}
 .charge.show{display:flex}
 .cbolt{filter:drop-shadow(0 0 6px rgba(33,193,94,.55));animation:glow 1.6s ease-in-out infinite}
 @keyframes glow{50%{filter:drop-shadow(0 0 12px rgba(33,193,94,.9))}}
-.cw{font-size:38px;font-weight:600;color:var(--green);letter-spacing:-1.5px;line-height:1}
-.cw span{font-size:15px;font-weight:500;color:var(--dim);margin-left:3px}
-.cbar{width:120px;height:5px;border-radius:3px;background:#0E1219;border:1px solid #1E2430;overflow:hidden}
+.cw{font-size:44px;font-weight:600;color:var(--green);letter-spacing:-1.5px;line-height:1}
+.cw span{font-size:16px;font-weight:500;color:var(--dim);margin-left:3px}
+/* 充电功率柱：0–250 kW 满量程，整根绿色 */
+.cpillar{position:relative;width:18px;height:84px;border-radius:9px;background:#0E1219;border:1px solid #1E2430;overflow:hidden;margin:2px 0}
+.cpillar i{position:absolute;left:1px;right:1px;bottom:1px;border-radius:8px;background:linear-gradient(180deg,#3ED57F,var(--green));transition:height .3s cubic-bezier(.22,1,.36,1)}
+.cbar{width:156px;height:5px;border-radius:3px;background:#0E1219;border:1px solid #1E2430;overflow:hidden}
 .cbar i{display:block;height:100%;background:var(--green);border-radius:3px;transition:width .4s ease}
-.cmeta{font-size:11px;color:var(--dim);letter-spacing:.4px}
+.cmeta{font-size:12.5px;color:var(--dim);letter-spacing:.4px}
 
-/* 底部 y=184..240 */
-.ftr{position:absolute;left:0;right:0;top:184px;height:56px;border-top:1px solid var(--line);display:flex;align-items:center}
-.car{position:absolute;left:7px;top:7px;width:90px;height:42px}
+/* 左侧车身栏 y=24..240：竖放车身 + 胎压标在车轮外侧 */
+.carcol{position:absolute;left:0;top:24px;bottom:0;width:104px;border-right:1px solid var(--line);display:flex;flex-direction:column}
+.carcol .cap{padding-top:7px;text-align:center}
+.cwrap{position:relative;flex:1}
+.car{position:absolute;left:26px;top:36px;width:52px;height:120px}
 .car .zone{fill:rgba(255,255,255,.035);stroke:#39414F;stroke-width:1;transition:fill .2s,stroke .2s}
 .car .zone.open{fill:rgba(255,69,58,.88);stroke:var(--red);animation:blink 1s steps(2,end) infinite}
 .car .glass{fill:#171C26;stroke:#252C3A;stroke-width:1}
 .car .body{fill:#080A0E;stroke:#4A5163;stroke-width:1.2}
-.vr{position:absolute;left:107px;top:9px;bottom:9px;width:1px;background:#1A1F28}
-.tpms{position:absolute;left:116px;top:0;right:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:3px}
-.tpms .cap{margin:0}
-.cells{display:flex;gap:4px}
-.cell{width:47px}
-.cell .t{font-size:8.5px;letter-spacing:.8px;color:var(--faint);font-weight:600}
-.cell .v{font-size:15px;font-weight:500;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
-.cell.warn .v{color:var(--red);font-weight:700}
-.cell.warn .t{color:var(--red)}
+.tyre{fill:#4A5163;stroke:rgba(0,0,0,.45);transition:fill .25s}
+.tyre.warn{fill:var(--red);animation:blink 1s steps(2,end) infinite}
+.tyre.off{fill:#232A36}
+/* 胎压数值块：定位在各车轮外侧 */
+.tw{position:absolute;width:22px;display:flex;flex-direction:column;gap:2px;align-items:center}
+.tw .t{font-size:7px;letter-spacing:.6px;color:var(--faint);font-weight:600}
+.tw .v{font-size:10.5px;font-weight:500;line-height:1;font-variant-numeric:tabular-nums}
+.tw .bar{width:18px;height:3px;border-radius:2px;background:#0E1219;border:1px solid #1E2430;overflow:hidden}
+.tw .bar i{display:block;height:100%;background:#8A93A6;border-radius:2px;transition:width .3s ease}
+.tw.warn .v{color:var(--red);font-weight:700}
+.tw.warn .t{color:var(--red)}
+.tw.warn .bar i{background:var(--red);animation:blink 1s steps(2,end) infinite}
+#tw-fl,#tw-fr{top:44px}
+#tw-rl,#tw-rr{top:118px}
+#tw-fl,#tw-rl{left:2px}
+#tw-fr,#tw-rr{left:80px}
 
 /* 断连遮罩 */
 .offline{position:absolute;left:0;top:24px;right:0;bottom:0;background:rgba(0,0,0,.82);display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;z-index:9}
@@ -178,65 +180,59 @@ kbd{background:#151A22;border:1px solid #262D39;border-radius:4px;padding:1px 5p
         <!-- 告警条 -->
         <div class="banner" id="banner"><span>⚠</span><span id="bannerTxt">FRUNK OPEN</span></div>
 
-        <!-- 左：电池 -->
-        <section class="col left">
+        <!-- 右：电量 + 续航（最右侧） -->
+        <section class="col batt">
           <div class="soc"><b id="soc">78</b><span>%</span></div>
           <div class="gauge"><i class="fill" id="socFill" style="height:78%"></i></div>
           <div class="range"><b id="range">312</b><span>km</span></div>
           <div class="cap">RANGE</div>
         </section>
 
-        <!-- 中：车速 / 充电 -->
+        <!-- 中：车速 / 充电（紧邻车身栏右侧） -->
         <section class="hero">
           <div id="spdBox">
             <div class="spd" id="spd">128</div>
             <div class="unit" id="unit" style="text-align:center">km/h</div>
           </div>
           <div class="charge" id="chargeBox">
-            <svg class="cbolt" width="26" height="34" viewBox="0 0 26 34" fill="#21C15E">
+            <svg class="cbolt" width="30" height="40" viewBox="0 0 26 34" fill="#21C15E">
               <path d="M15 0 0 20h9l-3 14L26 13h-9l4-13z"/>
             </svg>
             <div class="cw"><b id="cKw">110</b><span>kW</span></div>
+            <div class="cpillar"><i id="cPowBar" style="height:27px"></i></div>
             <div class="cbar"><i id="cBar" style="width:45%"></i></div>
             <div class="cmeta" id="cMeta">45 min → 80%</div>
           </div>
         </section>
 
-        <!-- 右：电机功率 -->
-        <section class="col right">
-          <div class="pw" id="pwWrap"><b id="pwVal">+45</b><span>kW</span></div>
-          <div class="gauge pwg">
-            <i class="out" id="pwOut" style="height:7px"></i>
-            <i class="reg" id="pwReg" style="height:0px"></i>
-            <i class="zero"></i>
+        <!-- 左：竖放车身 + 四轮胎压（数值在各轮外侧） -->
+        <section class="carcol">
+          <div class="cap">TPMS · BAR</div>
+          <div class="cwrap">
+            <svg class="car" viewBox="0 0 52 120">
+              <!-- 车身俯视 · 车头朝上 -->
+              <rect class="body" x="5" y="2" width="42" height="116" rx="12"/>
+              <rect class="glass" x="14" y="22" width="24" height="14" rx="4"/>
+              <rect class="glass" x="15" y="80" width="22" height="11" rx="3"/>
+              <!-- 四轮 = 胎压指示（灰正常 / 红+1Hz闪烁异常 / 暗灰断连） -->
+              <rect class="tyre" id="w-fl" x="0.5"  y="16" width="7" height="11" rx="2.5"/>
+              <rect class="tyre" id="w-fr" x="44.5" y="16" width="7" height="11" rx="2.5"/>
+              <rect class="tyre" id="w-rl" x="0.5"  y="90" width="7" height="11" rx="2.5"/>
+              <rect class="tyre" id="w-rr" x="44.5" y="90" width="7" height="11" rx="2.5"/>
+              <!-- 车门/前后备箱 6 开口 -->
+              <rect class="zone" id="z-frunk" x="10" y="4.5" width="32" height="9" rx="3.5"/>
+              <rect class="zone" id="z-trunk" x="10" y="104.5" width="32" height="9" rx="3.5"/>
+              <rect class="zone" id="z-fl" x="6"  y="38" width="5" height="9" rx="2"/>
+              <rect class="zone" id="z-rl" x="6"  y="58" width="5" height="9" rx="2"/>
+              <rect class="zone" id="z-fr" x="41" y="38" width="5" height="9" rx="2"/>
+              <rect class="zone" id="z-rr" x="41" y="58" width="5" height="9" rx="2"/>
+            </svg>
+            <div class="tw" id="tw-fl"><span class="t">FL</span><b class="v">2.45</b><div class="bar"><i style="width:45%"></i></div></div>
+            <div class="tw" id="tw-fr"><span class="t">FR</span><b class="v">2.42</b><div class="bar"><i style="width:42%"></i></div></div>
+            <div class="tw" id="tw-rl"><span class="t">RL</span><b class="v">2.40</b><div class="bar"><i style="width:40%"></i></div></div>
+            <div class="tw" id="tw-rr"><span class="t">RR</span><b class="v">2.38</b><div class="bar"><i style="width:38%"></i></div></div>
           </div>
-          <div class="ticks"><span class="t1">300</span><span class="t2">0</span><span class="t3">-100</span></div>
-          <div class="cap">MOTOR</div>
         </section>
-
-        <!-- 底部：车身状态 + 胎压 -->
-        <footer class="ftr">
-          <svg class="car" viewBox="0 0 90 42">
-            <rect class="body" x="1.5" y="1.5" width="87" height="39" rx="13"/>
-            <rect class="glass" x="27" y="9" width="37" height="24" rx="6"/>
-            <rect class="zone" id="z-frunk" x="3" y="7.5" width="21" height="27" rx="8"/>
-            <rect class="zone" id="z-trunk"  x="67" y="7.5" width="20" height="27" rx="8"/>
-            <rect class="zone" id="z-fl" x="27" y="2.5" width="17" height="7" rx="2.5"/>
-            <rect class="zone" id="z-rl" x="46" y="2.5" width="16" height="7" rx="2.5"/>
-            <rect class="zone" id="z-fr" x="27" y="32.5" width="17" height="7" rx="2.5"/>
-            <rect class="zone" id="z-rr" x="46" y="32.5" width="16" height="7" rx="2.5"/>
-          </svg>
-          <div class="vr"></div>
-          <div class="tpms">
-            <div class="cap">TPMS · BAR</div>
-            <div class="cells">
-              <div class="cell" id="tp-fl"><div class="t">FL</div><div class="v">2.45</div></div>
-              <div class="cell" id="tp-fr"><div class="t">FR</div><div class="v">2.42</div></div>
-              <div class="cell" id="tp-rl"><div class="t">RL</div><div class="v">2.40</div></div>
-              <div class="cell" id="tp-rr"><div class="t">RR</div><div class="v">2.38</div></div>
-            </div>
-          </div>
-        </footer>
 
         <!-- 断连遮罩 -->
         <div class="offline" id="offline">
@@ -280,10 +276,9 @@ kbd{background:#151A22;border:1px solid #262D39;border-radius:4px;padding:1px 5p
     <table>
       <tr><th>区域</th><th>像素范围</th><th>内容</th></tr>
       <tr><td>状态条</td><td>y 0–24</td><td>档位 P R N D · 内外温 · 锁 · BLE 信号</td></tr>
-      <tr><td>左列</td><td>x 0–84 / y 24–184</td><td>SOC 大字 + 竖向电量条 + 续航</td></tr>
-      <tr><td>中区</td><td>x 84–236 / y 24–184</td><td>车速大字（充电时切换为充电面板）</td></tr>
-      <tr><td>右列</td><td>x 236–320 / y 24–184</td><td>电机功率，中零点上蓝(输出)/下绿(回收)</td></tr>
-      <tr><td>底部</td><td>y 184–240</td><td>车身俯视 6 开口状态 + TPMS 四轮胎压</td></tr>
+      <tr><td>左侧车身栏</td><td>x 0–104 / y 24–240</td><td>竖放车身俯视（车头朝上）：车门 6 开口 + 四轮着色，胎压数值/量程条在各轮外侧</td></tr>
+      <tr><td>中区（紧邻车身）</td><td>x 104–250 / y 24–240</td><td>车速大字（充电时切换为全宽充电面板 x104–320）</td></tr>
+      <tr><td>最右电量列</td><td>x 250–320 / y 24–240</td><td>SOC 大字 + 竖向电量条 + 续航（充电模式隐藏）</td></tr>
     </table>
   </div>
 
@@ -305,8 +300,8 @@ kbd{background:#151A22;border:1px solid #262D39;border-radius:4px;padding:1px 5p
   <div class="grp">
     <h2>设计要点</h2>
     <div class="notes">
-      <b>① 扫视优先</b>：车速 74px 置中，电量左、功率右，三者一屏读取，无需翻页。<br>
-      <b>② 零点功率计</b>：右侧竖条以 <kbd>-100…+300 kW</kbd> 全量程映射，零线在 25% 高度——上蓝为驱动、下绿为回收，能量方向一眼可辨。<br>
+      <b>① 扫视优先</b>：左侧全高车身栏（胎压直接标在四个车轮外侧），车速紧邻其右，最右侧为电量/续航，一屏读取，无需翻页。<br>
+      <b>② 简约显示</b>：行驶只显示车速+电量+续航，充电时右侧整块切换为充电面板（⚡ + kW + 功率柱 + 进度 + ETA）；电机功率 v1.0 不展示。<br>
       <b>③ 状态机驱动</b>：SimPayload 的 <kbd>charging</kbd> / <kbd>doors[6]</kbd> / <kbd>SOC</kbd> 自动触发页面与告警条，与仿真器 9 阶段剧本对应。<br>
       <b>④ 800ms 节拍</b>：数值按真实 DriveState 节奏刷新，UI 层做 200ms 插值补间，避免跳变；告警 1Hz 闪烁。<br>
       <b>⑤ 全英文标注</b>：屏幕文字只用数字与 ASCII，免去 CJK 点阵字库占用的 Flash（需中文时用 <kbd>lv_font_conv</kbd> 只打包用到的字）。
@@ -391,11 +386,13 @@ function render(name, jitter = 0){
   fill.className = 'fill' + (charging ? ' green' : (s.soc <= 15 && !off ? ' red' : ''));
   $('range').textContent = off ? '--' : s.range;
 
-  // 中央：车速 / 充电面板
+  // 中央：车速 / 充电面板（充电时隐藏左右列，充电面板占右侧全宽）
+  $('screen').classList.toggle('mode-charge', charging && !off);
   $('chargeBox').classList.toggle('show', charging && !off);
   $('spdBox').style.display = (charging && !off) ? 'none' : '';
   if (charging){
     $('cKw').textContent = s.chargeKw;
+    $('cPowBar').style.height = (Math.min(s.chargeKw / 250, 1) * 100).toFixed(1) + '%';
     $('cBar').style.width = s.soc + '%';
     $('cMeta').textContent = s.eta;
   } else {
@@ -404,26 +401,23 @@ function render(name, jitter = 0){
     $('unit').classList.toggle('dim', off);
   }
 
-  // 功率：-100..+300 → 高度 0..60（零点 15px）
-  const pw = s.pw;
-  if (off || pw === null){ $('pwVal').textContent = '--'; $('pwOut').style.height='0'; $('pwReg').style.height='0'; $('pwWrap').classList.remove('neg'); }
-  else {
-    const v = pw + (jitter ? jitter * 0.6 : 0);
-    $('pwVal').textContent = (v >= 0 ? '+' : '') + Math.round(v);
-    $('pwWrap').classList.toggle('neg', v < 0);
-    $('pwOut').style.height = v > 0 ? Math.min(v / 300, 1) * 43 + 'px' : '0px';
-    $('pwReg').style.height = v < 0 ? Math.min(-v / 100, 1) * 14 + 'px' : '0px';
-  }
+  // 功率数据不展示（简约版移除功率计），仅保留数据字段
 
   // 车身 6 开口
   ['fl','fr','rl','rr','frunk','trunk'].forEach(z =>
     $('z-' + z).classList.toggle('open', !!s.doors[z]));
 
-  // 胎压
-  document.querySelectorAll('.cell').forEach((c,i) => {
+  // 胎压：车轮着色 + 各轮外侧数值/迷你量程条（2.0–3.0 bar 满量程）
+  const tyreIds = ['w-fl','w-fr','w-rl','w-rr'];
+  document.querySelectorAll('.tw').forEach((c,i) => {
     const t = s.tpms ? s.tpms[i] : null;
     c.querySelector('.v').textContent = t === null ? '--' : t.toFixed(2);
-    c.classList.toggle('warn', t !== null && (t < 2.2 || t > 2.8));
+    const w = t === null ? 0 : Math.max(0, Math.min(1, (t - 2.0) / 1.0));
+    c.querySelector('.bar i').style.width = (w * 100).toFixed(0) + '%';
+    const warn = t !== null && (t < 2.2 || t > 2.8);
+    c.classList.toggle('warn', warn);
+    $(tyreIds[i]).classList.toggle('warn', warn);
+    $(tyreIds[i]).classList.toggle('off', off || t === null);
   });
 
   // 断连遮罩
