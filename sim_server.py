@@ -1,4 +1,5 @@
 import sys
+import os
 import time
 import math
 import struct
@@ -9,7 +10,12 @@ import queue
 import hashlib
 from datetime import datetime
 
+_VENDOR_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
+if os.path.isdir(_VENDOR_DIR) and _VENDOR_DIR not in sys.path:
+    sys.path.insert(0, _VENDOR_DIR)
+
 # BLE 模拟库导入保护
+BLESS_IMPORT_ERROR = None
 try:
     from bless import (
         BlessServer,
@@ -17,9 +23,11 @@ try:
         GATTCharacteristicProperties,
         GATTAttributePermissions
     )
-except ImportError:
+except ImportError as e:
     BlessServer = None
+    BLESS_IMPORT_ERROR = e
 
+BUMBLE_IMPORT_ERROR = None
 try:
     from bumble.device import Device as BumbleDevice
     from bumble.gatt import Service as BumbleService, Characteristic as BumbleChar
@@ -28,8 +36,9 @@ try:
     from bumble.host import Host as BumbleHost
     from bumble.hci import OwnAddressType
     HAS_BUMBLE = True
-except ImportError:
+except ImportError as e:
     HAS_BUMBLE = False
+    BUMBLE_IMPORT_ERROR = e
 
 class BumbleTeslaServer:
     def __init__(self, vin="5YJ3E1EA0KF000000", usb_spec="usb:0a12:0001"):
@@ -1642,12 +1651,6 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
 
     async def start_ble_server(name):
         use_bumble = getattr(args, 'bumble', False)
-        # 自动检测 Bumble 是否可用
-        try:
-            import bumble
-            has_bumble = True
-        except ImportError:
-            has_bumble = False
 
         if use_bumble or HAS_BUMBLE:
             log_queue.put("[+] 使用 Bumble (USB HCI 硬件模式) 启动 BLE 广播...")
@@ -1689,7 +1692,13 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
             await server_obj.start()
             return server_obj
 
-        raise RuntimeError("无可用 BLE 后端服务（请安装 bless 或 bumble 依赖）")
+        details = []
+        if BLESS_IMPORT_ERROR is not None:
+            details.append(f"bless 导入失败: {BLESS_IMPORT_ERROR}")
+        if BUMBLE_IMPORT_ERROR is not None:
+            details.append(f"bumble 导入失败: {BUMBLE_IMPORT_ERROR}")
+        detail_text = "；".join(details) if details else "未检测到任何 BLE 后端"
+        raise RuntimeError(f"无可用 BLE 后端服务（请安装 bless 或 bumble 依赖）。{detail_text}")
 
     # 启动蓝牙广播
     try:
@@ -1898,7 +1907,13 @@ if __name__ == "__main__":
     
     # 强制在 Windows 平台下将 asyncio loop 初始化为 SelectorLoop (防止 Proactor 冲突与死锁)
     if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        try:
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', DeprecationWarning)
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        except Exception:
+            pass
         
     state = TelemetryState()
     state.set_vin(args.vin)

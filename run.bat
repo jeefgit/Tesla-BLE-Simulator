@@ -17,7 +17,7 @@ echo ==========================================================
 echo.
 
 :: ── Check Python ──────────────────────────────────────────────────
-python --version >nul 2>&1
+py --version >nul 2>&1
 if %errorlevel% neq 0 (
     color 0C
     echo [-] Error: Python 3 not found. Please install Python 3 and add to PATH.
@@ -27,12 +27,12 @@ if %errorlevel% neq 0 (
 
 :: ── Install dependencies ──────────────────────────────────────────
 echo [+] Validating dependencies...
-python -m pip install -r requirements.txt -q
+py -m pip install -r requirements.txt -q
 echo.
 
 :: ── Launch simulator ──────────────────────────────────────────────
 echo [+] Starting BLE Telemetry Simulation Service (Admin)...
 cd /d "%~dp0"
-python sim_server.py
+py sim_server.py
 
 pause

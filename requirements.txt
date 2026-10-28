@@ -1,3 +1,5 @@
 # Python simulation app dependencies
+# Windows + Python 3.12 及以上：sim_server.py 会优先加载项目内 vendor/ 目录中的
+# bless 0.3.0 与 pysetupdi（PyPI 上的 bless 0.2.6 WinRT 后端不兼容新版 Python/bleak）。
 bless>=0.2.6
 protobuf>=3.20.0
