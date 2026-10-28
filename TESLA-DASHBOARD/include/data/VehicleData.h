@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <stdint.h>
 
+#include "tesla/TeslaPayload.h"
+
 // 字段有效位，配合 VehicleData::valid 使用
 enum VehicleField : uint32_t {
   VF_SPEED = 1u << 0,
@@ -64,3 +66,7 @@ struct VehicleData {
 };
 
 extern VehicleData g_vehicle;
+
+// 把一帧 SimPayload 写入全局快照（TeslaClient 与 MockSource 共用同一路径，
+// 保证 UI 侧无论真实 BLE 还是演示数据行为一致）
+void applyTesla(const TeslaPayload& p);

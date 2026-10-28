@@ -3,17 +3,23 @@
 #include "app/Dashboard.h"
 #include "ble/BleLink.h"
 #include "config.h"
+#include "data/MockSource.h"
 #include "data/VehicleData.h"
+#include "display/Display.h"
 #include "tesla/TeslaClient.h"
 
 // ---------------------------------------------------------------------------
-// 数据流（只走特斯拉 BLE，无 OBD）：
-//   模拟器/真车 --BLE notify(800ms 节拍)--> BleLink --字节-->
-//   TeslaClient --53B组帧/解析--> g_vehicle --> Dashboard
+// 数据流：
+//   CFG_DEMO_MODE=1: MockSource(9阶段剧本) --TeslaPayload--> g_vehicle
+//   CFG_DEMO_MODE=0: 模拟器/真车 --BLE notify--> BleLink --53B组帧-->
+//                    TeslaClient --> g_vehicle
+//   两条路径汇合后统一经 applyTesla() 写快照 --> Dashboard(LVGL) 渲染
 // ---------------------------------------------------------------------------
 BleLink bleLink;
 TeslaClient teslaClient;
+MockSource mockSource;
 Dashboard dashboard;
+Display display;
 
 void setup() {
   Serial.begin(115200);
@@ -22,7 +28,13 @@ void setup() {
   CFG_LOG(" ESP32 BLE Tesla Dashboard");
   CFG_LOG("==============================");
 
-  dashboard.begin();
+  display.begin();   // 屏幕 + LVGL 先起
+  dashboard.begin(); // UI 对象树
+
+#if CFG_DEMO_MODE
+  // 演示模式：内建剧本，不启动 BLE
+  mockSource.begin();
+#else
   bleLink.begin();
 
   // 目标广播名：S + sha1(VIN) 前16位hex + C（与 sim_server.py 规则一致）
@@ -41,11 +53,18 @@ void setup() {
     teslaClient.feed(data, len);
   });
   teslaClient.begin(&bleLink);
+#endif
 }
 
 void loop() {
+#if CFG_DEMO_MODE
+  mockSource.loop();
+  dashboard.render(g_vehicle, BleLink::State::Ready, true);
+#else
   bleLink.loop();
   teslaClient.loop();
   dashboard.render(g_vehicle, bleLink.state(), teslaClient.ready());
+#endif
+  display.loop();  // LVGL 事务驱动
   delay(5);
 }

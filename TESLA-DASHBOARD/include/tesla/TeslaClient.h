@@ -10,7 +10,7 @@
 // TeslaClient：特斯拉 BLE 应用层
 //
 // 数据流：BleLink 字节 -> feed() -> 53B 组帧(带逐字节重同步) ->
-//         合理性校验 -> apply() 写入 g_vehicle
+//         合理性校验 -> applyTesla() 写入 g_vehicle
 //
 // 特斯拉是"车端推送"模式（800ms 节拍 notify），与 OBD 的
 // "请求-应答"轮询不同，本层没有发送逻辑，纯被动接收。
@@ -35,7 +35,6 @@ class TeslaClient {
   static constexpr size_t kFrame = sizeof(TeslaPayload);
 
   bool plausible(const TeslaPayload& p) const;
-  void apply(const TeslaPayload& p);
   void consume(size_t n);
 
   BleLink* m_link = nullptr;
