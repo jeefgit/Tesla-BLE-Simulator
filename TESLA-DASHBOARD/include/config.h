@@ -69,10 +69,28 @@
 // ---------------------------------------------------------------------------
 // 显示：2.8 寸 320×240 SPI（LVGL 9 + LovyanGFX）
 // 当前硬件：ESP32-2432S028R（CYD 板）——板载 ILI9341 + XPT2046 触摸，背光 GPIO21
+//
+// ⚠️ 这块克隆 ILI9341 面板的初始化参数是实测出来的：
+//    必须按 320×240 声明 + offset_rotation=4 + setRotation(1)，
+//    改成原生 240×320 声明会花屏。所以面板参数不要再动。
+//
+// 这种初始化下，驱动层坐标是「竖装」240×320，而 UI 设计是 320×240 横屏，
+// 因此方向由 Display.cpp 的刷新回调做 90° 旋转（CFG_LCD_FLUSH_ROTATION）解决，
+// 面板初始化保持原样 —— 画错方向只会转/翻，不会花屏。
 // ---------------------------------------------------------------------------
 
 // 驱动芯片选择：1 = ILI9341（CYD 2432S028 板载），0 = ST7789（独立排线屏常见）
 #define CFG_LCD_DRIVER_ILI9341 1
+
+// 面板驱动旋转 / 镜像位：固定 1 / 4（实测稳定组合，改别的值可能花屏）
+#define CFG_LCD_ROTATION 1
+#define CFG_LCD_OFFSET_ROTATION 4
+
+// 刷新层旋转（不碰面板初始化，只决定 UI 画面的朝向）：
+//   90  = 画面顺时针转 90°（默认，横屏）
+//   270 = 画面逆时针转 90°（横屏，和 90 差 180°，用来纠正上下颠倒）
+//   0   = 不旋转（竖屏，仅调试用）
+#define CFG_LCD_FLUSH_ROTATION 90
 
 // 引脚取自出厂演示的 TFT_eSPI 配置（实测可显示）：
 // 这块板 LCD 走 HSPI 14/13，18/23 是 TF 卡的脚；RST 与 MISO 共用 IO12
@@ -83,6 +101,7 @@
 #define CFG_LCD_DC 2
 #define CFG_LCD_RST 12  // 与 MISO 共用 IO12（LovyanGFX 会先拉低复位再切回 SPI 读）
 #define CFG_LCD_BL 21   // 背光脚，无背光控制填 -1
+// LVGL 逻辑画布：横屏 320×240（UI 设计分辨率，不随面板参数变化）
 #define CFG_LCD_WIDTH 320
 #define CFG_LCD_HEIGHT 240
 #define CFG_LCD_SPI_FREQ 40000000  // SPI 时钟（此板 40MHz 稳定）

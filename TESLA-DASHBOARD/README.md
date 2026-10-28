@@ -103,6 +103,11 @@ pio device monitor      # 打开 115200 串口
 - **模拟器换了 VIN** → `include/config.h` 改 `CFG_TESLA_VIN`（或直接在 `CFG_TESLA_NAME` 写死广播名）
 - **连上了但报"未找到服务"** → 核对 `CFG_SERVICE_UUID / CFG_CHAR_WRITE_UUID / CFG_CHAR_NOTIFY_UUID`
 - **连上了但一直"尚未收到数据帧"** → 模拟器与 `CFG_TESLA_VIN` 是否一致、Notify 是否订阅成功
+- **屏幕方向不对（竖屏显示 / 画面转 90° / 上下颠倒）** →
+  `include/config.h` 的 `CFG_LCD_FLUSH_ROTATION`：默认 `90`（横屏）；
+  上下颠倒改 `270`。面板初始化参数（`CFG_LCD_ROTATION 1` +
+  `CFG_LCD_OFFSET_ROTATION 4`、面板按 320×240 声明）是这块克隆 ILI9341
+  实测稳定的组合，**不要修改**，改成原生 240×320 会花屏
 - **数据超时判定** → `CFG_DATA_STALE_MS`（默认 3000ms，超时字段显示 `--`）
 - **数据字段增删** → `tesla/TeslaPayload.h`（帧定义）+ `VehicleData.h`（快照）+ `Dashboard.cpp`（渲染）
 
