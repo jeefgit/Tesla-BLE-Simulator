@@ -80,20 +80,21 @@ bool BleLink::scanForTarget() {
   scan->setInterval(100);
   scan->setWindow(99);
   scan->clearResults();
-  scan->start((uint32_t)CFG_SCAN_SECONDS, false);  // 阻塞式扫描
-
-  NimBLEScanResults results = scan->getResults();
+  // NimBLE 2.x：getResults(duration_ms, is_continue) 启动扫描并阻塞到完成
+  // （1.x 的 start() 是阻塞式且单位为秒，2.x 语义已变，不能沿用）
+  NimBLEScanResults results =
+      scan->getResults((uint32_t)CFG_SCAN_SECONDS * 1000, false);
   const int count = results.getCount();
 
   // 第一优先级：精确广播名匹配（特斯拉按 VIN 推导，区分大小写）
   if (m_targetName.length() > 0) {
     for (int i = 0; i < count; ++i) {
-      NimBLEAdvertisedDevice dev = results.getDevice((uint32_t)i);
-      if (!dev.haveName()) continue;
-      const String name(dev.getName().c_str());
+      const NimBLEAdvertisedDevice* dev = results.getDevice((uint32_t)i);
+      if (!dev || !dev->haveName()) continue;
+      const String name(dev->getName().c_str());
       if (name != m_targetName) continue;
-      m_targetAddr = dev.getAddress().toString();
-      m_targetType = (uint8_t)dev.getAddressType();
+      m_targetAddr = dev->getAddress().toString();
+      m_targetType = (uint8_t)dev->getAddressType();
       m_remoteName = name;
       m_hasTarget = true;
       m_failCount = 0;
@@ -105,13 +106,13 @@ bool BleLink::scanForTarget() {
 
   // 第二优先级：名称前缀匹配（未配置精确名时的兜底）
   for (int i = 0; i < count; ++i) {
-    NimBLEAdvertisedDevice dev = results.getDevice((uint32_t)i);
-    if (!dev.haveName()) continue;
-    const String name(dev.getName().c_str());
+    const NimBLEAdvertisedDevice* dev = results.getDevice((uint32_t)i);
+    if (!dev || !dev->haveName()) continue;
+    const String name(dev->getName().c_str());
     for (size_t k = 0; k < kTargetNameCount; ++k) {
       if (!namePrefixMatch(name, kTargetNames[k])) continue;
-      m_targetAddr = dev.getAddress().toString();
-      m_targetType = (uint8_t)dev.getAddressType();
+      m_targetAddr = dev->getAddress().toString();
+      m_targetType = (uint8_t)dev->getAddressType();
       m_remoteName = name;
       m_hasTarget = true;
       m_failCount = 0;
@@ -123,11 +124,11 @@ bool BleLink::scanForTarget() {
   // 第三优先级：广播了目标服务 UUID 的设备
   const NimBLEUUID serviceUuid(CFG_SERVICE_UUID);
   for (int i = 0; i < count; ++i) {
-    NimBLEAdvertisedDevice dev = results.getDevice((uint32_t)i);
-    if (!dev.isAdvertisingService(serviceUuid)) continue;
-    m_targetAddr = dev.getAddress().toString();
-    m_targetType = (uint8_t)dev.getAddressType();
-    m_remoteName = dev.haveName() ? String(dev.getName().c_str()) : String("(未命名)");
+    const NimBLEAdvertisedDevice* dev = results.getDevice((uint32_t)i);
+    if (!dev || !dev->isAdvertisingService(serviceUuid)) continue;
+    m_targetAddr = dev->getAddress().toString();
+    m_targetType = (uint8_t)dev->getAddressType();
+    m_remoteName = dev->haveName() ? String(dev->getName().c_str()) : String("(未命名)");
     m_hasTarget = true;
     m_failCount = 0;
     CFG_LOG("按服务 UUID 找到目标: %s (%s)", m_remoteName.c_str(), m_targetAddr.c_str());

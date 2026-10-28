@@ -91,11 +91,15 @@ pio device monitor      # 打开 115200 串口
 [2.41s] [仪表] BLE:已连接 | 数据:就绪 | 车速 128 km/h | SOC 78% | 续航 312 km | 档位 D | 功率 +44.0 kW
 ```
 
-> 已验证环境：PlatformIO Core 6.2.0 + espressif32 8.0.0 + Arduino core 3.3.12 + NimBLE-Arduino 1.4.3，
-> 默认板型 `esp32dev`。
+> 已验证环境：PlatformIO Core 6.2.0 + espressif32 8.0.0 + Arduino core 3.3.12 + **NimBLE-Arduino 2.5.x**，
+> 默认板型 `esp32dev`。⚠️ NimBLE 必须 2.x：1.x 与 core 3.x/IDF5 不兼容，会在
+> `NimBLEDevice::init` 处报 `ESP_ERR_INVALID_STATE` 进入重启循环。
 
 ## 常见调整
 
+- **上电后无限 `Rebooting...`（重启循环）** → 日志里找
+  `ESP_ERROR_CHECK failed: ... ESP_ERR_INVALID_STATE ... NimBLEDevice::init`：
+  是 NimBLE 库版本问题，`platformio.ini` 的 `lib_deps` 必须是 `h2zero/NimBLE-Arduino@^2.5.1`（1.x 不支持 core 3.x），改完 `pio run -t upload` 重烧
 - **模拟器换了 VIN** → `include/config.h` 改 `CFG_TESLA_VIN`（或直接在 `CFG_TESLA_NAME` 写死广播名）
 - **连上了但报"未找到服务"** → 核对 `CFG_SERVICE_UUID / CFG_CHAR_WRITE_UUID / CFG_CHAR_NOTIFY_UUID`
 - **连上了但一直"尚未收到数据帧"** → 模拟器与 `CFG_TESLA_VIN` 是否一致、Notify 是否订阅成功
