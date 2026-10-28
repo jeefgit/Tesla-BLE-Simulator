@@ -66,5 +66,5 @@ void loop() {
   dashboard.render(g_vehicle, bleLink.state(), teslaClient.ready());
 #endif
   display.loop();  // LVGL 事务驱动
-  delay(5);
+  delay(500);
 }

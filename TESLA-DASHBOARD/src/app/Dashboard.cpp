@@ -1,8 +1,43 @@
 #include "app/Dashboard.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "config.h"
+
+// ---------------------------------------------------------------------------
+// 脏写守卫：LVGL 的 set_text/set_style_* 即使值相同也会标脏重绘，
+// 高频无条件写会让整屏反复重绘（表现为屏幕闪动感）。全部改为变化才写。
+// ---------------------------------------------------------------------------
+static void setText(lv_obj_t* lbl, const char* s) {
+  const char* cur = lv_label_get_text(lbl);
+  if (cur == nullptr || strcmp(cur, s) != 0) lv_label_set_text(lbl, s);
+}
+
+static void setTextColorC(lv_obj_t* o, uint32_t c) {
+  // 目标色与当前色都先量化到 RGB565 再比较（round-trip 不等于原值）
+  const uint32_t q = lv_color_to_u32(lv_color_hex(c));
+  if (lv_color_to_u32(lv_obj_get_style_text_color(o, LV_PART_MAIN)) == q) {
+    return;
+  }
+  lv_obj_set_style_text_color(o, lv_color_hex(c), LV_PART_MAIN);
+}
+
+static void setBgColorC(lv_obj_t* o, uint32_t c) {
+  const uint32_t q = lv_color_to_u32(lv_color_hex(c));
+  if (lv_color_to_u32(lv_obj_get_style_bg_color(o, LV_PART_MAIN)) == q) {
+    return;
+  }
+  lv_obj_set_style_bg_color(o, lv_color_hex(c), LV_PART_MAIN);
+}
+
+static void setHeightIfChanged(lv_obj_t* o, int32_t h) {
+  if (lv_obj_get_height(o) != h) lv_obj_set_height(o, h);
+}
+
+static void setPosIfChanged(lv_obj_t* o, int32_t x, int32_t y) {
+  if (lv_obj_get_x(o) != x || lv_obj_get_y(o) != y) lv_obj_set_pos(o, x, y);
+}
 
 // ---------------------------------------------------------------------------
 // 色板 token（dashboard/DESIGN.md §4.1，RGB565 经 lv_color_hex 转换）
@@ -372,22 +407,21 @@ void Dashboard::updateHeader() {
   // 档位高亮
   for (int i = 0; i < 4; ++i) {
     const bool on = m_ok && m_v.gear == "PRND"[i];
-    lv_obj_set_style_text_color(
-        gearLbl[i], lv_color_hex(on ? C_FG : C_GEAR_OFF), LV_PART_MAIN);
+    setTextColorC(gearLbl[i], on ? C_FG : C_GEAR_OFF);
   }
 
+  char buf[32];
   if (m_ok) {
-    lv_label_set_text_fmt(tempsLbl, "OUT %.1f  IN %.1f",
-                          m_v.outsideTempC, m_v.insideTempC);
-    lv_label_set_text(lockLbl, m_v.locked ? "LOCK" : "UNLK");
-    lv_obj_set_style_text_color(
-        lockLbl, lv_color_hex(m_v.locked ? C_DIM : C_CAUTION),
-        LV_PART_MAIN);
+    snprintf(buf, sizeof(buf), "OUT %.1f  IN %.1f", m_v.outsideTempC,
+             m_v.insideTempC);
+    setText(tempsLbl, buf);
+    setText(lockLbl, m_v.locked ? "LOCK" : "UNLK");
+    setTextColorC(lockLbl, m_v.locked ? C_DIM : C_CAUTION);
   } else {
-    lv_label_set_text(tempsLbl, "OUT --.-  IN --.-");
-    lv_label_set_text(lockLbl, "UNLK");
+    setText(tempsLbl, "OUT --.-  IN --.-");
+    setText(lockLbl, "UNLK");
   }
-  lv_label_set_text(bleLbl, bleStateText(m_bleState));
+  setText(bleLbl, bleStateText(m_bleState));
 }
 
 void Dashboard::updateCar() {
@@ -408,17 +442,16 @@ void Dashboard::updateCar() {
     uint32_t wheelColor = C_TPMS_OK;
     if (!m_ok) wheelColor = C_OFFLINE;
     else if (bad) wheelColor = C_ALERT;
-    lv_obj_set_style_bg_color(wheelObj[i], lv_color_hex(wheelColor),
-                              LV_PART_MAIN);
+    setBgColorC(wheelObj[i], wheelColor);
 
+    char buf[8];
     if (m_ok) {
-      lv_label_set_text_fmt(tpmsVal[i], "%.1f", bar);
-      lv_obj_set_style_text_color(
-          tpmsVal[i], lv_color_hex(bad ? C_ALERT : C_FG), LV_PART_MAIN);
+      snprintf(buf, sizeof(buf), "%.1f", bar);
+      setText(tpmsVal[i], buf);
+      setTextColorC(tpmsVal[i], bad ? C_ALERT : C_FG);
     } else {
-      lv_label_set_text(tpmsVal[i], "--");
-      lv_obj_set_style_text_color(tpmsVal[i], lv_color_hex(C_OFFLINE),
-                                  LV_PART_MAIN);
+      setText(tpmsVal[i], "--");
+      setTextColorC(tpmsVal[i], C_OFFLINE);
     }
   }
 
@@ -460,8 +493,8 @@ void Dashboard::updateCar() {
   }
 
   if (text) {
-    lv_obj_set_style_bg_color(banner, lv_color_hex(color), LV_PART_MAIN);
-    lv_label_set_text(bannerLbl, text);
+    setBgColorC(banner, color);
+    setText(bannerLbl, text);
     lv_obj_clear_flag(banner, LV_OBJ_FLAG_HIDDEN);
   } else {
     lv_obj_add_flag(banner, LV_OBJ_FLAG_HIDDEN);
@@ -476,26 +509,33 @@ void Dashboard::updateHero() {
   }
 
   if (chg) {
-    lv_label_set_text_fmt(chargeKwLbl, "%.1f kW", m_v.chargePowerKw);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.1f kW", m_v.chargePowerKw);
+    setText(chargeKwLbl, buf);
     // 功率柱：0-250kW 满量程 → 110px 高（从底部长）
     float frac = m_v.chargePowerKw / 250.0f;
     if (frac > 1.0f) frac = 1.0f;
     const int32_t fh = (int32_t)(frac * 110.0f);
-    lv_obj_set_height(chargeFill, fh);
-    lv_obj_set_y(chargeFill, 20 + (110 - fh));
+    setHeightIfChanged(chargeFill, fh);
+    setPosIfChanged(chargeFill, 196, 20 + (110 - fh));
     // SOC 进度条宽 = SOC%（188px 满宽）
-    lv_obj_set_width(chargeSocBar, (int32_t)(m_v.soc * 188 / 100));
+    if (lv_obj_get_width(chargeSocBar) != (int32_t)(m_v.soc * 188 / 100)) {
+      lv_obj_set_width(chargeSocBar, (int32_t)(m_v.soc * 188 / 100));
+    }
     // 简易 ETA：剩余 kWh 按 75kWh 电池包估算（演示用）
     const float remainKwh = (100 - m_v.soc) * 0.75f;
     const float hours =
         m_v.chargePowerKw > 0.1f ? remainKwh / m_v.chargePowerKw : 0;
-    lv_label_set_text_fmt(chargeEtaLbl, "EST REMAINING %dH %02dM",
-                          (int)hours, (int)((hours - (int)hours) * 60));
+    snprintf(buf, sizeof(buf), "EST REMAINING %dH %02dM", (int)hours,
+             (int)((hours - (int)hours) * 60));
+    setText(chargeEtaLbl, buf);
   } else if (m_ok) {
     // 补间后的车速（m_spdShown 由 onTimer 每 50ms 插值）
-    lv_label_set_text_fmt(spdLbl, "%.0f", m_spdShown);
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%.0f", m_spdShown);
+    setText(spdLbl, buf);
   } else {
-    lv_label_set_text(spdLbl, "--");
+    setText(spdLbl, "--");
   }
 }
 
@@ -515,24 +555,26 @@ void Dashboard::setChargingLayout(bool charging) {
 }
 
 void Dashboard::updateBattery() {
+  char buf[16];
   if (m_ok) {
-    lv_label_set_text_fmt(socLbl, "%ld%%", (long)m_v.soc);
-    lv_label_set_text_fmt(rangeLbl, "%.0f km", m_v.rangeKm);
+    snprintf(buf, sizeof(buf), "%ld%%", (long)m_v.soc);
+    setText(socLbl, buf);
+    snprintf(buf, sizeof(buf), "%.0f km", m_v.rangeKm);
+    setText(rangeLbl, buf);
 
     // 电量条：底部向上生长（y = 108 - h, 高 = SOC% × 68）
     const int32_t fh = (int32_t)(m_v.soc * 68 / 100);
-    lv_obj_set_height(battFill, fh);
-    lv_obj_set_y(battFill, 108 - fh);
+    setHeightIfChanged(battFill, fh);
+    setPosIfChanged(battFill, 30, 108 - fh);
     uint32_t c = C_FG;
     if (m_v.charging) c = C_REGEN;
     else if (m_v.soc <= 15) c = C_ALERT;
-    lv_obj_set_style_bg_color(battFill, lv_color_hex(c), LV_PART_MAIN);
-    lv_obj_set_style_text_color(socLbl, lv_color_hex(
-        m_v.soc <= 15 ? C_ALERT : C_FG), LV_PART_MAIN);
+    setBgColorC(battFill, c);
+    setTextColorC(socLbl, m_v.soc <= 15 ? C_ALERT : C_FG);
   } else {
-    lv_label_set_text(socLbl, "--");
-    lv_label_set_text(rangeLbl, "--");
-    lv_obj_set_height(battFill, 0);
+    setText(socLbl, "--");
+    setText(rangeLbl, "--");
+    setHeightIfChanged(battFill, 0);
   }
 }
 
@@ -554,7 +596,10 @@ void Dashboard::onTimer() {
     if (target - m_spdShown < 0.5f && m_spdShown - target < 0.5f) {
       m_spdShown = target;
     }
-    lv_label_set_text_fmt(spdLbl, "%.0f", m_spdShown);
+    // 只在数字变化时才写（每 50ms 无条件 set_text 会造成整屏重绘闪动）
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%.0f", m_spdShown);
+    setText(spdLbl, buf);
   } else {
     m_spdShown = 0;
   }
