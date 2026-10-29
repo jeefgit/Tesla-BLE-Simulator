@@ -84,12 +84,12 @@ class DashboardPanel : public lgfx::LGFX_Device {
 namespace {
 DashboardPanel lcd;
 
-// LVGL 部分刷新缓冲：320×32×2 字节(RGB565) 单缓冲 = 20KB
-// ESP32 DRAM 紧张（NimBLE 已占大头），单缓冲够用：
-// 800ms 数据节拍下渲染带宽绰绰有余
-constexpr int32_t kBufPixels = CFG_LCD_WIDTH * 32;
+// LVGL 部分刷新缓冲：320×24×2 字节(RGB565) 单缓冲 = 15KB，共两个 ≈ 30KB
+// ESP32 DRAM 紧张（BLE 模式要链接 NimBLE，静态 RAM 逼近 dram0_0_seg 上限），
+// 双缓冲只用 30KB；800ms 数据节拍下渲染带宽绰绰有余
+constexpr int32_t kBufPixels = CFG_LCD_WIDTH * 24;
 lv_color_t buf1[kBufPixels];
-// 刷新层 90° 旋转用：脏区转置后像素数不变，最大 32×320，同尺寸即可
+// 刷新层 90° 旋转用：脏区转置后像素数不变，最大 24×320，同尺寸即可
 lv_color_t rotBuf[kBufPixels];
 
 // LVGL 9 刷新回调：把脏区像素推给 LovyanGFX

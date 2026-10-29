@@ -12,7 +12,7 @@
  *--------------------*/
 #define LV_COLOR_DEPTH 16            /* RGB565，匹配 ST7789 */
 #define LV_COLOR_16_SWAP 0           /* ESP32 与 ST7789 都是小端，不交换 */
-#define LV_MEM_SIZE (32U * 1024U)     /* LVGL 对象堆 32KB（对象树 <100 个足够） */
+#define LV_MEM_SIZE (24U * 1024U)     /* LVGL 对象堆 24KB（对象树 <100 个足够；BLE 模式静态 RAM 紧张，从 32KB 调低省 8KB） */
 
 /*-------------------
  * 渲染节奏
