@@ -65,6 +65,8 @@ void loop() {
   teslaClient.loop();
   dashboard.render(g_vehicle, bleLink.state(), teslaClient.ready());
 #endif
-  display.loop();  // LVGL 事务驱动
-  delay(50);
+  display.loop();  // LVGL 事务驱动（内部按 LV_DEF_REFR_PERIOD 自我限流）
+  // 之前 delay(50) 会把 LVGL 刷新压到 ~20fps，加剧闪烁。
+  // 收紧到 2ms：LVGL 自行按 33ms 节拍刷新，画面更平滑；BLE 轮询本就非阻塞。
+  delay(2);
 }
