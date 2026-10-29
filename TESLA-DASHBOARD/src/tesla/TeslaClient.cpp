@@ -240,6 +240,7 @@ void TeslaClient::begin(BleLink* link) {
   m_wasConnected = false;
   m_handshakeTries = 0;
   m_nextActionAt = 0;
+  m_bypassIgnoredLogged = false;
 
   m_crypto.begin(String(CFG_TESLA_VIN));
   m_crypto.setResponseHandler([this](const uint8_t* p, size_t n, uint32_t fault) {
@@ -289,6 +290,7 @@ void TeslaClient::onConnected() {
   m_handshakeTries = 0;
   m_timeoutLogged = false;
   m_decodeLogged = false;
+  m_bypassIgnoredLogged = false;
   m_crypto.reset();
 #if CFG_TESLA_CRYPTO
   m_nextActionAt = millis();
@@ -450,6 +452,22 @@ void TeslaClient::processBuffer() {
     const size_t declared =
         ((size_t)m_buf[0] << 8) | (size_t)m_buf[1];
 
+#if CFG_TESLA_CRYPTO
+    // 加密模式：必须先完成握手。握手前收到 53B 旁路帧一律丢弃，
+    // 不解析、不写入 g_vehicle，避免出现"未握手就有数据"的假象。
+    if (m_len >= kFrame) {
+      TeslaPayload probe;
+      memcpy(&probe, m_buf, kFrame);
+      if (plausible(probe)) {
+        consume(kFrame);
+        if (!m_bypassIgnoredLogged) {
+          m_bypassIgnoredLogged = true;
+          CFG_LOG("[CRYPTO] 未握手成功，忽略 53B 旁路帧（必须先完成加密握手）");
+        }
+        continue;
+      }
+    }
+#else
     // 1) 53B 旁路帧优先：旁路模式下每个 notify 就是完整一帧，
     //    其首 2 字节是 float 低位，不能当成加密帧长度前缀
     if (m_len >= kFrame) {
@@ -464,6 +482,7 @@ void TeslaClient::processBuffer() {
         continue;
       }
     }
+#endif
 
     const bool cryptoHeader =
         declared > 0 && declared <= CFG_TESLA_MAX_FRAME;
@@ -516,6 +535,10 @@ void TeslaClient::consume(size_t n) {
 }
 
 bool TeslaClient::ready() const {
+#if CFG_TESLA_CRYPTO
+  // 未握手成功时一律视为"无数据"，仪表走降级显示
+  if (!m_crypto.hasSession()) return false;
+#endif
   if (m_packets == 0) return false;
   return (millis() - m_lastPacketAt) < CFG_DATA_STALE_MS;
 }

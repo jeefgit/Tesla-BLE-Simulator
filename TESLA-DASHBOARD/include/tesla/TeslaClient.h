@@ -12,13 +12,14 @@
 // TeslaClient：特斯拉 BLE 应用层
 //
 // 双路径：
-//   1) 加密路径（CFG_TESLA_CRYPTO=1）：连接后握手 -> 周期发 GetVehicleData ->
-//      解密 CarServer.Response -> 写入 g_vehicle
-//   2) 旁路路径：模拟器/旧固件直接推送 53 字节 SimPayload（帧长识别） ->
-//      applyTesla() 写入 g_vehicle
+//   1) 加密路径（CFG_TESLA_CRYPTO=1）：连接后必须先完成握手，握手成功后才
+//      周期发 GetVehicleData 并解密 CarServer.Response；握手前不解析任何
+//      53B 旁路帧，ready() 恒为 false（仪表降级显示）
+//   2) 旁路路径（仅 CFG_TESLA_CRYPTO=0）：模拟器/旧固件直接推送 53 字节
+//      SimPayload（帧长识别）-> applyTesla() 写入 g_vehicle
 //
-// 分流规则与 sim_server.py 一致：先看 2 字节大端长度前缀是否自洽
-// （declared + 2 == 已收字节数），自洽即视为加密帧；否则按 53B 旁路帧处理。
+// 加密模式的分流规则：先看 2 字节大端长度前缀是否自洽
+// （declared + 2 == 已收字节数），自洽即视为加密帧。
 // ---------------------------------------------------------------------------
 class TeslaClient {
  public:
@@ -80,4 +81,5 @@ class TeslaClient {
   uint32_t m_droppedBytes = 0;
   bool m_timeoutLogged = false;
   bool m_decodeLogged = false;
+  bool m_bypassIgnoredLogged = false;
 };

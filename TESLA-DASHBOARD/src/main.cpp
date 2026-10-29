@@ -59,11 +59,13 @@ void setup() {
 void loop() {
 #if CFG_DEMO_MODE
   mockSource.loop();
-  dashboard.render(g_vehicle, BleLink::State::Ready, true);
+  dashboard.render(g_vehicle, BleLink::State::Ready, true, true);
 #else
   bleLink.loop();
   teslaClient.loop();
-  dashboard.render(g_vehicle, bleLink.state(), teslaClient.ready());
+  // ready() 已含握手门禁，encrypted() 再显式传入握手状态，仪表层双重校验
+  dashboard.render(g_vehicle, bleLink.state(), teslaClient.ready(),
+                   teslaClient.encrypted());
 #endif
   display.loop();  // LVGL 事务驱动（内部按 LV_DEF_REFR_PERIOD 自我限流）
   // 之前 delay(50) 会把 LVGL 刷新压到 ~20fps，加剧闪烁。

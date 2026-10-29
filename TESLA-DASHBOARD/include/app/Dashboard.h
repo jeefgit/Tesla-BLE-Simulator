@@ -20,7 +20,9 @@
 class Dashboard {
  public:
   void begin();
-  void render(const VehicleData& v, BleLink::State bleState, bool dataReady);
+  // handshakeOk：加密会话是否已握手成功；false 时一律按无数据渲染
+  void render(const VehicleData& v, BleLink::State bleState, bool dataReady,
+              bool handshakeOk);
 
  private:
   // LVGL 定时器：数值补间(50ms) + 告警 1Hz 闪烁 + 断连三点脉冲

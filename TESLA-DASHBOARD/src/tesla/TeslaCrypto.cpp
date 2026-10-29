@@ -710,6 +710,11 @@ void TeslaCrypto::handleFrame(const uint8_t* payload, size_t len) {
   }
 
   if (ciphertext && ciphertextLen) {
+    // 未握手成功时不存在可用密钥，任何业务响应都直接丢弃
+    if (!m_hasSession) {
+      CFG_LOG("[CRYPTO] 尚未握手成功，忽略响应帧");
+      return;
+    }
     if (sig.hasResponse) {
       handleResponse(ciphertext, ciphertextLen, sig.nonce, sig.nonceLen,
                      sig.counter, sig.tag, sig.tagLen, flags, fault);

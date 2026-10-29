@@ -378,14 +378,15 @@ void Dashboard::buildOverlay() {
 // 数据刷新（render 每帧调用；内部节流 + 只改脏属性）
 // ---------------------------------------------------------------------------
 void Dashboard::render(const VehicleData& v, BleLink::State bleState,
-                       bool dataReady) {
+                       bool dataReady, bool handshakeOk) {
   const uint32_t now = millis();
   if (now - m_lastPrint < CFG_RENDER_INTERVAL_MS) return;
   m_lastPrint = now;
 
   m_v = v;
   m_bleState = bleState;
-  m_ok = dataReady && v.fresh(VF_SPEED, CFG_DATA_STALE_MS);
+  // 未握手成功时即使车端数据未过期也不渲染，避免"没握手就有数据"的假象
+  m_ok = dataReady && handshakeOk && v.fresh(VF_SPEED, CFG_DATA_STALE_MS);
 
   updateAll();
   printSerial();
