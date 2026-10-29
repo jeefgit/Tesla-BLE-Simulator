@@ -61,7 +61,7 @@ class DashboardPanel : public lgfx::LGFX_Device {
       // 水平镜像修正：rot1 + offset4 -> MADCTL 0xA8
       // （库在 setRotation 时自动重发，优于裸写会被缓存覆盖）
       cfg.offset_rotation = CFG_LCD_OFFSET_ROTATION;
-      cfg.invert = true;                   // 颜色反了改这里
+      cfg.invert = CFG_LCD_INVERT;         // 1 = 反色（黑显示成白就是它错了）
       _panel.config(cfg);
     }
     {
