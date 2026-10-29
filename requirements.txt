@@ -3,3 +3,7 @@
 # bless 0.3.0 与 pysetupdi（PyPI 上的 bless 0.2.6 WinRT 后端不兼容新版 Python/bleak）。
 bless>=0.2.6
 protobuf>=3.20.0
+# 特斯拉真实加密协议栈：NIST P-256 ECDH + AES-128-GCM（cryptography 提供成熟实现）
+cryptography>=41.0.0
+# 仅在需要重新生成 tesla_protocol/pb 下的 *_pb2.py 时安装：
+# grpcio-tools>=1.60.0

@@ -40,6 +40,14 @@ except ImportError as e:
     HAS_BUMBLE = False
     BUMBLE_IMPORT_ERROR = e
 
+# 特斯拉真实加密协议栈（ECDH + AES-GCM + HMAC）
+TESLA_CRYPTO_ERROR = None
+try:
+    from tesla_protocol.server import TeslaCryptoServer
+except ImportError as e:
+    TeslaCryptoServer = None
+    TESLA_CRYPTO_ERROR = e
+
 class BumbleTeslaServer:
     def __init__(self, vin="5YJ3E1EA0KF000000", usb_spec="usb:0a12:0001"):
         self.vin = vin
@@ -210,6 +218,11 @@ class TelemetryState:
         self.fault_drop_until = 0.0    # 故障注入截止时间戳
         self.recent_latencies = []     # 近期响应延迟历史 (ms)
 
+        # 特斯拉加密协议（real path）开关
+        self.crypto_enabled = True     # True = 启用真实加密通道；False = 纯 53B 旁路
+        self.response_encryption = True  # True = 模拟 2024.38+ 加密响应；False = 老固件明文响应
+        self.crypto_reset_pending = False  # GUI「使会话失效」→ 模拟车机重启
+
         # 初始车况数据
         self.data = {
             'speed_kmh': 0.0,
@@ -360,6 +373,35 @@ class TelemetryState:
             if not self.recent_latencies:
                 return 0.0
             return sum(self.recent_latencies) / len(self.recent_latencies)
+
+    # ── 加密协议 real path 控制 ─────────────────────────────
+    def is_crypto_enabled(self):
+        with self.lock:
+            return self.crypto_enabled
+
+    def toggle_crypto_enabled(self):
+        with self.lock:
+            self.crypto_enabled = not self.crypto_enabled
+            return self.crypto_enabled
+
+    def is_response_encryption(self):
+        with self.lock:
+            return self.response_encryption
+
+    def toggle_response_encryption(self):
+        with self.lock:
+            self.response_encryption = not self.response_encryption
+            return self.response_encryption
+
+    def request_crypto_reset(self):
+        with self.lock:
+            self.crypto_reset_pending = True
+
+    def consume_crypto_reset(self):
+        with self.lock:
+            val = self.crypto_reset_pending
+            self.crypto_reset_pending = False
+            return val
 
 
 def pack_telemetry(data):
@@ -785,6 +827,24 @@ class TeslaSimulatorGUI:
         )
         self.btn_comm_mode.pack(side="left", padx=5)
 
+        # 1.5 加密协议通道开关（ON = 真实握手/加解密；OFF = 53B 旁路）
+        crypto_on = self.state.is_crypto_enabled()
+        self.btn_crypto = tk.Button(
+            bar_frame,
+            text="加密协议: ON" if crypto_on else "加密协议: OFF (53B旁路)",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.COLOR_GREEN if crypto_on else self.BG_BTN,
+            fg=self.FG_TEXT,
+            activebackground=self.COLOR_GREEN if crypto_on else self.BG_BTN,
+            activeforeground=self.FG_TEXT,
+            bd=0,
+            relief="flat",
+            padx=8,
+            pady=2,
+            command=self.toggle_crypto_switch
+        )
+        self.btn_crypto.pack(side="left", padx=5)
+
         # 2. 实时链路监控 Label
         self.lbl_emulation_monitor = tk.Label(
             bar_frame,
@@ -853,6 +913,79 @@ class TeslaSimulatorGUI:
             command=self.inject_fault_blackout
         )
         btn_fault.pack(side="right", padx=10)
+
+        # 6. 使会话失效（模拟 Infotainment 重启，客户端应自动重新握手）
+        btn_reset = tk.Button(
+            bar_frame,
+            text="♻ 使会话失效",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.BG_BTN,
+            fg=self.FG_TEXT,
+            activebackground=self.BG_BTN_HOVER,
+            activeforeground=self.FG_TEXT,
+            bd=0,
+            relief="flat",
+            padx=8,
+            pady=2,
+            command=self.invalidate_crypto_session
+        )
+        btn_reset.pack(side="right", padx=(0, 6))
+
+        # 7. 响应加密开关（ON = 2024.38+ 加密响应；OFF = 老固件明文响应）
+        resp_enc = self.state.is_response_encryption()
+        self.btn_resp_enc = tk.Button(
+            bar_frame,
+            text="响应加密: 2024.38+" if resp_enc else "响应加密: 老固件明文",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.COLOR_BLUE if resp_enc else self.BG_BTN,
+            fg=self.FG_TEXT,
+            activebackground=self.COLOR_BLUE if resp_enc else self.BG_BTN,
+            activeforeground=self.FG_TEXT,
+            bd=0,
+            relief="flat",
+            padx=8,
+            pady=2,
+            command=self.toggle_response_encryption
+        )
+        self.btn_resp_enc.pack(side="right", padx=(0, 6))
+
+    def toggle_crypto_switch(self):
+        enabled = self.state.toggle_crypto_enabled()
+        if enabled:
+            self.btn_crypto.config(
+                text="加密协议: ON",
+                bg=self.COLOR_GREEN,
+                activebackground=self.COLOR_GREEN
+            )
+            self.log_queue.put("[System] 已启用真实加密协议通道（ESP32 需先握手，遥测改为问答驱动）")
+        else:
+            self.btn_crypto.config(
+                text="加密协议: OFF (53B旁路)",
+                bg=self.BG_BTN,
+                activebackground=self.BG_BTN
+            )
+            self.log_queue.put("[System] 已切回 53B 旁路模式（ESP32 直接接收裸 SimPayload）")
+
+    def toggle_response_encryption(self):
+        enabled = self.state.toggle_response_encryption()
+        if enabled:
+            self.btn_resp_enc.config(
+                text="响应加密: 2024.38+",
+                bg=self.COLOR_BLUE,
+                activebackground=self.COLOR_BLUE
+            )
+            self.log_queue.put("[System] 响应加密已开启（模拟 2024.38+ 固件）")
+        else:
+            self.btn_resp_enc.config(
+                text="响应加密: 老固件明文",
+                bg=self.BG_BTN,
+                activebackground=self.BG_BTN
+            )
+            self.log_queue.put("[System] 响应加密已关闭（模拟老固件，响应保持明文）")
+
+    def invalidate_crypto_session(self):
+        self.state.request_crypto_reset()
+        self.log_queue.put("[System] 已请求使加密会话失效（模拟车机重启）")
 
     def toggle_comm_mode_switch(self):
         new_mode = self.state.toggle_comm_mode()
@@ -1618,6 +1751,22 @@ class TeslaSimulatorGUI:
         return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def parse_client_public(spec: str) -> bytes:
+    """解析 --client-pub：65 字节非压缩公钥的 130 位 hex（允许 0x 前缀）。"""
+    text = spec.strip().lower()
+    if text.startswith("0x"):
+        text = text[2:]
+    if len(text) != 130:
+        raise ValueError(f"公钥应为 130 位 hex（65 字节），实际 {len(text)} 位")
+    try:
+        raw = bytes.fromhex(text)
+    except ValueError as exc:
+        raise ValueError(f"公钥含非法字符: {exc}") from exc
+    if raw[0] != 0x04:
+        raise ValueError("公钥必须是非压缩编码（0x04 前缀）")
+    return raw
+
+
 # ─── 主单线程协程异步服务逻辑 ──────────────────────────────────────
 async def async_main(args, state: TelemetryState, stop_event: threading.Event, log_queue: queue.Queue):
     """
@@ -1636,6 +1785,44 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
     last_push_time = 0.0
     current_target_interval = 0.8
 
+    # ── 特斯拉加密协议 real path 初始化 ───────────────────────
+    proto_responses = queue.Queue()
+    crypto_server = None
+
+    # --client-pub：模拟真车的配对白名单（不传则不校验，兼容旧行为）
+    allowed_client_pub = None
+    if getattr(args, "client_pub", None):
+        try:
+            allowed_client_pub = parse_client_public(args.client_pub)
+        except ValueError as exc:
+            log_queue.put(f"[-] --client-pub 参数非法: {exc}")
+            return
+
+    if TeslaCryptoServer is not None:
+        crypto_server = TeslaCryptoServer(
+            state.get_vin(),
+            telemetry=state,
+            logger=lambda m: log_queue.put(m),
+            allowed_client_public=allowed_client_pub,
+        )
+        crypto_server.response_encryption_enabled = state.is_response_encryption()
+        log_queue.put("[+] 特斯拉加密协议栈已就绪 (ECDH P-256 / AES-128-GCM / HMAC-SHA256)")
+        if allowed_client_pub is not None:
+            log_queue.put(
+                f"[+] 已启用配对白名单：仅接受公钥 {allowed_client_pub.hex()[:16]}…"
+            )
+    else:
+        log_queue.put(f"[-] 加密协议栈不可用（缺少依赖 cryptography）: {TESLA_CRYPTO_ERROR}")
+
+    # 协议响应通知分片大小：兼容 Windows/WinRT 与 Bumble 的最小 MTU
+    PROTO_NOTIFY_CHUNK = 20
+
+    def is_complete_frame(data: bytes) -> bool:
+        if len(data) < 2:
+            return False
+        declared = int.from_bytes(data[:2], "big")
+        return 0 < declared <= 4096 and declared + 2 == len(data)
+
     # BLE 客户端特征值写入事件回调
     def on_write(characteristic, value):
         nonlocal last_push_time
@@ -1645,9 +1832,28 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
             log_queue.put(f"[BLE-Write] ⚠️ [故障注入中] 丢弃 ESP32 写入请求: {value.hex()[:16]}...")
             return
 
-        log_queue.put(f"[BLE-Write] 📥 接收 ESP32 指令包 ({len(value)}B): {value.hex()[:16]}...")
-        # 触发即时更新
-        last_push_time = 0.0
+        data = bytes(value)
+        log_queue.put(f"[BLE-Write] 📥 接收 ESP32 指令包 ({len(data)}B): {data.hex()[:24]}...")
+
+        # Fast path：加密关闭，或尚未握手且恰好 53 字节 → 保持原有旁路行为
+        if crypto_server is None or not state.is_crypto_enabled():
+            log_queue.put("[BLE-Write] 53B 旁路模式：触发即时遥测更新")
+            last_push_time = 0.0
+            return
+        if not crypto_server.sessions and len(data) == 53 and not is_complete_frame(data):
+            log_queue.put("[BLE-Write] 53B 旁路模式：触发即时遥测更新")
+            last_push_time = 0.0
+            return
+
+        # Real path：交给加密协议栈（内部按长度前缀重组分片）
+        crypto_server.response_encryption_enabled = state.is_response_encryption()
+        try:
+            replies = crypto_server.feed(data)
+        except Exception as exc:
+            log_queue.put(f"[-] 加密协议处理失败: {exc}")
+            return
+        for reply in replies:
+            proto_responses.put(reply)
 
     async def start_ble_server(name):
         use_bumble = getattr(args, 'bumble', False)
@@ -1790,6 +1996,10 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                         new_ble_name = "Tesla-BLE-Simulation"
                     
                     log_queue.put(f"[System] 重新配置蓝牙广播名: {new_ble_name}")
+                    if crypto_server is not None:
+                        crypto_server.set_vin(new_vin)
+                        crypto_server.reset()
+                        log_queue.put("[CRYPTO] VIN 变更，已清空旧加密会话")
                     try:
                         server = await start_ble_server(new_ble_name)
                         log_queue.put("[+] 广播重启发布成功！等待连接...")
@@ -1800,14 +2010,39 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                     if gui is not None:
                         gui.btn_restart_ble.config(state="normal", text="应用并重启广播")
 
-            # 4. 遥测数据推送机制 (支持真车节奏分批推送 vs 理想 20Hz 连续推送)
+            # 4. 加密协议：处理「使会话失效」并发送待回包
+            if crypto_server is not None:
+                if state.consume_crypto_reset():
+                    crypto_server.reset()
+                    log_queue.put("[CRYPTO] 已使会话失效（模拟车机重启），等待 ESP32 重新握手")
+                while not proto_responses.empty():
+                    try:
+                        reply = proto_responses.get_nowait()
+                    except queue.Empty:
+                        break
+                    try:
+                        if server is not None and hasattr(server, 'notify'):
+                            for i in range(0, len(reply), PROTO_NOTIFY_CHUNK):
+                                await server.notify(reply[i:i + PROTO_NOTIFY_CHUNK])
+                        elif server is not None:
+                            char = server.get_characteristic(RD_UUID)
+                            for i in range(0, len(reply), PROTO_NOTIFY_CHUNK):
+                                char.value = reply[i:i + PROTO_NOTIFY_CHUNK]
+                                server.update_value(SVC_UUID, RD_UUID)
+                    except Exception as e:
+                        log_queue.put(f"[-] 发送加密响应失败: {e}")
+
+            # 5. 遥测数据推送机制 (支持真车节奏分批推送 vs 理想 20Hz 连续推送)
             if server is not None:
                 is_conn = await server.is_connected()
                 state.set_connected(is_conn)
                 
                 if is_conn:
                     now_t = time.time()
-                    if state.get_comm_mode() == "REALISTIC":
+                    if crypto_server is not None and state.is_crypto_enabled() and crypto_server.sessions:
+                        # 加密 real path：遥测由 ESP32 的 GetVehicleData 请求驱动，不主动推 53B
+                        pass
+                    elif state.get_comm_mode() == "REALISTIC":
                         # 真实车机节奏模式 (方案 A)：按 800ms 基础间隔 (带延迟/抖动/丢包) 分批推送 53 字节 SimPayload
                         if now_t - last_push_time >= current_target_interval:
                             last_push_time = now_t
@@ -1899,6 +2134,12 @@ if __name__ == "__main__":
     parser.add_argument("--nogui", action="store_true", help="强制在纯命令行模式下运行（不启动 Tkinter 界面）")
     parser.add_argument("--vin", type=str, default="5YJ3E1EA0KF000000", help="设定模拟车型的 17 位 VIN 识别号（示例: 5YJ3E1EA0KF000000）")
     parser.add_argument("--bumble", action="store_true", help="使用 Bumble (CSR8510 USB HCI) 硬件物理广播模式")
+    parser.add_argument(
+        "--client-pub",
+        type=str,
+        default="",
+        help="启用车端配对白名单：只接受该客户端公钥（65 字节非压缩编码的 130 位 hex，可带 0x 前缀）",
+    )
     args = parser.parse_args()
     
     print("==========================================================")

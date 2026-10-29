@@ -210,7 +210,20 @@ bool BleLink::sendRaw(const uint8_t* data, size_t len) {
   if (!isConnected() || !m_writeChar || !data || len == 0) return false;
   // 特征值只支持"需响应写"时才用 write request
   const bool withResponse = !m_writeChar->canWriteNoResponse();
-  return m_writeChar->writeValue(data, len, withResponse);
+
+  // BLE 单次写入上限 = MTU - 3。加密帧（RoutableMessage）可达数百字节，
+  // 必须按协商后的 MTU 分片写入，车端/模拟器会按长度前缀自行重组。
+  const uint16_t mtu = m_client ? m_client->getMTU() : 0;
+  size_t chunk = (mtu > 3) ? (size_t)(mtu - 3) : 20;
+  if (chunk > len) chunk = len;
+
+  for (size_t off = 0; off < len; off += chunk) {
+    const size_t n = (len - off) < chunk ? (len - off) : chunk;
+    if (!m_writeChar->writeValue(data + off, n, withResponse)) return false;
+    // write-without-response 需要给控制器发送缓冲留出排空时间
+    if (!withResponse && (off + n) < len) delay(4);
+  }
+  return true;
 }
 
 void BleLink::onBleBytes(const uint8_t* data, size_t len) {

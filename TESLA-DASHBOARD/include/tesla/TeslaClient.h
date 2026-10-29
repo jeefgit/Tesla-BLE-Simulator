@@ -3,17 +3,22 @@
 #include <Arduino.h>
 
 #include "ble/BleLink.h"
+#include "config.h"
 #include "data/VehicleData.h"
+#include "tesla/TeslaCrypto.h"
 #include "tesla/TeslaPayload.h"
 
 // ---------------------------------------------------------------------------
 // TeslaClient：特斯拉 BLE 应用层
 //
-// 数据流：BleLink 字节 -> feed() -> 53B 组帧(带逐字节重同步) ->
-//         合理性校验 -> applyTesla() 写入 g_vehicle
+// 双路径：
+//   1) 加密路径（CFG_TESLA_CRYPTO=1）：连接后握手 -> 周期发 GetVehicleData ->
+//      解密 CarServer.Response -> 写入 g_vehicle
+//   2) 旁路路径：模拟器/旧固件直接推送 53 字节 SimPayload（帧长识别） ->
+//      applyTesla() 写入 g_vehicle
 //
-// 特斯拉是"车端推送"模式（800ms 节拍 notify），与 OBD 的
-// "请求-应答"轮询不同，本层没有发送逻辑，纯被动接收。
+// 分流规则与 sim_server.py 一致：先看 2 字节大端长度前缀是否自洽
+// （declared + 2 == 已收字节数），自洽即视为加密帧；否则按 53B 旁路帧处理。
 // ---------------------------------------------------------------------------
 class TeslaClient {
  public:
@@ -28,6 +33,9 @@ class TeslaClient {
   uint32_t packetCount() const { return m_packets; }
   uint32_t lastPacketMs() const { return m_lastPacketAt; }
 
+  // 加密会话是否已建立（仪表状态页可用来区分"旁路/加密"）
+  bool encrypted() const { return m_crypto.hasSession(); }
+
   // 特斯拉广播名 = "S" + sha1(VIN) 前16位hex + "C"（与 sim_server.py 规则一致）
   static String advertisedNameFromVin(const char* vin);
 
@@ -37,14 +45,39 @@ class TeslaClient {
   bool plausible(const TeslaPayload& p) const;
   void consume(size_t n);
 
+  // 从接收缓冲中按"长度前缀/53B 帧"分流解析
+  void processBuffer();
+
+  // 连接生命周期与命令调度
+  void onConnected();
+  void onDisconnected();
+  void sendHandshake();
+  void sendPoll();
+
+  // TeslaCrypto 回调
+  void onCryptoResponse(const uint8_t* plaintext, size_t len, uint32_t fault);
+  void onCryptoSession(bool ok);
+
+  // 解析 CarServer.Response（已解密的明文）
+  bool decodeVehicleData(const uint8_t* data, size_t len);
+
   BleLink* m_link = nullptr;
 
-  // 组帧缓冲：BLE 通知可能被 MTU 拆分，也可能一次到完整帧
-  uint8_t m_buf[kFrame];
+  // 组帧缓冲：同时容纳加密帧（长度前缀 + RoutableMessage）与 53B 旁路帧
+  uint8_t m_buf[CFG_TESLA_MAX_FRAME + 2];
   size_t m_len = 0;
+
+  TeslaCrypto m_crypto;
+  // 发送缓冲：握手请求/加密命令最长不超过一帧上限
+  uint8_t m_tx[CFG_TESLA_MAX_FRAME];
+
+  bool m_wasConnected = false;
+  uint32_t m_nextActionAt = 0;
+  uint32_t m_handshakeTries = 0;
 
   uint32_t m_packets = 0;
   uint32_t m_lastPacketAt = 0;
   uint32_t m_droppedBytes = 0;
   bool m_timeoutLogged = false;
+  bool m_decodeLogged = false;
 };

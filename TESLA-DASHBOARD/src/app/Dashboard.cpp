@@ -58,8 +58,8 @@ constexpr uint32_t C_TPMS_OK = 0x4A5163;   // 胎压正常中性灰
 constexpr uint32_t C_OFFLINE = 0x232A36;   // 断连暗灰
 
 // 胎压正常区间（bar），越界变红闪烁（DESIGN.md §5）
-constexpr float TPMS_LO = 2.2f;
-constexpr float TPMS_HI = 2.8f;
+constexpr float TPMS_LO = 2.8f;
+constexpr float TPMS_HI = 3.1f;
 
 const char* bleStateText(BleLink::State s) {
   switch (s) {

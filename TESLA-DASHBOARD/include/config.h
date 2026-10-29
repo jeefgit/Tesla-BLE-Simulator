@@ -67,6 +67,43 @@
 #define CFG_CHAR_NOTIFY_UUID "00000213-b2d1-43f0-9b88-960cebf8b91e"
 
 // ---------------------------------------------------------------------------
+// 特斯拉加密协议（NIST P-256 ECDH + AES-128-GCM + HMAC-SHA256）
+//
+//   1 = 连接后先握手，再用加密 GetVehicleData 轮询（真车/模拟器加密通道）
+//   0 = 只接收 53B 旁路 SimPayload（旧行为，便于对照排查）
+// ---------------------------------------------------------------------------
+#define CFG_TESLA_CRYPTO 1
+
+// 客户端私钥（64 位 hex，32 字节）。
+// 本地真实密钥放在 include/secrets/tesla_client_key.h（已被 .gitignore 忽略），
+// 存在时自动覆盖下面的默认值；默认值取自 Tesla 官方 vehicle-command
+// 文档公开的调试测试私钥（与模拟器 tesla_protocol/identity.py 的
+// TEST_CLIENT_PRIVATE_KEY 一致），仅用于联调/向量比对。
+#if defined(__has_include)
+#if __has_include("secrets/tesla_client_key.h")
+#include "secrets/tesla_client_key.h"
+#endif
+#endif
+
+#ifndef CFG_TESLA_CLIENT_KEY_HEX
+#define CFG_TESLA_CLIENT_KEY_HEX "2538CDC29A97C19C1E99A637D6CF4F8C970C118B56EDE1E6323E6D162C4B30DB"
+#endif
+
+// 握手重试间隔（毫秒）与连续失败次数；超过后降级为 53B 旁路并周期性重试
+#define CFG_TESLA_HANDSHAKE_RETRY_MS 2000
+#define CFG_TESLA_HANDSHAKE_MAX_RETRY 3
+#define CFG_TESLA_HANDSHAKE_RETRY_LONG_MS 15000
+
+// GetVehicleData 轮询间隔（毫秒）
+#define CFG_TESLA_POLL_INTERVAL_MS 1500
+
+// 命令有效期（秒）。车端允许 15s 时钟偏差，60s 足够覆盖轮询窗口
+#define CFG_TESLA_COMMAND_TTL_S 60
+
+// 加密帧上限（协议长度前缀最大 4096，实际 GetVehicleData 响应 ~200B）
+#define CFG_TESLA_MAX_FRAME 2048
+
+// ---------------------------------------------------------------------------
 // 显示：2.8 寸 320×240 SPI（LVGL 9 + LovyanGFX）
 // 当前硬件：ESP32-2432S028R（CYD 板）——板载 ILI9341 + XPT2046 触摸，背光 GPIO21
 //
