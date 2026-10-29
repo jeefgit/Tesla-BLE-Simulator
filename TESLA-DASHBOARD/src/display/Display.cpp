@@ -62,6 +62,9 @@ class DashboardPanel : public lgfx::LGFX_Device {
       // （库在 setRotation 时自动重发，优于裸写会被缓存覆盖）
       cfg.offset_rotation = CFG_LCD_OFFSET_ROTATION;
       cfg.invert = CFG_LCD_INVERT;         // 1 = 反色（黑显示成白就是它错了）
+      // 红蓝通道顺序：库内部 madctl |= (rgb_order ? MAD_RGB : MAD_BGR)
+      // 默认 false 会写 MAD_BGR，导致红蓝互换（暗蓝黑 #0E1219 显示成棕红）
+      cfg.rgb_order = CFG_LCD_RGB_ORDER;
       _panel.config(cfg);
     }
     {
