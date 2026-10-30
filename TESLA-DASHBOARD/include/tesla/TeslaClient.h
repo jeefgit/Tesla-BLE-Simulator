@@ -54,10 +54,15 @@ class TeslaClient {
   void onDisconnected();
   void sendHandshake();
   void sendPoll();
+  void sendPairingRequest();
 
   // TeslaCrypto 回调
   void onCryptoResponse(const uint8_t* plaintext, size_t len, uint32_t fault);
   void onCryptoSession(bool ok);
+  void onNotPaired();
+  void onPairingStatus(uint32_t operationStatus, uint32_t info, bool terminal);
+
+  static bool due(uint32_t at) { return (int32_t)(millis() - at) >= 0; }
 
   // 解析 CarServer.Response（已解密的明文）
   bool decodeVehicleData(const uint8_t* data, size_t len);
@@ -75,6 +80,13 @@ class TeslaClient {
   bool m_wasConnected = false;
   uint32_t m_nextActionAt = 0;
   uint32_t m_handshakeTries = 0;
+
+  // 配钥（add-key-request）状态
+  bool m_notPaired = false;       // 车辆回 KEY_NOT_ON_WHITELIST
+  bool m_pairDone = false;        // 已收到配钥终态
+  bool m_pairWaitLogged = false;  // WAIT 日志只打一次
+  uint32_t m_pairSends = 0;
+  uint32_t m_nextPairAt = 0;
 
   uint32_t m_packets = 0;
   uint32_t m_lastPacketAt = 0;

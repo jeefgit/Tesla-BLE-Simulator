@@ -18,6 +18,17 @@ FAULT_INVALID_COMMAND = 9
 FAULT_DECODING = 10
 FAULT_INVALID_DOMAINS = 8
 
+# VCSEC.WhitelistOperation_information_E（只列本模拟器用得到的）
+INFO_NONE = 0
+INFO_WHITELIST_FULL = 4
+INFO_NO_PERMISSION_TO_ADD = 5
+INFO_INVALID_PUBLIC_KEY = 6
+INFO_NO_PERMISSION_TO_REMOVE = 7
+INFO_NO_PERMISSION_TO_CHANGE_PERMISSIONS = 8
+INFO_PUBLIC_KEY_NOT_ON_WHITELIST = 12
+INFO_ALREADY_ON_WHITELIST = 13
+INFO_NO_PERMISSION_TO_ADD_UNLESS_ON_READER = 14
+
 
 @dataclass
 class DispatchResult:
@@ -26,11 +37,13 @@ class DispatchResult:
 
 
 class Dispatcher:
-    def __init__(self, vin: str, telemetry=None, logger=None):
+    def __init__(self, vin: str, telemetry=None, logger=None, whitelist=None):
         self.vin = vin
         self.telemetry = telemetry
         self.log = logger or (lambda msg: None)
         self.climate_on = False
+        # 车端白名单（VCSEC key store）。为 None 时退化为旧行为（不记录钥匙）
+        self.whitelist = whitelist
 
     # ── 入口 ──────────────────────────────────────────────
     def handle(self, domain: int, plaintext: bytes, client_public: bytes = b"") -> DispatchResult:
@@ -249,21 +262,19 @@ class Dispatcher:
                 return DispatchResult(reply.SerializeToString())
             if req_type == vcsec_pb2.INFORMATION_REQUEST_TYPE_GET_WHITELIST_INFO:
                 info = reply.whitelistInfo
-                info.numberOfEntries = 1
-                if client_public:
-                    info.whitelistEntries.add().publicKeySHA1 = hashlib.sha1(
-                        client_public
-                    ).digest()
-                info.slotMask = 0x01
+                entries = self.whitelist.entries() if self.whitelist is not None else []
+                info.numberOfEntries = len(entries)
+                for entry in entries:
+                    info.whitelistEntries.add().publicKeySHA1 = entry.sha1
+                info.slotMask = self.whitelist.slot_mask() if self.whitelist is not None else 0
                 return DispatchResult(reply.SerializeToString())
             if req_type == vcsec_pb2.INFORMATION_REQUEST_TYPE_GET_WHITELIST_ENTRY_INFO:
-                entry = reply.whitelistEntryInfo
-                if client_public:
-                    entry.keyId.publicKeySHA1 = hashlib.sha1(client_public).digest()
-                    entry.publicKey.PublicKeyRaw = client_public
-                entry.metadataForKey.keyFormFactor = vcsec_pb2.KEY_FORM_FACTOR_ANDROID_DEVICE
-                entry.slot = 1
-                entry.keyRole = keys_pb2.ROLE_OWNER
+                requested = self._requested_entry(msg.InformationRequest, client_public)
+                if requested is None:
+                    self.log("[VCSEC] 查询的白名单条目不存在")
+                    reply.nominalError.genericError = errors_pb2.GENERICERROR_UNKNOWN
+                    return DispatchResult(reply.SerializeToString(), FAULT_INVALID_COMMAND)
+                self._fill_whitelist_entry(reply.whitelistEntryInfo, requested)
                 return DispatchResult(reply.SerializeToString())
             self.log(f"[FAULT] 未支持的 VCSEC 信息请求: {req_type}")
             reply.nominalError.genericError = errors_pb2.GENERICERROR_UNKNOWN
@@ -286,16 +297,135 @@ class Dispatcher:
             return DispatchResult(reply.SerializeToString())
 
         if kind == "WhitelistOperation":
-            reply.commandStatus.operationStatus = vcsec_pb2.OPERATIONSTATUS_OK
-            reply.commandStatus.whitelistOperationStatus.operationStatus = (
-                vcsec_pb2.OPERATIONSTATUS_OK
-            )
-            self.log("[GCM] VCSEC 白名单操作（模拟器直接放行）")
-            return DispatchResult(reply.SerializeToString())
+            return self._handle_whitelist_operation(msg.WhitelistOperation, client_public, reply)
 
         self.log(f"[FAULT] 未支持的 VCSEC 命令: {kind}")
         reply.nominalError.genericError = errors_pb2.GENERICERROR_UNKNOWN
         return DispatchResult(reply.SerializeToString(), FAULT_INVALID_COMMAND)
+
+    # ── 白名单操作（已配对钥匙的加密命令，对应官方 add-key/remove-key）──
+    def _handle_whitelist_operation(self, op, client_public: bytes, reply) -> DispatchResult:
+        sub = op.WhichOneof("sub_message")
+        info = INFO_NONE
+        self.log(f"[VCSEC] WhitelistOperation: {sub}")
+
+        if self.whitelist is None:
+            # 旧行为（未启用白名单模型）直接放行
+            return self._whitelist_result(reply, INFO_NONE, client_public)
+
+        signer = self.whitelist.find(client_public) if client_public else None
+        signer_is_owner = signer is not None and signer.role == keys_pb2.ROLE_OWNER
+
+        if sub in ("addKeyToWhitelistAndAddPermissions", "updateKeyAndPermissions"):
+            change = getattr(op, sub)
+            info = self._add_key(change, signer_is_owner)
+        elif sub in ("addImpermanentKey", "addImpermanentKeyAndRemoveExisting"):
+            change = getattr(op, sub)
+            info = self._add_key(change, signer_is_owner)
+        elif sub == "addPublicKeyToWhitelist":
+            info = self._add_key_raw(
+                bytes(op.addPublicKeyToWhitelist.PublicKeyRaw), keys_pb2.ROLE_NONE, signer_is_owner
+            )
+        elif sub == "addPermissionsToPublicKey":
+            change = op.addPermissionsToPublicKey
+            if not signer_is_owner:
+                info = INFO_NO_PERMISSION_TO_CHANGE_PERMISSIONS
+            elif not self.whitelist.set_role(
+                bytes(change.key.PublicKeyRaw), int(change.keyRole)
+            ):
+                info = INFO_PUBLIC_KEY_NOT_ON_WHITELIST
+        elif sub == "removePermissionsFromPublicKey":
+            change = op.removePermissionsFromPublicKey
+            if not signer_is_owner:
+                info = INFO_NO_PERMISSION_TO_CHANGE_PERMISSIONS
+            elif not self.whitelist.set_role(
+                bytes(change.key.PublicKeyRaw), keys_pb2.ROLE_NONE
+            ):
+                info = INFO_PUBLIC_KEY_NOT_ON_WHITELIST
+        elif sub == "removePublicKeyFromWhitelist":
+            key = bytes(op.removePublicKeyFromWhitelist.PublicKeyRaw)
+            if not signer_is_owner:
+                info = INFO_NO_PERMISSION_TO_REMOVE
+            elif not self.whitelist.remove(key):
+                info = INFO_PUBLIC_KEY_NOT_ON_WHITELIST
+        elif sub == "removeAllImpermanentKeys":
+            # 模拟器不区分永久/临时钥匙
+            info = INFO_NONE
+        elif sub == "replaceKey":
+            info = self._replace_key(op.replaceKey, signer_is_owner)
+        else:
+            info = 1  # WHITELISTOPERATION_INFORMATION_UNDOCUMENTED_ERROR
+            self.log(f"[FAULT] 未支持的白名单操作: {sub}")
+
+        return self._whitelist_result(reply, info, client_public)
+
+    def _add_key(self, change, signer_is_owner: bool) -> int:
+        if not signer_is_owner:
+            return INFO_NO_PERMISSION_TO_ADD
+        role = int(change.keyRole) if change.keyRole else keys_pb2.ROLE_NONE
+        return self._add_key_raw(bytes(change.key.PublicKeyRaw), role, signer_is_owner)
+
+    def _add_key_raw(self, public_key: bytes, role: int, signer_is_owner: bool) -> int:
+        if not signer_is_owner:
+            return INFO_NO_PERMISSION_TO_ADD
+        if len(public_key) != 65 or public_key[0] != 0x04:
+            return INFO_INVALID_PUBLIC_KEY
+        if self.whitelist.contains(public_key):
+            return INFO_ALREADY_ON_WHITELIST
+        if self.whitelist.is_full():
+            return INFO_WHITELIST_FULL
+        if self.whitelist.add(public_key, role) is None:
+            return INFO_WHITELIST_FULL
+        return INFO_NONE
+
+    def _replace_key(self, replace, signer_is_owner: bool) -> int:
+        if not signer_is_owner:
+            return INFO_NO_PERMISSION_TO_ADD
+        old = None
+        if replace.WhichOneof("keyToReplace") == "publicKeyToReplace":
+            old = bytes(replace.publicKeyToReplace.PublicKeyRaw)
+        elif replace.WhichOneof("keyToReplace") == "slotToReplace":
+            entry = self.whitelist.find_by_slot(int(replace.slotToReplace))
+            old = entry.public_key if entry else None
+        if old is not None:
+            self.whitelist.remove(old)
+        new = bytes(replace.keyToAdd.PublicKeyRaw)
+        return self._add_key_raw(new, int(replace.keyRole), signer_is_owner)
+
+    @staticmethod
+    def _whitelist_result(reply, info: int, client_public: bytes) -> DispatchResult:
+        status = reply.commandStatus
+        status.operationStatus = (
+            vcsec_pb2.OPERATIONSTATUS_OK if info == INFO_NONE else vcsec_pb2.OPERATIONSTATUS_ERROR
+        )
+        wl = status.whitelistOperationStatus
+        wl.whitelistOperationInformation = info
+        wl.operationStatus = (
+            vcsec_pb2.OPERATIONSTATUS_OK if info == INFO_NONE else vcsec_pb2.OPERATIONSTATUS_ERROR
+        )
+        if client_public:
+            wl.signerOfOperation.publicKeySHA1 = hashlib.sha1(client_public).digest()
+        return DispatchResult(reply.SerializeToString())
+
+    def _requested_entry(self, request, client_public: bytes):
+        if self.whitelist is None:
+            return None
+        kind = request.WhichOneof("key")
+        if kind == "keyId":
+            return self.whitelist.find_by_sha1(bytes(request.keyId.publicKeySHA1))
+        if kind == "publicKey":
+            return self.whitelist.find(bytes(request.publicKey))
+        if kind == "slot":
+            return self.whitelist.find_by_slot(int(request.slot))
+        return self.whitelist.find(client_public) if client_public else None
+
+    @staticmethod
+    def _fill_whitelist_entry(entry, src) -> None:
+        entry.keyId.publicKeySHA1 = src.sha1
+        entry.publicKey.PublicKeyRaw = src.public_key
+        entry.metadataForKey.keyFormFactor = src.form_factor
+        entry.slot = src.slot
+        entry.keyRole = src.role
 
     def _fill_vcsec_status(self, status) -> None:
         data = self._data()

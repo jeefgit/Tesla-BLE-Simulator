@@ -247,7 +247,9 @@ class TeslaCryptoServer:
 
 **VCSEC（车锁/门）**
 - `GET_STATUS` → 车辆状态（锁、门、后备箱开口）映射现有 `TelemetryState.data`；
-- `GET_WHITELIST_INFO` / `AUTHENTICATE` → 返回固定"已授权 Owner"成功状态（模拟器不做真实白名单，ESP32 端 tesla-ble 启动时会查询）。
+- `GET_WHITELIST_INFO` / `GET_WHITELIST_ENTRY_INFO` → 读取真实白名单模型（`tesla_protocol/whitelist.py`）；
+- `WhitelistOperation`（add-key / add-key-request / 增删权限）→ 按 OWNER 权限校验并修改白名单；
+- 配钥（add-key-request 明文信封 + NFC 刷卡授权）细节见 [PAIRING.md](./PAIRING.md)。
 
 **Infotainment（遥测/充电）**
 - `GET_VEHICLE_DATA` / `GET_DRIVE_STATE` → 速度、功率、档位（`SimPayload` 字段同源）；
@@ -391,6 +393,9 @@ GUI 手动开关可强制单一模式，排除歧义用于测试。
 ## 十一、附录：官方测试密钥与测试向量（P0/P1/P2 单测基准）
 
 来源：`teslamotors/vehicle-command` `pkg/protocol/protocol.md`。**仅用于调试实现，禁止注册到真实车辆。**
+
+> 需要给**真车**生成可注册的密钥对（`tesla-keygen create` / 本地 Python / OpenSSL）
+> 以及发起 `add-key-request` 的完整命令，见 [PAIRING.md](./PAIRING.md) 第 4 节。
 
 ### 车辆密钥（模拟器 identity 可固定用它）
 

@@ -247,6 +247,11 @@ void TeslaClient::begin(BleLink* link) {
     onCryptoResponse(p, n, fault);
   });
   m_crypto.setSessionHandler([this](bool ok) { onCryptoSession(ok); });
+  m_crypto.setNotPairedHandler([this]() { onNotPaired(); });
+  m_crypto.setPairingHandler(
+      [this](uint32_t op, uint32_t info, bool terminal) {
+        onPairingStatus(op, info, terminal);
+      });
 
 #if CFG_TESLA_CRYPTO
   CFG_LOG("特斯拉加密协议栈就绪 VIN=%s（握手后改用加密 GetVehicleData 轮询）",
@@ -273,8 +278,15 @@ void TeslaClient::loop() {
 
 #if CFG_TESLA_CRYPTO
   if (!m_crypto.hasSession()) {
-    if ((int32_t)(millis() - m_nextActionAt) >= 0) sendHandshake();
-  } else if ((int32_t)(millis() - m_nextActionAt) >= 0) {
+#if CFG_TESLA_PAIR_ON_DENIED
+    // 未配对：优先发 add-key-request（车辆等待 NFC 刷卡），发满次数后退回握手探测
+    if (m_notPaired && !m_pairDone && m_pairSends < CFG_TESLA_PAIR_MAX_SENDS) {
+      if (due(m_nextPairAt)) sendPairingRequest();
+      return;
+    }
+#endif
+    if (due(m_nextActionAt)) sendHandshake();
+  } else if (due(m_nextActionAt)) {
     sendPoll();
   }
 #else
@@ -291,6 +303,11 @@ void TeslaClient::onConnected() {
   m_timeoutLogged = false;
   m_decodeLogged = false;
   m_bypassIgnoredLogged = false;
+  m_notPaired = false;
+  m_pairDone = false;
+  m_pairWaitLogged = false;
+  m_pairSends = 0;
+  m_nextPairAt = 0;
   m_crypto.reset();
 #if CFG_TESLA_CRYPTO
   m_nextActionAt = millis();
@@ -301,6 +318,10 @@ void TeslaClient::onConnected() {
 void TeslaClient::onDisconnected() {
   m_len = 0;
   m_handshakeTries = 0;
+  m_notPaired = false;
+  m_pairDone = false;
+  m_pairWaitLogged = false;
+  m_pairSends = 0;
   m_crypto.reset();
   CFG_LOG("BLE 断开，加密会话已清除");
 }
@@ -343,10 +364,93 @@ void TeslaClient::sendPoll() {
 void TeslaClient::onCryptoSession(bool ok) {
   if (ok) {
     m_handshakeTries = 0;
+    m_notPaired = false;
+    m_pairDone = false;
+    m_pairWaitLogged = false;
+    m_pairSends = 0;
     m_nextActionAt = millis();  // 立即发第一条 GetVehicleData
   } else {
     m_nextActionAt = millis() + CFG_TESLA_HANDSHAKE_RETRY_MS;
   }
+}
+
+// ---------------------------------------------------------------------------
+// 配钥：车辆回 KEY_NOT_ON_WHITELIST 后发 add-key-request，等用户刷卡
+// ---------------------------------------------------------------------------
+void TeslaClient::onNotPaired() {
+#if CFG_TESLA_PAIR_ON_DENIED
+  // 已收到终态或已发满次数：不再自动重发，交给后续长间隔握手探测
+  if (m_notPaired && (m_pairDone || m_pairSends >= CFG_TESLA_PAIR_MAX_SENDS)) {
+    return;
+  }
+  if (!m_notPaired) {
+    m_notPaired = true;
+    m_pairDone = false;
+    m_pairSends = 0;
+    CFG_LOG("[PAIR] 本机公钥不在车端白名单，准备发送 add-key-request");
+  }
+  m_nextPairAt = millis();
+#else
+  if (!m_pairWaitLogged) {
+    m_pairWaitLogged = true;
+    CFG_LOG("[PAIR] 本机公钥未登记（请在车机或模拟器上授权后再握手）");
+  }
+  m_notPaired = true;
+#endif
+}
+
+void TeslaClient::sendPairingRequest() {
+  size_t n = 0;
+  if (!m_crypto.buildPairingRequest(m_tx, sizeof(m_tx), &n)) {
+    CFG_LOG("[PAIR] add-key-request 构造失败");
+    m_nextPairAt = millis() + CFG_TESLA_PAIR_RETRY_MS;
+    return;
+  }
+  if (!m_link || !m_link->sendRaw(m_tx, n)) {
+    CFG_LOG("[PAIR] add-key-request 发送失败（链路未就绪）");
+    m_nextPairAt = millis() + CFG_TESLA_PAIR_RETRY_MS;
+    return;
+  }
+  ++m_pairSends;
+  m_nextPairAt = millis() + CFG_TESLA_PAIR_RETRY_MS;
+  CFG_LOG("[PAIR] 已发送 add-key-request %uB（第 %u/%u 次）→ 请在中控台轻点 NFC 钥匙卡",
+          (unsigned)n, (unsigned)m_pairSends, (unsigned)CFG_TESLA_PAIR_MAX_SENDS);
+}
+
+void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
+                                  bool terminal) {
+  if (!terminal) {
+    if (operationStatus == 1 && !m_pairWaitLogged) {
+      m_pairWaitLogged = true;
+      CFG_LOG("[PAIR] 车辆已受理请求，等待 NFC 卡授权（中控台轻点钥匙卡）");
+    }
+    return;
+  }
+
+  m_pairDone = true;
+  if (operationStatus == 0 && info == 0) {
+    CFG_LOG("[PAIR] ✅ 配钥成功：公钥已写入车端白名单，重新握手");
+    m_notPaired = false;
+    m_handshakeTries = 0;
+    m_nextActionAt = millis() + 300;
+    return;
+  }
+
+  const char* reason = "未知错误";
+  switch (info) {
+    case 4: reason = "白名单已满（先在车机删除一把钥匙）"; break;
+    case 5: reason = "无权添加（当前钥匙不是 OWNER）"; break;
+    case 6: reason = "公钥格式非法"; break;
+    case 13: reason = "该公钥已在白名单（直接重新握手即可）"; break;
+    case 14: reason = "该操作必须在中控台刷卡"; break;
+    case 24: reason = "车主拒绝了配钥请求"; break;
+    case 25: reason = "等待刷卡超时"; break;
+    case 26: reason = "等待中控台确认超时"; break;
+    default: break;
+  }
+  CFG_LOG("[PAIR] ❌ 配钥失败 info=%u（%s）", (unsigned)info, reason);
+  // 保留 m_notPaired，后续可用长间隔握手探测；需人工处理后重启/重连重试
+  m_nextActionAt = millis() + CFG_TESLA_HANDSHAKE_RETRY_LONG_MS;
 }
 
 void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,

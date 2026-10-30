@@ -23,7 +23,8 @@ from .metadata import (
     response_metadata,
     session_info_metadata,
 )
-from .pb import signatures_pb2, universal_message_pb2
+from .pairing import PairingManager
+from .pb import keys_pb2, signatures_pb2, universal_message_pb2, vcsec_pb2
 from .secure_link import (
     FrameReassembler,
     build_request_hash,
@@ -42,6 +43,7 @@ from .session import (
     derive_shared_key,
     new_epoch,
 )
+from .whitelist import Whitelist
 
 # UniversalMessage.MessageFault_E
 FAULT_NONE = 0
@@ -77,23 +79,62 @@ class TeslaCryptoServer:
         logger=None,
         identity: VehicleIdentity | None = None,
         allowed_client_public: bytes | None = None,
+        pair_auto: bool = False,
+        pair_timeout_s: float = 300.0,
     ):
         self.vin = vin
         self.identity = identity or VehicleIdentity()
-        self.dispatcher = Dispatcher(vin, telemetry, logger)
         self.log = logger or (lambda msg: None)
+        # 车端配对白名单（VCSEC key store）
+        self.whitelist = Whitelist(self.log)
+        # allowed_client_public 非 None -> 模拟真车「未登记公钥一律拒绝握手」；
+        # None -> 兼容模式：任何客户端握手都自动登记为 OWNER。
+        self.allowed_client_public = allowed_client_public
+        self.enforce_whitelist = allowed_client_public is not None
+        if allowed_client_public:
+            self.whitelist.add(bytes(allowed_client_public), keys_pb2.ROLE_OWNER)
+        # add-key-request 明文信封 + 「轻点 NFC 卡」授权状态机
+        self.pairing = PairingManager(
+            self.whitelist, logger=self.log, auto_approve=pair_auto, timeout_s=pair_timeout_s
+        )
+        self.dispatcher = Dispatcher(vin, telemetry, logger, whitelist=self.whitelist)
         self.sessions: dict[int, DomainSession] = {}
         self.reassembler = FrameReassembler()
         # 模拟 2024.38 之前的老固件：忽略 FLAG_ENCRYPT_RESPONSE，响应保持明文
         self.response_encryption_enabled = True
-        # 车端配对白名单：非 None 时只接受该客户端公钥（65B 非压缩编码），
-        # 模拟真车「未登记公钥的客户端一律拒绝握手」的行为；None 表示不校验。
-        self.allowed_client_public = allowed_client_public
 
     # ── 生命周期 ────────────────────────────────────────────
     def reset(self) -> None:
         self.sessions.clear()
         self.reassembler.reset()
+
+    def poll_events(self) -> list[bytes]:
+        """配对状态机的异步回包（刷卡确认/拒绝/超时），需周期调用。"""
+        payloads = self.pairing.tick()
+        payloads = list(payloads) + self.pairing.drain()
+        return [frame(p) for p in payloads]
+
+    def pairing_approve(self) -> bool:
+        """模拟中控台轻点 NFC 钥匙卡并确认。"""
+        return self.pairing.approve()
+
+    def pairing_reject(self) -> bool:
+        return self.pairing.reject()
+
+    def pairing_pending(self) -> str | None:
+        req = self.pairing.pending
+        return req.describe() if req else None
+
+    def whitelist_summary(self) -> list[dict]:
+        return [
+            {
+                "slot": e.slot,
+                "role": int(e.role),
+                "form_factor": int(e.form_factor),
+                "sha1": e.sha1.hex(),
+            }
+            for e in self.whitelist.entries()
+        ]
 
     def set_vin(self, vin: str) -> None:
         if vin != self.vin:
@@ -133,8 +174,27 @@ class TeslaCryptoServer:
             return self._handle_handshake(msg)
         if msg.HasField("protobuf_message_as_bytes"):
             return self._handle_command(msg)
+        # 未配对的 add-key-request：官方直接 Send 明文 ToVCSECMessage（不经 RoutableMessage），
+        # 其首字节固定为 0x0A（ToVCSECMessage.signedMessage = field 1, wire type 2）。
+        if payload[:1] == b"\x0a":
+            return self._handle_pairing_envelope(payload)
         self.log("[CRYPTO] 未知 payload 类型")
         return self._build_fault(msg, None, FAULT_INVALID_COMMAND)
+
+    # ── 配钥（add-key-request 明文信封）────────────────────
+    def _handle_pairing_envelope(self, payload: bytes) -> bytes | None:
+        envelope = vcsec_pb2.ToVCSECMessage()
+        try:
+            envelope.ParseFromString(payload)
+        except Exception as exc:
+            self.log(f"[PAIR] ToVCSECMessage 解析失败: {exc}")
+            return None
+        replies = self.pairing.handle_envelope(envelope)
+        if not replies:
+            return None
+        if len(replies) > 1:  # pragma: no cover - 防御性
+            self.log(f"[PAIR] 单次请求产生 {len(replies)} 条回包，仅返回首条")
+        return replies[0]
 
     # ── 握手 ──────────────────────────────────────────────
     def _handle_handshake(self, msg) -> bytes:
@@ -146,14 +206,18 @@ class TeslaCryptoServer:
         if len(client_public) != 65 or client_public[0] != 0x04:
             self.log(f"[CRYPTO] 客户端公钥编码非法: {len(client_public)}B")
             return self._build_fault(msg, domain, FAULT_INVALID_SIGNATURE)
-        if self.allowed_client_public is not None and not constant_time_equals(
-            client_public, self.allowed_client_public
-        ):
+        if self.enforce_whitelist and not self.whitelist.contains(client_public):
+            # 真车语义：未登记公钥不建会话，回 SessionInfo status=KEY_NOT_ON_WHITELIST
+            # （客户端据此映射为 ErrKeyNotPaired，随后改走 add-key-request 刷卡流程）。
             self.log(
-                f"[CRYPTO] 客户端公钥未登记，拒绝握手 pub={client_public.hex()[:16]}…"
-                f"（车端仅接受 {self.allowed_client_public.hex()[:16]}…）"
+                "[CRYPTO] 客户端公钥不在白名单，回 SessionInfo "
+                f"status=KEY_NOT_ON_WHITELIST pub={client_public.hex()[:16]}…"
+                "（需先 add-key-request 并在中控台刷卡授权）"
             )
-            return self._build_fault(msg, domain, FAULT_INVALID_SIGNATURE)
+            return self._reject_not_paired(msg, domain)
+        if not self.enforce_whitelist and not self.whitelist.contains(client_public):
+            # 兼容模式（未配置白名单）：握手成功即自动登记为 OWNER，便于后续 add-key 命令
+            self.whitelist.add(client_public, keys_pb2.ROLE_OWNER)
 
         try:
             shared_x = self.identity.ecdh(client_public)
@@ -200,6 +264,26 @@ class TeslaCryptoServer:
             f"counter={session.initial_counter} epoch={session.epoch.hex()[:8]} "
             f"key={shared_key.hex()[:8]}"
         )
+        return reply.SerializeToString()
+
+    def _reject_not_paired(self, msg, domain: int) -> bytes:
+        """未配对公钥握手：回 SessionInfo{status=KEY_NOT_ON_WHITELIST}，不带 HMAC tag。"""
+        info = signatures_pb2.SessionInfo()
+        info.counter = self._new_counter()
+        info.publicKey = self.identity.public_bytes
+        info.epoch = new_epoch()
+        info.clock_time = int(time.time()) & 0xFFFFFFFF
+        info.status = signatures_pb2.SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST
+
+        reply = universal_message_pb2.RoutableMessage()
+        routing = self._routing_of(msg)
+        if routing:
+            reply.to_destination.routing_address = routing
+        reply.from_destination.domain = domain
+        reply.session_info = info.SerializeToString()
+        challenge = self._challenge_of(msg)
+        if challenge:
+            reply.request_uuid = challenge
         return reply.SerializeToString()
 
     # ── 命令 ──────────────────────────────────────────────

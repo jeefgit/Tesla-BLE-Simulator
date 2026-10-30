@@ -29,6 +29,14 @@ class TeslaCrypto {
       std::function<void(const uint8_t* plaintext, size_t len, uint32_t fault)>;
   // 握手结果回调（true = 会话建立）
   using SessionHandler = std::function<void(bool ok)>;
+  // 车辆回 SessionInfo.status = KEY_NOT_ON_WHITELIST（需先配钥）
+  using NotPairedHandler = std::function<void()>;
+  // 配钥状态回调（FromVCSECMessage.commandStatus）
+  //   operationStatus: 0=OK 1=WAIT(等待 NFC 刷卡) 2=ERROR
+  //   info: WhitelistOperation_information_E（终态时有效）
+  //   terminal: true = 收到 WhitelistOperation_status 终态
+  using PairingHandler =
+      std::function<void(uint32_t operationStatus, uint32_t info, bool terminal)>;
 
   void begin(const String& vin);
   void reset();
@@ -37,9 +45,16 @@ class TeslaCrypto {
 
   void setResponseHandler(ResponseHandler h) { m_onResponse = std::move(h); }
   void setSessionHandler(SessionHandler h) { m_onSession = std::move(h); }
+  void setNotPairedHandler(NotPairedHandler h) { m_onNotPaired = std::move(h); }
+  void setPairingHandler(PairingHandler h) { m_onPairing = std::move(h); }
 
   // 构造握手请求帧（含 2 字节长度前缀），写入 out
   bool buildHandshakeRequest(uint8_t* out, size_t cap, size_t* outLen);
+
+  // 构造 add-key-request 明文信封帧（含 2 字节长度前缀）
+  // ToVCSECMessage{SignedMessage{UnsignedMessage{WhitelistOperation{...}},
+  //                              SIGNATURE_TYPE_PRESENT_KEY}}
+  bool buildPairingRequest(uint8_t* out, size_t cap, size_t* outLen);
 
   // 构造 GetVehicleData 加密命令帧（含 2 字节长度前缀）
   bool buildGetVehicleData(uint8_t* out, size_t cap, size_t* outLen);
@@ -93,4 +108,6 @@ class TeslaCrypto {
 
   ResponseHandler m_onResponse;
   SessionHandler m_onSession;
+  NotPairedHandler m_onNotPaired;
+  PairingHandler m_onPairing;
 };

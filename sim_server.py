@@ -223,6 +223,11 @@ class TelemetryState:
         self.response_encryption = True  # True = 模拟 2024.38+ 加密响应；False = 老固件明文响应
         self.crypto_reset_pending = False  # GUI「使会话失效」→ 模拟车机重启
 
+        # BLE 配钥（add-key-request）：模拟「中控台轻点 NFC 钥匙卡」授权
+        self.pair_approve_pending = False
+        self.pair_reject_pending = False
+        self.pair_pending_desc = ""      # 当前待授权请求描述（供界面/日志展示）
+
         # 初始车况数据
         self.data = {
             'speed_kmh': 0.0,
@@ -402,6 +407,31 @@ class TelemetryState:
             val = self.crypto_reset_pending
             self.crypto_reset_pending = False
             return val
+
+    # ── 配钥授权（NFC 刷卡）控制 ────────────────────────────
+    def request_pair_approve(self):
+        with self.lock:
+            self.pair_approve_pending = True
+
+    def request_pair_reject(self):
+        with self.lock:
+            self.pair_reject_pending = True
+
+    def consume_pair_requests(self):
+        """取出一次待处理的批准/拒绝操作。"""
+        with self.lock:
+            approve, reject = self.pair_approve_pending, self.pair_reject_pending
+            self.pair_approve_pending = False
+            self.pair_reject_pending = False
+            return approve, reject
+
+    def set_pair_pending_desc(self, desc):
+        with self.lock:
+            self.pair_pending_desc = desc or ""
+
+    def get_pair_pending_desc(self):
+        with self.lock:
+            return self.pair_pending_desc
 
 
 def pack_telemetry(data):
@@ -948,6 +978,28 @@ class TeslaSimulatorGUI:
             command=self.toggle_response_encryption
         )
         self.btn_resp_enc.pack(side="right", padx=(0, 6))
+
+        # 8. 配钥授权（模拟中控台轻点 NFC 钥匙卡）
+        self.btn_pair = tk.Button(
+            bar_frame,
+            text="🔑 轻点钥匙卡",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.BG_BTN,
+            fg=self.FG_TEXT,
+            activebackground=self.BG_BTN_HOVER,
+            activeforeground=self.FG_TEXT,
+            bd=0,
+            relief="flat",
+            padx=8,
+            pady=2,
+            command=self.tap_nfc_card
+        )
+        self.btn_pair.pack(side="right", padx=(0, 6))
+
+    def tap_nfc_card(self):
+        """模拟车主在中控台轻点钥匙卡（授权 add-key-request）。"""
+        self.state.request_pair_approve()
+        self.log_queue.put("[GUI] 🔑 已请求刷卡授权，等待后台配钥状态机处理")
 
     def toggle_crypto_switch(self):
         enabled = self.state.toggle_crypto_enabled()
@@ -1636,6 +1688,21 @@ class TeslaSimulatorGUI:
                 fg=q_color
             )
 
+        # 配钥请求待授权时高亮 NFC 按钮
+        if getattr(self, "btn_pair", None) is not None:
+            if self.state.get_pair_pending_desc():
+                self.btn_pair.config(
+                    text="🔑 轻点钥匙卡 (待授权)",
+                    bg=self.COLOR_RED,
+                    activebackground=self.COLOR_RED,
+                )
+            else:
+                self.btn_pair.config(
+                    text="🔑 轻点钥匙卡",
+                    bg=self.BG_BTN,
+                    activebackground=self.BG_BTN,
+                )
+
     def sync_ui_from_data(self, data):
         """
         将字典数据全量更新至界面各滑块、按钮
@@ -1804,6 +1871,8 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
             telemetry=state,
             logger=lambda m: log_queue.put(m),
             allowed_client_public=allowed_client_pub,
+            pair_auto=getattr(args, "pair_auto", False),
+            pair_timeout_s=getattr(args, "pair_timeout", 300.0),
         )
         crypto_server.response_encryption_enabled = state.is_response_encryption()
         log_queue.put("[+] 特斯拉加密协议栈已就绪 (ECDH P-256 / AES-128-GCM / HMAC-SHA256)")
@@ -1811,6 +1880,13 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
             log_queue.put(
                 f"[+] 已启用配对白名单：仅接受公钥 {allowed_client_pub.hex()[:16]}…"
             )
+            if getattr(args, "pair_auto", False):
+                log_queue.put("[+] 配钥模式：AUTO（收到 add-key-request 立即授权，模拟刷卡）")
+            else:
+                log_queue.put(
+                    "[+] 配钥模式：NFC（未登记公钥会收到 KEY_NOT_ON_WHITELIST，"
+                    "需在界面点击「🔑 轻点钥匙卡」授权）"
+                )
     else:
         log_queue.put(f"[-] 加密协议栈不可用（缺少依赖 cryptography）: {TESLA_CRYPTO_ERROR}")
 
@@ -1934,6 +2010,7 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
     frame_log_counter = 0
     last_ble_start_attempt = 0.0
     last_push_time = 0.0
+    last_pair_pending_desc = None
     current_target_interval = 0.8
     try:
         while not stop_event.is_set():
@@ -2010,11 +2087,33 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                     if gui is not None:
                         gui.btn_restart_ble.config(state="normal", text="应用并重启广播")
 
-            # 4. 加密协议：处理「使会话失效」并发送待回包
+            # 4. 加密协议：处理「使会话失效」、配钥授权并发送待回包
             if crypto_server is not None:
                 if state.consume_crypto_reset():
                     crypto_server.reset()
                     log_queue.put("[CRYPTO] 已使会话失效（模拟车机重启），等待 ESP32 重新握手")
+
+                # 配钥：界面「轻点钥匙卡」→ 批准；超时由状态机自行回终态
+                approve, reject = state.consume_pair_requests()
+                if approve:
+                    if crypto_server.pairing_approve():
+                        log_queue.put("[PAIR] 🔑 NFC 刷卡成功，钥匙已写入车端白名单")
+                    else:
+                        log_queue.put("[PAIR] 当前没有待授权的配钥请求，忽略刷卡")
+                if reject and crypto_server.pairing_reject():
+                    log_queue.put("[PAIR] 已拒绝本次配钥请求（UI DENIED）")
+                pending = crypto_server.pairing_pending()
+                state.set_pair_pending_desc(pending)
+                if pending and pending != last_pair_pending_desc:
+                    log_queue.put(
+                        f"[PAIR] ⏳ 车辆等待刷卡：{pending}（点击界面「🔑 轻点钥匙卡」）"
+                    )
+                last_pair_pending_desc = pending
+
+                # 刷卡终态 / 超时等异步回包
+                for event in crypto_server.poll_events():
+                    proto_responses.put(event)
+
                 while not proto_responses.empty():
                     try:
                         reply = proto_responses.get_nowait()
@@ -2139,6 +2238,17 @@ if __name__ == "__main__":
         type=str,
         default="",
         help="启用车端配对白名单：只接受该客户端公钥（65 字节非压缩编码的 130 位 hex，可带 0x 前缀）",
+    )
+    parser.add_argument(
+        "--pair-auto",
+        action="store_true",
+        help="配钥自动授权：收到 add-key-request 立即写入白名单（不模拟 NFC 刷卡）",
+    )
+    parser.add_argument(
+        "--pair-timeout",
+        type=float,
+        default=300.0,
+        help="等待 NFC 刷卡的超时秒数（超时回 TIMED_OUT_WAITING_FOR_TAP），默认 300",
     )
     args = parser.parse_args()
     

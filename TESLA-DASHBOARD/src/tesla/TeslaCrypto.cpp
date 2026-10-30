@@ -27,6 +27,11 @@ namespace {
 
 // UniversalMessage.Domain
 constexpr uint32_t kDomainInfotainment = 3;
+constexpr uint32_t kDomainVcsec = 2;
+
+// VCSEC.SignatureType：PRESENT_KEY 表示「需要本地实体（NFC 卡）授权」
+constexpr uint32_t kSigPresentKey = 2;
+
 
 // Signatures.SignatureType
 constexpr uint8_t kSigAesGcmPersonalized = 5;
@@ -377,6 +382,72 @@ void parseSignatureData(pb::Reader& r, SignatureFields* out) {
   }
 }
 
+// from_destination.domain（Destination.domain = 1）
+uint32_t parseDestinationDomain(pb::Reader& r) {
+  uint32_t domain = 0;
+  while (!r.atEnd()) {
+    uint32_t f = 0, w = 0;
+    if (!r.next(&f, &w)) break;
+    if (f == 1 && w == pb::WIRE_VARINT) {
+      uint64_t v = 0;
+      if (r.readVarint(&v)) domain = (uint32_t)v;
+    } else {
+      r.skip(w);
+    }
+  }
+  return domain;
+}
+
+// 解析 FromVCSECMessage.commandStatus（配钥进度）
+//   CommandStatus            : operationStatus=1, whitelistOperationStatus=3
+//   WhitelistOperation_status: whitelistOperationInformation=1, operationStatus=3
+// terminal=true 表示已收到 WhitelistOperation_status（配钥终态）。
+bool parsePairingStatus(const uint8_t* data, size_t len, uint32_t* opStatus,
+                        uint32_t* info, bool* terminal) {
+  *opStatus = 0;
+  *info = 0;
+  *terminal = false;
+  bool found = false;
+
+  pb::Reader r(data, len);
+  while (!r.atEnd()) {
+    uint32_t f = 0, w = 0;
+    if (!r.next(&f, &w)) break;
+    if (f == 4 && w == pb::WIRE_LEN) {  // FromVCSECMessage.commandStatus
+      pb::Reader cs;
+      if (!r.readMessage(&cs)) break;
+      found = true;
+      while (!cs.atEnd()) {
+        uint32_t cf = 0, cw = 0;
+        if (!cs.next(&cf, &cw)) break;
+        if (cf == 1 && cw == pb::WIRE_VARINT) {
+          uint64_t v = 0;
+          if (cs.readVarint(&v)) *opStatus = (uint32_t)v;
+        } else if (cf == 3 && cw == pb::WIRE_LEN) {
+          pb::Reader wl;
+          if (!cs.readMessage(&wl)) break;
+          *terminal = true;
+          while (!wl.atEnd()) {
+            uint32_t wf = 0, ww = 0;
+            if (!wl.next(&wf, &ww)) break;
+            if (wf == 1 && ww == pb::WIRE_VARINT) {
+              uint64_t v = 0;
+              if (wl.readVarint(&v)) *info = (uint32_t)v;
+            } else {
+              wl.skip(ww);
+            }
+          }
+        } else {
+          cs.skip(cw);
+        }
+      }
+    } else {
+      r.skip(w);
+    }
+  }
+  return found;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -520,6 +591,74 @@ bool TeslaCrypto::buildHandshakeRequest(uint8_t* out, size_t cap,
 }
 
 // ---------------------------------------------------------------------------
+// add-key-request（未配对时的明文配钥信封）
+//
+// 官方 vehicle-command pkg/vehicle/security.go:
+//   ToVCSECMessage{SignedMessage{ProtobufMessageAsBytes=UnsignedMessage{
+//       WhitelistOperation{addKeyToWhitelistAndAddPermissions{key,keyRole},
+//                          metadataForKey{keyFormFactor}}},
+//     SignatureType=SIGNATURE_TYPE_PRESENT_KEY}}
+// 直接 conn.Send(明文)，不经 ECDH 会话、无签名；车辆提示刷卡后回
+// CommandStatus{operationStatus=WAIT}，刷卡确认后回终态 WhitelistOperation_status。
+// ---------------------------------------------------------------------------
+bool TeslaCrypto::buildPairingRequest(uint8_t* out, size_t cap,
+                                      size_t* outLen) {
+  if (!out || !outLen) return false;
+  if (!ensureKeys()) return false;
+
+  // PublicKey{PublicKeyRaw = m_pub}
+  uint8_t keyBuf[80];
+  pb::Writer key(keyBuf, sizeof(keyBuf));
+  key.putBytes(1, m_pub, sizeof(m_pub));
+
+  // PermissionChange{key, keyRole}
+  uint8_t changeBuf[96];
+  pb::Writer change(changeBuf, sizeof(changeBuf));
+  change.putMessage(1, key);
+  change.putUint32(4, CFG_TESLA_PAIR_ROLE);
+
+  // KeyMetadata{keyFormFactor}
+  uint8_t metaBuf[8];
+  pb::Writer meta(metaBuf, sizeof(metaBuf));
+  meta.putUint32(1, CFG_TESLA_PAIR_FORM_FACTOR);
+
+  // WhitelistOperation{addKeyToWhitelistAndAddPermissions, metadataForKey}
+  uint8_t opBuf[160];
+  pb::Writer op(opBuf, sizeof(opBuf));
+  op.putMessage(5, change);  // addKeyToWhitelistAndAddPermissions
+  op.putMessage(6, meta);    // metadataForKey
+
+  // UnsignedMessage{WhitelistOperation}
+  uint8_t unsignedBuf[192];
+  pb::Writer um(unsignedBuf, sizeof(unsignedBuf));
+  um.putMessage(16, op);  // UnsignedMessage.WhitelistOperation
+
+  // SignedMessage{protobufMessageAsBytes, signatureType}
+  uint8_t signedBuf[256];
+  pb::Writer sm(signedBuf, sizeof(signedBuf));
+  sm.putBytes(2, um.data(), um.size());
+  sm.putUint32(3, kSigPresentKey);
+
+  // ToVCSECMessage{signedMessage}
+  uint8_t body[320];
+  pb::Writer w(body, sizeof(body));
+  w.putMessage(1, sm);
+  if (!key.ok() || !change.ok() || !meta.ok() || !op.ok() || !um.ok() ||
+      !sm.ok() || !w.ok()) {
+    CFG_LOG("[PAIR] add-key-request 编码失败（缓冲区不足）");
+    return false;
+  }
+
+  const size_t n = w.size();
+  if (cap < n + 2) return false;
+  out[0] = (uint8_t)(n >> 8);
+  out[1] = (uint8_t)(n & 0xFF);
+  memcpy(out + 2, body, n);
+  *outLen = n + 2;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // GetVehicleData 加密命令
 // ---------------------------------------------------------------------------
 bool TeslaCrypto::buildGetVehicleData(uint8_t* out, size_t cap, size_t* outLen) {
@@ -637,6 +776,7 @@ void TeslaCrypto::handleFrame(const uint8_t* payload, size_t len) {
   size_t ciphertextLen = 0;
   uint32_t flags = 0;
   uint32_t fault = 0;
+  uint32_t fromDomain = 0;
   SignatureFields sig;
 
   pb::Reader r(payload, len);
@@ -644,6 +784,15 @@ void TeslaCrypto::handleFrame(const uint8_t* payload, size_t len) {
     uint32_t f = 0, w = 0;
     if (!r.next(&f, &w)) break;
     switch (f) {
+      case 7:  // from_destination
+        if (w == pb::WIRE_LEN) {
+          pb::Reader d;
+          if (r.readMessage(&d)) fromDomain = parseDestinationDomain(d);
+        } else {
+          r.skip(w);
+        }
+        break;
+
       case 10:  // protobuf_message_as_bytes
         if (w == pb::WIRE_LEN) {
           const uint8_t* p = nullptr;
@@ -710,14 +859,40 @@ void TeslaCrypto::handleFrame(const uint8_t* payload, size_t len) {
   }
 
   if (ciphertext && ciphertextLen) {
-    // 未握手成功时不存在可用密钥，任何业务响应都直接丢弃
+    // 未握手成功时不存在可用密钥；但 VCSEC 明文配钥状态必须放行，
+    // 否则无法完成 add-key-request -> 刷卡 -> 终态 的引导流程。
     if (!m_hasSession) {
+      if (fromDomain == kDomainVcsec) {
+        uint32_t opStatus = 0;
+        uint32_t info = 0;
+        bool terminal = false;
+        if (parsePairingStatus(ciphertext, ciphertextLen, &opStatus, &info,
+                               &terminal)) {
+          CFG_LOG("[PAIR] 配钥状态 operationStatus=%u info=%u%s",
+                  (unsigned)opStatus, (unsigned)info,
+                  terminal ? "（终态）" : "（等待刷卡）");
+          if (m_onPairing) m_onPairing(opStatus, info, terminal);
+          return;
+        }
+      }
       CFG_LOG("[CRYPTO] 尚未握手成功，忽略响应帧");
       return;
     }
     if (sig.hasResponse) {
       handleResponse(ciphertext, ciphertextLen, sig.nonce, sig.nonceLen,
                      sig.counter, sig.tag, sig.tagLen, flags, fault);
+    } else if (fromDomain == kDomainVcsec) {
+      // VCSEC 明文：可能是配钥终态（刷卡确认晚于重新握手时）
+      uint32_t opStatus = 0;
+      uint32_t info = 0;
+      bool terminal = false;
+      if (parsePairingStatus(ciphertext, ciphertextLen, &opStatus, &info,
+                             &terminal)) {
+        CFG_LOG("[PAIR] 配钥状态 operationStatus=%u info=%u%s",
+                (unsigned)opStatus, (unsigned)info,
+                terminal ? "（终态）" : "（等待刷卡）");
+        if (m_onPairing) m_onPairing(opStatus, info, terminal);
+      }
     } else {
       // 老固件忽略 FLAG_ENCRYPT_RESPONSE：负载直接是明文 CarServer.Response
       m_lastFault = fault;
@@ -786,8 +961,15 @@ bool TeslaCrypto::handleHandshake(const uint8_t* sessionInfo, size_t len,
     if (m_onSession) m_onSession(false);
     return false;
   }
+  if (status == 1) {
+    // SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST：官方客户端映射为 ErrKeyNotPaired
+    CFG_LOG("[CRYPTO] 车辆回 KEY_NOT_ON_WHITELIST（本机公钥未配对）");
+    if (m_onNotPaired) m_onNotPaired();
+    if (m_onSession) m_onSession(false);
+    return false;
+  }
   if (status != 0) {
-    CFG_LOG("[CRYPTO] 握手被拒 status=%u（密钥不在白名单？）", (unsigned)status);
+    CFG_LOG("[CRYPTO] 握手被拒 status=%u", (unsigned)status);
     if (m_onSession) m_onSession(false);
     return false;
   }

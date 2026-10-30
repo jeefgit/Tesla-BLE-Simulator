@@ -119,4 +119,4 @@ pio device monitor      # 打开 115200 串口
 - [x] 断连与超时的仪表降级显示（`--`）
 - [ ] 接屏（ST7789 圆屏 + LVGL，只改 Dashboard 模块）
 - [ ] Write 通道指令下发（如车辆控制，00000212 特征值）
-- [ ] 真车配对/加密流程（见 docs/ENCRYPTION_SIMULATION_PLAN.md）
+- [x] 真车配对/加密流程（add-key-request 刷卡配钥 + add-key，见 docs/PAIRING.md）
