@@ -667,6 +667,14 @@ class TeslaSimulatorGUI:
         
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(2, weight=1)
+
+        # 配钥授权弹窗（等待刷卡时自动弹出）
+        self._pair_dialog = None
+        self._pair_dialog_desc = None
+        self._pair_btn_approve = None
+        self._pair_btn_reject = None
+        self._pair_approve_clicked = False
+
         
         self.create_top_panel()
         self.create_emulation_bar()
@@ -833,8 +841,14 @@ class TeslaSimulatorGUI:
         """
         创建真车 BLE 通讯拟真控制栏（问答模式切换、延迟/丢包控制、故障注入）
         """
-        bar_frame = tk.Frame(self.root, bg=self.BG_CARD, height=42, bd=0, relief="flat")
-        bar_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
+        # 外层容器：控制栏 + 配钥授权横幅各占一行。
+        # 控制栏控件很多，宽度超出窗口时后 pack 的控件会被挤掉不可见，
+        # 所以「轻点钥匙卡」必须放在独立一行保证永远可见。
+        wrap = tk.Frame(self.root, bg=self.BG_MAIN)
+        wrap.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
+
+        bar_frame = tk.Frame(wrap, bg=self.BG_CARD, height=42, bd=0, relief="flat")
+        bar_frame.pack(fill="x")
         
         # 1. 标题与模式 Toggle
         lbl_tag = tk.Label(bar_frame, text="真车BLE拟真:", font=("Segoe UI", 9, "bold"), fg=self.COLOR_BLUE, bg=self.BG_CARD)
@@ -979,10 +993,23 @@ class TeslaSimulatorGUI:
         )
         self.btn_resp_enc.pack(side="right", padx=(0, 6))
 
-        # 8. 配钥授权（模拟中控台轻点 NFC 钥匙卡）
-        self.btn_pair = tk.Button(
-            bar_frame,
-            text="🔑 轻点钥匙卡",
+        # 8. 配钥授权横幅（独立一行，始终可见；模拟中控台「轻点 NFC 钥匙卡」）
+        self.pair_banner = tk.Frame(wrap, bg=self.BG_INNER, bd=0, relief="flat")
+        self.pair_banner.pack(fill="x", pady=(4, 0))
+
+        self.lbl_pair_banner = tk.Label(
+            self.pair_banner,
+            text="🔑 配钥授权：当前没有待授权的 add-key-request",
+            font=("Segoe UI", 9, "bold"),
+            fg=self.FG_MUTED,
+            bg=self.BG_INNER,
+            anchor="w"
+        )
+        self.lbl_pair_banner.pack(side="left", padx=10, pady=4)
+
+        self.btn_pair_reject = tk.Button(
+            self.pair_banner,
+            text="拒绝",
             font=("Segoe UI", 9, "bold"),
             bg=self.BG_BTN,
             fg=self.FG_TEXT,
@@ -990,16 +1017,194 @@ class TeslaSimulatorGUI:
             activeforeground=self.FG_TEXT,
             bd=0,
             relief="flat",
-            padx=8,
+            padx=10,
             pady=2,
+            state="disabled",
+            command=self._pair_dialog_reject
+        )
+        self.btn_pair_reject.pack(side="right", padx=(0, 10), pady=3)
+
+        self.btn_pair_approve = tk.Button(
+            self.pair_banner,
+            text="🔑 轻点钥匙卡（批准）",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.BG_BTN,
+            fg=self.FG_TEXT,
+            activebackground=self.COLOR_GREEN,
+            activeforeground=self.FG_TEXT,
+            bd=0,
+            relief="flat",
+            padx=10,
+            pady=2,
+            state="disabled",
             command=self.tap_nfc_card
         )
-        self.btn_pair.pack(side="right", padx=(0, 6))
+        self.btn_pair_approve.pack(side="right", padx=(0, 6), pady=3)
 
     def tap_nfc_card(self):
         """模拟车主在中控台轻点钥匙卡（授权 add-key-request）。"""
+        self._pair_approve_clicked = True
         self.state.request_pair_approve()
+        if getattr(self, "btn_pair_approve", None) is not None:
+            self.btn_pair_approve.config(state="disabled", text="已刷卡，等待车辆确认…")
         self.log_queue.put("[GUI] 🔑 已请求刷卡授权，等待后台配钥状态机处理")
+
+    # ─── 配钥授权弹窗 ──────────────────────────────────────────
+    def _pair_dialog_alive(self):
+        dlg = self._pair_dialog
+        if dlg is None:
+            return False
+        try:
+            return bool(dlg.winfo_exists())
+        except Exception:
+            return False
+
+    def _sync_pair_dialog(self, pending):
+        """有待授权请求时弹出窗口；请求结束（批准/拒绝/超时）后自动关闭。"""
+        if pending and not self._pair_dialog_alive():
+            self._show_pair_dialog(pending)
+        elif not pending and self._pair_dialog_alive():
+            self._close_pair_dialog()
+
+    def _show_pair_dialog(self, desc):
+        try:
+            dlg = tk.Toplevel(self.root)
+            dlg.title("🔑 BLE 配钥授权")
+            dlg.configure(bg=self.BG_MAIN)
+            dlg.resizable(False, False)
+            dlg.transient(self.root)
+
+            self.root.update_idletasks()
+            width, height = 480, 250
+            x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
+            y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 3)
+            dlg.geometry(f"{width}x{height}+{x}+{y}")
+
+            body = tk.Frame(dlg, bg=self.BG_CARD)
+            body.pack(fill="both", expand=True, padx=12, pady=12)
+
+            tk.Label(
+                body,
+                text="车辆请求登记新钥匙",
+                font=("Segoe UI", 14, "bold"),
+                fg=self.COLOR_RED,
+                bg=self.BG_CARD,
+            ).pack(anchor="w")
+
+            tk.Label(
+                body,
+                text=desc,
+                font=("Consolas", 10),
+                fg=self.FG_TEXT,
+                bg=self.BG_CARD,
+                wraplength=440,
+                justify="left",
+            ).pack(anchor="w", pady=(8, 4))
+
+            tk.Label(
+                body,
+                text="请在车辆中控台轻点 NFC 钥匙卡；也可以点击下方按钮模拟刷卡。\n"
+                     "授权成功后该公钥会写入车端白名单，ESP32 会自动重新握手。",
+                font=("Segoe UI", 9),
+                fg=self.FG_MUTED,
+                bg=self.BG_CARD,
+                wraplength=440,
+                justify="left",
+            ).pack(anchor="w", pady=(0, 8))
+
+            btns = tk.Frame(body, bg=self.BG_CARD)
+            btns.pack(fill="x", side="bottom", pady=(6, 0))
+
+            self._pair_btn_approve = tk.Button(
+                btns,
+                text="🔑 轻点钥匙卡（批准）",
+                font=("Segoe UI", 10, "bold"),
+                bg=self.COLOR_GREEN,
+                fg=self.FG_TEXT,
+                activebackground=self.COLOR_GREEN,
+                activeforeground=self.FG_TEXT,
+                bd=0,
+                relief="flat",
+                padx=12,
+                pady=6,
+                command=self._pair_dialog_approve,
+            )
+            self._pair_btn_approve.pack(side="left", expand=True, fill="x", padx=(0, 6))
+
+            self._pair_btn_reject = tk.Button(
+                btns,
+                text="拒绝",
+                font=("Segoe UI", 10, "bold"),
+                bg=self.BG_BTN,
+                fg=self.FG_TEXT,
+                activebackground=self.BG_BTN_HOVER,
+                activeforeground=self.FG_TEXT,
+                bd=0,
+                relief="flat",
+                padx=12,
+                pady=6,
+                command=self._pair_dialog_reject,
+            )
+            self._pair_btn_reject.pack(side="left", expand=True, fill="x")
+
+            dlg.protocol("WM_DELETE_WINDOW", self._pair_dialog_reject)
+            self._pair_dialog = dlg
+            self._pair_dialog_desc = desc
+            dlg.lift()
+            dlg.attributes("-topmost", True)
+            dlg.after(800, lambda: self._drop_topmost(dlg))
+            self.log_queue.put("[GUI] 🔑 已弹出配钥授权窗口，请刷卡或点击「批准」")
+        except Exception as exc:
+            self._pair_dialog = None
+            self._pair_dialog_desc = None
+            msg = f"[GUI] 配钥授权弹窗创建失败: {exc}"
+            self.log_queue.put(msg)
+            print(msg)
+
+    @staticmethod
+    def _drop_topmost(dlg):
+        try:
+            dlg.attributes("-topmost", False)
+        except Exception:
+            pass
+
+    def _close_pair_dialog(self):
+        dlg = self._pair_dialog
+        self._pair_dialog = None
+        self._pair_dialog_desc = None
+        self._pair_btn_approve = None
+        self._pair_btn_reject = None
+        if dlg is not None:
+            try:
+                dlg.destroy()
+            except Exception:
+                pass
+
+    def _pair_dialog_approve(self):
+        self._pair_approve_clicked = True
+        self.state.request_pair_approve()
+        self.log_queue.put("[GUI] 🔑 已点击「轻点钥匙卡」，等待车辆确认")
+        if getattr(self, "btn_pair_approve", None) is not None:
+            try:
+                self.btn_pair_approve.config(state="disabled", text="已刷卡，等待车辆确认…")
+            except Exception:
+                pass
+        for btn in (self._pair_btn_approve, self._pair_btn_reject):
+            if btn is not None:
+                try:
+                    btn.config(state="disabled")
+                except Exception:
+                    pass
+        if self._pair_btn_approve is not None:
+            try:
+                self._pair_btn_approve.config(text="已刷卡，等待车辆确认…")
+            except Exception:
+                pass
+
+    def _pair_dialog_reject(self):
+        self.state.request_pair_reject()
+        self.log_queue.put("[GUI] 已请求拒绝本次配钥")
+        self._close_pair_dialog()
 
     def toggle_crypto_switch(self):
         enabled = self.state.toggle_crypto_enabled()
@@ -1688,20 +1893,40 @@ class TeslaSimulatorGUI:
                 fg=q_color
             )
 
-        # 配钥请求待授权时高亮 NFC 按钮
-        if getattr(self, "btn_pair", None) is not None:
-            if self.state.get_pair_pending_desc():
-                self.btn_pair.config(
-                    text="🔑 轻点钥匙卡 (待授权)",
-                    bg=self.COLOR_RED,
-                    activebackground=self.COLOR_RED,
-                )
-            else:
-                self.btn_pair.config(
-                    text="🔑 轻点钥匙卡",
-                    bg=self.BG_BTN,
-                    activebackground=self.BG_BTN,
-                )
+        # 配钥请求待授权时高亮横幅，并自动弹出授权窗口
+        pending = self.state.get_pair_pending_desc()
+        self._update_pair_banner(pending)
+        self._sync_pair_dialog(pending)
+
+    def _update_pair_banner(self, pending):
+        """配钥横幅：有待授权请求时红色高亮 + 按钮可用，否则灰显。"""
+        lbl = getattr(self, "lbl_pair_banner", None)
+        btn_ok = getattr(self, "btn_pair_approve", None)
+        btn_no = getattr(self, "btn_pair_reject", None)
+        if lbl is None:
+            return
+        if pending:
+            lbl.config(text=f"🔑 车辆等待刷卡授权：{pending}", fg=self.COLOR_RED)
+            if btn_no is not None:
+                btn_no.config(state="normal", bg=self.BG_BTN)
+            if btn_ok is not None:
+                if self._pair_approve_clicked:
+                    btn_ok.config(state="disabled", text="已刷卡，等待车辆确认…")
+                else:
+                    btn_ok.config(
+                        state="normal",
+                        text="🔑 轻点钥匙卡（批准）",
+                        bg=self.COLOR_GREEN,
+                    )
+            return
+        self._pair_approve_clicked = False
+        lbl.config(text="🔑 配钥授权：当前没有待授权的 add-key-request", fg=self.FG_MUTED)
+        if btn_ok is not None:
+            btn_ok.config(
+                state="disabled", text="🔑 轻点钥匙卡（批准）", bg=self.BG_BTN
+            )
+        if btn_no is not None:
+            btn_no.config(state="disabled", bg=self.BG_BTN)
 
     def sync_ui_from_data(self, data):
         """

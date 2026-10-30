@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import time
 
@@ -97,6 +98,7 @@ class TeslaCryptoServer:
         self.pairing = PairingManager(
             self.whitelist, logger=self.log, auto_approve=pair_auto, timeout_s=pair_timeout_s
         )
+        self._not_paired_pubs: set[bytes] = set()
         self.dispatcher = Dispatcher(vin, telemetry, logger, whitelist=self.whitelist)
         self.sessions: dict[int, DomainSession] = {}
         self.reassembler = FrameReassembler()
@@ -209,11 +211,7 @@ class TeslaCryptoServer:
         if self.enforce_whitelist and not self.whitelist.contains(client_public):
             # 真车语义：未登记公钥不建会话，回 SessionInfo status=KEY_NOT_ON_WHITELIST
             # （客户端据此映射为 ErrKeyNotPaired，随后改走 add-key-request 刷卡流程）。
-            self.log(
-                "[CRYPTO] 客户端公钥不在白名单，回 SessionInfo "
-                f"status=KEY_NOT_ON_WHITELIST pub={client_public.hex()[:16]}…"
-                "（需先 add-key-request 并在中控台刷卡授权）"
-            )
+            self._log_not_paired(client_public)
             return self._reject_not_paired(msg, domain)
         if not self.enforce_whitelist and not self.whitelist.contains(client_public):
             # 兼容模式（未配置白名单）：握手成功即自动登记为 OWNER，便于后续 add-key 命令
@@ -262,9 +260,22 @@ class TeslaCryptoServer:
         self.log(
             f"[CRYPTO] 握手成功 域={self._domain_name(domain)} "
             f"counter={session.initial_counter} epoch={session.epoch.hex()[:8]} "
-            f"key={shared_key.hex()[:8]}"
+            f"key={shared_key.hex()[:8]} "
+            f"客户钥匙={hashlib.sha1(client_public).hexdigest()[:16]}（已在白名单，无需配钥刷卡）"
         )
         return reply.SerializeToString()
+
+    def _log_not_paired(self, client_public: bytes) -> None:
+        """每个未登记公钥只提示一次，避免 ESP32 握手重试刷屏。"""
+        if client_public in self._not_paired_pubs:
+            return
+        self._not_paired_pubs.add(client_public)
+        self.log(
+            "[CRYPTO] 客户端公钥不在白名单，回 SessionInfo "
+            f"status=KEY_NOT_ON_WHITELIST pub={client_public.hex()[:16]}…"
+            "（ESP32 应随即发送 add-key-request，模拟器会弹出「🔑 轻点钥匙卡」窗口；"
+            "若始终只有本日志，请确认 ESP32 已烧录含配钥功能的新固件）"
+        )
 
     def _reject_not_paired(self, msg, domain: int) -> bytes:
         """未配对公钥握手：回 SessionInfo{status=KEY_NOT_ON_WHITELIST}，不带 HMAC tag。"""
