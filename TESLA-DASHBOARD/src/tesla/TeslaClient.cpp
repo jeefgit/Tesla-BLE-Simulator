@@ -11,6 +11,17 @@ namespace {
 // 数值合理性：范围检查同时天然排除了 NaN/Inf（NaN 与任何数比较都为 false）
 inline bool inRange(float v, float lo, float hi) { return v >= lo && v <= hi; }
 
+// 打印前若干字节的 hex，用于诊断入站通知/帧
+void formatHexPrefix(char* out, size_t outSize, const uint8_t* p, size_t n) {
+  if (!out || outSize == 0) return;
+  out[0] = '\0';
+  const size_t max = (outSize - 1) / 2;
+  if (n > max) n = max;
+  for (size_t i = 0; i < n; ++i) {
+    snprintf(out + i * 2, outSize - i * 2, "%02x", p[i]);
+  }
+}
+
 // ── CarServer.ChargeState ─────────────────────────────────────────
 // 字段号见 tesla_protocol/protobuf/vehicle.proto
 bool decodeChargeState(pb::Reader& r) {
@@ -280,19 +291,49 @@ void TeslaClient::loop() {
   if (!m_crypto.hasSession()) {
 #if CFG_TESLA_PAIR_ON_DENIED
     // 真车对未登记公钥的 SessionInfoRequest 可能完全不回包（官方 add-key-request
-    // 本身就不依赖握手）。连续多次握手都没有任何入站帧时，直接改发配钥请求。
-    if (!m_notPaired && !m_pairDone && !m_rxAnyFrame && !m_pairFallbackTried &&
+    // 本身就不依赖握手）。连续多次握手仍未建立会话时，直接改发配钥请求；
+    // 即使收到过无法解析的通知，也不能因此放弃配钥。
+    if (!m_notPaired && !m_pairDone && !m_pairFallbackTried &&
         m_handshakeTries >= CFG_TESLA_PAIR_FALLBACK_TRIES) {
       m_pairFallbackTried = true;
       m_notPaired = true;
       m_pairSends = 0;
       m_nextPairAt = millis();
-      CFG_LOG("[PAIR] 握手 %u 次无任何回包 → 直接发 add-key-request",
-              (unsigned)m_handshakeTries);
+      CFG_LOG("[PAIR] 握手 %u 次仍未建立会话（收到 %u 次通知/%uB）→ 直接发 add-key-request",
+              (unsigned)m_handshakeTries, (unsigned)m_rxNotifies,
+              (unsigned)m_rxBytes);
     }
-    // 未配对：优先发 add-key-request（车辆等待 NFC 刷卡），发满次数后退回握手探测
-    if (m_notPaired && !m_pairDone && m_pairSends < CFG_TESLA_PAIR_MAX_SENDS) {
-      if (due(m_nextPairAt)) sendPairingRequest();
+
+    // 配钥流程进行中：不发握手（SessionInfoRequest 可能打断车端刷卡提示）
+    if (m_notPaired && !m_pairDone) {
+      const bool pairTimedOut =
+          (int32_t)(millis() - (m_pairWaitAt + CFG_TESLA_PAIR_WAIT_TIMEOUT_MS)) >=
+          0;
+
+      if (m_pairWaitNfc) {
+        // 车辆已回 WAIT：纯等待刷卡，不重发、不握手
+        if (!pairTimedOut) return;
+        // 车端提示可能已消失，清空计数后重新走一轮 add-key-request
+        m_pairWaitNfc = false;
+        m_pairWaitLogged = false;
+        m_pairSends = 0;
+        m_nextPairAt = millis();
+        CFG_LOG("[PAIR] 等待刷卡超时 %u ms，重新发起 add-key-request",
+                (unsigned)CFG_TESLA_PAIR_WAIT_TIMEOUT_MS);
+      }
+
+      if (m_pairSends < CFG_TESLA_PAIR_MAX_SENDS) {
+        if (due(m_nextPairAt)) sendPairingRequest();
+        return;
+      }
+
+      // 发满次数仍未收到 WAIT：先静默等待，超时后允许重新配钥
+      if (pairTimedOut) {
+        m_pairSends = 0;
+        m_pairWaitLogged = false;
+        m_nextPairAt = millis();
+        CFG_LOG("[PAIR] 未收到车端等待刷卡响应，重新尝试配钥");
+      }
       return;
     }
 #endif
@@ -317,10 +358,14 @@ void TeslaClient::onConnected() {
   m_notPaired = false;
   m_pairDone = false;
   m_pairWaitLogged = false;
+  m_pairWaitNfc = false;
   m_pairSends = 0;
   m_nextPairAt = 0;
-  m_rxAnyFrame = false;
+  m_pairWaitAt = 0;
   m_pairFallbackTried = false;
+  m_rxNotifies = 0;
+  m_rxBytes = 0;
+  m_rxLogs = 0;
   m_crypto.reset();
 #if CFG_TESLA_CRYPTO
   m_nextActionAt = millis();
@@ -334,8 +379,9 @@ void TeslaClient::onDisconnected() {
   m_notPaired = false;
   m_pairDone = false;
   m_pairWaitLogged = false;
+  m_pairWaitNfc = false;
   m_pairSends = 0;
-  m_rxAnyFrame = false;
+  m_pairWaitAt = 0;
   m_pairFallbackTried = false;
   m_crypto.reset();
   CFG_LOG("BLE 断开，加密会话已清除");
@@ -382,7 +428,9 @@ void TeslaClient::onCryptoSession(bool ok) {
     m_notPaired = false;
     m_pairDone = false;
     m_pairWaitLogged = false;
+    m_pairWaitNfc = false;
     m_pairSends = 0;
+    m_pairWaitAt = 0;
     m_pairFallbackTried = false;
     m_nextActionAt = millis();  // 立即发第一条 GetVehicleData
   } else {
@@ -395,17 +443,16 @@ void TeslaClient::onCryptoSession(bool ok) {
 // ---------------------------------------------------------------------------
 void TeslaClient::onNotPaired() {
 #if CFG_TESLA_PAIR_ON_DENIED
-  // 已收到终态或已发满次数：不再自动重发，交给后续长间隔握手探测
-  if (m_notPaired && (m_pairDone || m_pairSends >= CFG_TESLA_PAIR_MAX_SENDS)) {
-    return;
-  }
-  if (!m_notPaired) {
-    m_notPaired = true;
-    m_pairDone = false;
-    m_pairSends = 0;
-    CFG_LOG("[PAIR] 本机公钥不在车端白名单，准备发送 add-key-request");
-  }
+  // 配钥流程已在进行：忽略延迟到达的重复 status=1，避免打断当前节奏
+  if (m_notPaired) return;
+
+  m_notPaired = true;
+  m_pairDone = false;
+  m_pairWaitNfc = false;
+  m_pairWaitLogged = false;
+  m_pairSends = 0;
   m_nextPairAt = millis();
+  CFG_LOG("[PAIR] 本机公钥不在车端白名单，准备发送 add-key-request");
 #else
   if (!m_pairWaitLogged) {
     m_pairWaitLogged = true;
@@ -429,6 +476,12 @@ void TeslaClient::sendPairingRequest() {
   }
   ++m_pairSends;
   m_nextPairAt = millis() + CFG_TESLA_PAIR_RETRY_MS;
+  // 超时基准：最后一次发送时刻；若随后收到 WAIT 会用 WAIT 时刻刷新
+  m_pairWaitAt = millis();
+  if (m_pairSends == 1) {
+    // 重新采样车端对配钥请求的响应（前几条 notify / 完整帧）
+    m_rxLogs = 0;
+  }
   CFG_LOG("[PAIR] 已发送 add-key-request %uB（第 %u/%u 次）→ 请在中控台轻点 NFC 钥匙卡",
           (unsigned)n, (unsigned)m_pairSends, (unsigned)CFG_TESLA_PAIR_MAX_SENDS);
   if (m_pairSends >= 2 && !m_pairWaitLogged) {
@@ -440,14 +493,22 @@ void TeslaClient::sendPairingRequest() {
 void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
                                   bool terminal) {
   if (!terminal) {
-    if (operationStatus == 1 && !m_pairWaitLogged) {
-      m_pairWaitLogged = true;
-      CFG_LOG("[PAIR] 车辆已受理请求，等待 NFC 卡授权（中控台轻点钥匙卡）");
+    if (operationStatus == 1) {
+      // 车辆已受理：停止重发和握手，纯等待刷卡（超时由 loop 统一处理）
+      m_pairWaitNfc = true;
+      m_pairWaitAt = millis();
+      if (!m_pairWaitLogged) {
+        m_pairWaitLogged = true;
+        CFG_LOG("[PAIR] 车辆已受理请求，等待 NFC 卡授权（中控台轻点钥匙卡，"
+                "固件暂停发送 %u s）",
+                (unsigned)(CFG_TESLA_PAIR_WAIT_TIMEOUT_MS / 1000));
+      }
     }
     return;
   }
 
   m_pairDone = true;
+  m_pairWaitNfc = false;
   if (operationStatus == 0 && info == 0) {
     CFG_LOG("[PAIR] ✅ 配钥成功：公钥已写入车端白名单，重新握手");
     m_notPaired = false;
@@ -558,8 +619,19 @@ bool TeslaClient::decodeVehicleData(const uint8_t* data, size_t len) {
 
 void TeslaClient::feed(const uint8_t* data, size_t len) {
   if (!data || len == 0) return;
-  // 有任何入站字节即视为「车辆有回包」，用于区分「车辆不理睬」与「公钥未配对」
-  m_rxAnyFrame = true;
+
+  ++m_rxNotifies;
+  m_rxBytes += (uint32_t)len;
+  // 真车不回包时，打印前几条原始通知，用于区分「没有通知」与「通知无法解析」
+  if (m_rxLogs < 3) {
+    ++m_rxLogs;
+    const size_t show = len < 12 ? len : 12;
+    char hex[25];
+    formatHexPrefix(hex, sizeof(hex), data, show);
+    CFG_LOG("[BLE] RX 通知 %uB: %s%s（累计 %u 次/%uB）", (unsigned)len, hex,
+            len > show ? "..." : "", (unsigned)m_rxNotifies,
+            (unsigned)m_rxBytes);
+  }
 
   // 缓冲容量按单帧上限设计：一帧处理完立即消费，不会堆积多帧
   if (len > sizeof(m_buf) - m_len) {
@@ -613,8 +685,18 @@ void TeslaClient::processBuffer() {
     const bool cryptoHeader =
         declared > 0 && declared <= CFG_TESLA_MAX_FRAME;
 
-    // 2) 长度前缀恰好吃满已收字节 -> 完整加密帧（2 字节长度 + RoutableMessage）
-    if (cryptoHeader && m_len == declared + 2) {
+    // 2) 长度前缀已凑齐 -> 完整加密帧（2 字节长度 + RoutableMessage）。
+    //    车端可能在一个 notify 里塞多帧，所以用 >= 而不是 ==，
+    //    只消费当前这一帧，剩余字节继续下一轮解析。
+    if (cryptoHeader && m_len >= declared + 2) {
+#if CFG_TESLA_CRYPTO
+      if (!m_crypto.hasSession() && m_rxLogs < 6) {
+        ++m_rxLogs;
+        char hex[65];
+        formatHexPrefix(hex, sizeof(hex), m_buf + 2, declared);
+        CFG_LOG("[CRYPTO] RX 帧 %uB: %s", (unsigned)declared, hex);
+      }
+#endif
       m_crypto.handleFrame(m_buf + 2, declared);
       consume(declared + 2);
       m_timeoutLogged = false;

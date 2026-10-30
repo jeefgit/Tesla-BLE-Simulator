@@ -85,10 +85,16 @@ class TeslaClient {
   bool m_notPaired = false;       // 车辆回 KEY_NOT_ON_WHITELIST
   bool m_pairDone = false;        // 已收到配钥终态
   bool m_pairWaitLogged = false;  // WAIT 日志只打一次
+  bool m_pairWaitNfc = false;     // 车辆已回 WAIT，正在等待 NFC 刷卡
   uint32_t m_pairSends = 0;
   uint32_t m_nextPairAt = 0;
-  bool m_rxAnyFrame = false;       // 本次连接是否收到过任何入站帧
+  uint32_t m_pairWaitAt = 0;       // 进入等待/最后一次发送的时刻（超时基准）
   bool m_pairFallbackTried = false; // 握手无回包时是否已改发 add-key-request
+
+  // 入站诊断：真车不回包时用于区分「完全无通知」与「有通知但解析不出帧」
+  uint32_t m_rxNotifies = 0;
+  uint32_t m_rxBytes = 0;
+  uint8_t m_rxLogs = 0;
 
   uint32_t m_packets = 0;
   uint32_t m_lastPacketAt = 0;

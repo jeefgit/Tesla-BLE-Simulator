@@ -300,6 +300,25 @@ bool parseHexKey(const char* hex, uint8_t out[32]) {
   return true;
 }
 
+// 串口打印完整 BLE 报文（每行 32 字节，附「已打印/总长」），
+// 便于直接与模拟器/官方客户端抓包逐字节对照。
+void logHexDump(const char* tag, const uint8_t* data, size_t len) {
+  constexpr size_t kPerLine = 32;
+  char line[kPerLine * 3 + 1];
+  for (size_t off = 0; off < len; off += kPerLine) {
+    const size_t n = (len - off) < kPerLine ? (len - off) : kPerLine;
+    size_t p = 0;
+    for (size_t i = 0; i < n; ++i) {
+      const int wrote =
+          snprintf(line + p, sizeof(line) - p, "%02x ", data[off + i]);
+      if (wrote <= 0) return;
+      p += (size_t)wrote;
+    }
+    if (p) line[p - 1] = '\0';  // 去掉行尾空格
+    CFG_LOG("%s %u/%u: %s", tag, (unsigned)(off + n), (unsigned)len, line);
+  }
+}
+
 // ── RoutableMessage 字段解析辅助 ─────────────────────────────────
 void parseMessageStatus(pb::Reader& r, uint32_t* fault) {
   while (!r.atEnd()) {
@@ -655,6 +674,11 @@ bool TeslaCrypto::buildPairingRequest(uint8_t* out, size_t cap,
   out[1] = (uint8_t)(n & 0xFF);
   memcpy(out + 2, body, n);
   *outLen = n + 2;
+
+  // 打印实际下发的配钥报文：2 字节大端长度前缀 + ToVCSECMessage
+  CFG_LOG("[PAIR] add-key-request 帧 %uB（长度前缀 %02x%02x）", (unsigned)*outLen,
+          out[0], out[1]);
+  logHexDump("[PAIR] add-key-request TX", out, *outLen);
   return true;
 }
 
@@ -907,6 +931,25 @@ void TeslaCrypto::handleFrame(const uint8_t* payload, size_t len) {
     m_lastFault = fault;
     CFG_LOG("[CRYPTO] 协议层错误响应 fault=%u", (unsigned)fault);
     report(nullptr, 0, fault);
+    return;
+  }
+
+  // 未封装的 VCSEC 明文：实测真车把配钥 WAIT/终态直接以 FromVCSECMessage
+  // 下发，不带 RoutableMessage 外壳，例如：
+  //   0a 08 18 01 20 02 42 02 08 02   (vehicleStatus: awake / present)
+  //   22 06 08 02 1a 02 08 19         (commandStatus: info=25 刷卡超时)
+  // 未握手时按配钥状态处理；已握手时无需处理（配钥流程早已结束）。
+  if (!m_hasSession && !sessionInfo && !ciphertext && fromDomain == 0) {
+    uint32_t opStatus = 0;
+    uint32_t info = 0;
+    bool terminal = false;
+    if (parsePairingStatus(payload, len, &opStatus, &info, &terminal) &&
+        (opStatus != 0 || terminal)) {
+      CFG_LOG("[PAIR] 配钥状态(Raw VCSEC) operationStatus=%u info=%u%s",
+              (unsigned)opStatus, (unsigned)info,
+              terminal ? "（终态）" : "（等待刷卡）");
+      if (m_onPairing) m_onPairing(opStatus, info, terminal);
+    }
   }
 }
 

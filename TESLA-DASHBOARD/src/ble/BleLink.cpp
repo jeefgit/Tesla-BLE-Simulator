@@ -208,8 +208,11 @@ bool BleLink::send(const char* cmd) {
 
 bool BleLink::sendRaw(const uint8_t* data, size_t len) {
   if (!isConnected() || !m_writeChar || !data || len == 0) return false;
-  // 特征值只支持"需响应写"时才用 write request
-  const bool withResponse = !m_writeChar->canWriteNoResponse();
+
+  // 特斯拉协议要求写 00000212 时必须用 write-with-response
+  // （tesla_protocol/protobuf/protocol_reference.md §BLE）。即使特征值同时
+  // 声明了 WRITE_NO_RSP，也不能降级成 write command，否则车端可能不回包，
+  // 表现为「握手/配钥发了但没有任何响应」。
 
   // BLE 单次写入上限 = MTU - 3。加密帧（RoutableMessage）可达数百字节，
   // 必须按协商后的 MTU 分片写入，车端/模拟器会按长度前缀自行重组。
@@ -219,9 +222,7 @@ bool BleLink::sendRaw(const uint8_t* data, size_t len) {
 
   for (size_t off = 0; off < len; off += chunk) {
     const size_t n = (len - off) < chunk ? (len - off) : chunk;
-    if (!m_writeChar->writeValue(data + off, n, withResponse)) return false;
-    // write-without-response 需要给控制器发送缓冲留出排空时间
-    if (!withResponse && (off + n) < len) delay(4);
+    if (!m_writeChar->writeValue(data + off, n, true)) return false;
   }
   return true;
 }
