@@ -64,7 +64,7 @@ python sim_server.py
 python sim_server.py --bumble
 
 # (可选) 纯命令行模式 (无 GUI 界面)
-python sim_server.py --nogui --vin 5YJ3E1EA0KF000000
+python sim_server.py --nogui --vin LRWYGCFJ8RC571213
 ```
 
 ---

@@ -295,7 +295,7 @@ tesla-ble 常规流程会用内嵌的 Tesla 根公钥验证车辆身份；模拟
 ```
 # Kconfig / sdkconfig
 CONFIG_TESLA_SIM_TRUST=y        # 仅模拟器构建使用
-CONFIG_TESLA_SIM_VIN="5YJ3E1EA0KF000000"
+CONFIG_TESLA_SIM_VIN="LRWYGCFJ8RC571213"
 ```
 
 实现方式二选一（实施时对组件版本选型）：

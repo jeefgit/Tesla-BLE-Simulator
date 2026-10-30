@@ -77,12 +77,12 @@ pio run -t upload       # 烧录（自动找串口）
 pio device monitor      # 打开 115200 串口
 ```
 
-1. 启动模拟器（根目录）：`python sim_server.py`（默认 VIN `5YJ3E1EA0KF000000`，
+1. 启动模拟器（根目录）：`python sim_server.py`（默认 VIN `LRWYGCFJ8RC571213`，
    换 VIN 加 `--vin`，同时改 `config.h` 的 `CFG_TESLA_VIN`）。
 2. 上电后日志流程应为：
 
 ```
-[0.20s] 目标 VIN=5YJ3E1EA0KF000000  广播名=S<16位hex>C
+[0.20s] 目标 VIN=LRWYGCFJ8RC571213  广播名=S<16位hex>C
 [0.21s] BLE 协议栈就绪（特斯拉 Central）…
 [0.22s] 扫描 BLE 设备 (10 s)...
 [1.35s] 找到目标(精确名): S<16位hex>C (aa:bb:…)
