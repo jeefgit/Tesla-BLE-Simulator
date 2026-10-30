@@ -383,13 +383,19 @@ void Dashboard::render(const VehicleData& v, BleLink::State bleState,
   if (now - m_lastPrint < CFG_RENDER_INTERVAL_MS) return;
   m_lastPrint = now;
 
+  const bool ok =
+      dataReady && handshakeOk && v.fresh(VF_SPEED, CFG_DATA_STALE_MS);
+  const bool statusChanged = bleState != m_bleState || ok != m_ok;
+
   m_v = v;
   m_bleState = bleState;
   // 未握手成功时即使车端数据未过期也不渲染，避免"没握手就有数据"的假象
-  m_ok = dataReady && handshakeOk && v.fresh(VF_SPEED, CFG_DATA_STALE_MS);
+  m_ok = ok;
+  if (!m_ok && m_hasRendered && !statusChanged) return;
 
   updateAll();
   printSerial();
+  m_hasRendered = true;
 }
 
 void Dashboard::updateAll() {

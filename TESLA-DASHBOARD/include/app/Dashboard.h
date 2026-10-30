@@ -50,6 +50,7 @@ class Dashboard {
   uint32_t m_lastPrint = 0;
   BleLink::State m_bleState = BleLink::State::Idle;
   bool m_ok = false;
+  bool m_hasRendered = false;
   bool m_chargingLayout = false;
   bool m_blinkOn = true;        // 1Hz 方波相位
   uint32_t m_tick = 0;          // 50ms 定时器节拍计数
