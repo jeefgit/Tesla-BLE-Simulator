@@ -391,6 +391,9 @@ void Dashboard::render(const VehicleData& v, BleLink::State bleState,
   m_bleState = bleState;
   // 未握手成功时即使车端数据未过期也不渲染，避免"没握手就有数据"的假象
   m_ok = ok;
+  CFG_LOG("仪表更新检查: BLE=%s 数据就绪=%s 握手=%s",
+          bleStateText(m_bleState), dataReady ? "是" : "否",
+          handshakeOk ? "是" : "否");
   if (!m_ok && m_hasRendered && !statusChanged) return;
 
   updateAll();
