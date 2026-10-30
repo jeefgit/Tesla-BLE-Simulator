@@ -27,7 +27,7 @@ if %errorlevel% neq 0 (
 
 :: ── Install dependencies ──────────────────────────────────────────
 echo [+] Validating dependencies...
-py -m pip install -r ./requirements.txt -q
+py -m pip install -r "%~dp0requirements.txt" -q
 echo.
 
 :: ── Launch simulator ──────────────────────────────────────────────
