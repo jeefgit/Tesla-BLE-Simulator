@@ -110,13 +110,21 @@
 // ---------------------------------------------------------------------------
 #define CFG_TESLA_PAIR_ON_DENIED 1
 
-// 配钥请求重发间隔（毫秒）与最多发送次数（车辆回 WAIT 后等待人工刷卡）
-#define CFG_TESLA_PAIR_RETRY_MS 5000
+// 配钥请求重发间隔（毫秒）与最多发送次数。
+// 官方客户端在车辆回 WAIT 时会按 retryInterval 重发，重复请求不会破坏刷卡流程；
+// 真车从休眠被 BLE 唤醒需要几秒，单发一次容易「发了但车机没反应」。
+#define CFG_TESLA_PAIR_RETRY_MS 8000
 #define CFG_TESLA_PAIR_MAX_SENDS 3
 
-// 申请的角色与钥匙形态（Keys.Role: 2=OWNER 3=DRIVER；KeyFormFactor: 7=Android）
+// 握手连续多次完全无回包时，直接按官方做法发 add-key-request
+// （真车对未登记公钥的 SessionInfoRequest 可能不回包，此时不能死等 status=1）
+// 4 次 × 2s ≈ 8s：已配对且车已唤醒时首次握手就会回包，不会误触发配钥提示
+#define CFG_TESLA_PAIR_FALLBACK_TRIES 4
+
+// 申请的角色与钥匙形态（Keys.Role: 2=OWNER 3=DRIVER；
+// KeyFormFactor: 7=ANDROID_DEVICE 9=CLOUD_KEY，官方 BLE 配钥示例用 9）
 #define CFG_TESLA_PAIR_ROLE 2
-#define CFG_TESLA_PAIR_FORM_FACTOR 7
+#define CFG_TESLA_PAIR_FORM_FACTOR 9
 
 // 命令有效期（秒）。车端允许 15s 时钟偏差，60s 足够覆盖轮询窗口
 #define CFG_TESLA_COMMAND_TTL_S 60

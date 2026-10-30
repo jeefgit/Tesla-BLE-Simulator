@@ -87,6 +87,8 @@ class TeslaClient {
   bool m_pairWaitLogged = false;  // WAIT 日志只打一次
   uint32_t m_pairSends = 0;
   uint32_t m_nextPairAt = 0;
+  bool m_rxAnyFrame = false;       // 本次连接是否收到过任何入站帧
+  bool m_pairFallbackTried = false; // 握手无回包时是否已改发 add-key-request
 
   uint32_t m_packets = 0;
   uint32_t m_lastPacketAt = 0;

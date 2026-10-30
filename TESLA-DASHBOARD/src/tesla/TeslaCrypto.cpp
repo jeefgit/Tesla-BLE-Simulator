@@ -875,7 +875,8 @@ void TeslaCrypto::handleFrame(const uint8_t* payload, size_t len) {
           return;
         }
       }
-      CFG_LOG("[CRYPTO] 尚未握手成功，忽略响应帧");
+      CFG_LOG("[CRYPTO] 未握手 RX %uB fromDomain=%u（非配钥状态，忽略）",
+              (unsigned)ciphertextLen, (unsigned)fromDomain);
       return;
     }
     if (sig.hasResponse) {

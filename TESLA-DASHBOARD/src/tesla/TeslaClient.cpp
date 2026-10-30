@@ -279,6 +279,17 @@ void TeslaClient::loop() {
 #if CFG_TESLA_CRYPTO
   if (!m_crypto.hasSession()) {
 #if CFG_TESLA_PAIR_ON_DENIED
+    // 真车对未登记公钥的 SessionInfoRequest 可能完全不回包（官方 add-key-request
+    // 本身就不依赖握手）。连续多次握手都没有任何入站帧时，直接改发配钥请求。
+    if (!m_notPaired && !m_pairDone && !m_rxAnyFrame && !m_pairFallbackTried &&
+        m_handshakeTries >= CFG_TESLA_PAIR_FALLBACK_TRIES) {
+      m_pairFallbackTried = true;
+      m_notPaired = true;
+      m_pairSends = 0;
+      m_nextPairAt = millis();
+      CFG_LOG("[PAIR] 握手 %u 次无任何回包 → 直接发 add-key-request",
+              (unsigned)m_handshakeTries);
+    }
     // 未配对：优先发 add-key-request（车辆等待 NFC 刷卡），发满次数后退回握手探测
     if (m_notPaired && !m_pairDone && m_pairSends < CFG_TESLA_PAIR_MAX_SENDS) {
       if (due(m_nextPairAt)) sendPairingRequest();
@@ -308,6 +319,8 @@ void TeslaClient::onConnected() {
   m_pairWaitLogged = false;
   m_pairSends = 0;
   m_nextPairAt = 0;
+  m_rxAnyFrame = false;
+  m_pairFallbackTried = false;
   m_crypto.reset();
 #if CFG_TESLA_CRYPTO
   m_nextActionAt = millis();
@@ -322,6 +335,8 @@ void TeslaClient::onDisconnected() {
   m_pairDone = false;
   m_pairWaitLogged = false;
   m_pairSends = 0;
+  m_rxAnyFrame = false;
+  m_pairFallbackTried = false;
   m_crypto.reset();
   CFG_LOG("BLE 断开，加密会话已清除");
 }
@@ -368,6 +383,7 @@ void TeslaClient::onCryptoSession(bool ok) {
     m_pairDone = false;
     m_pairWaitLogged = false;
     m_pairSends = 0;
+    m_pairFallbackTried = false;
     m_nextActionAt = millis();  // 立即发第一条 GetVehicleData
   } else {
     m_nextActionAt = millis() + CFG_TESLA_HANDSHAKE_RETRY_MS;
@@ -415,6 +431,10 @@ void TeslaClient::sendPairingRequest() {
   m_nextPairAt = millis() + CFG_TESLA_PAIR_RETRY_MS;
   CFG_LOG("[PAIR] 已发送 add-key-request %uB（第 %u/%u 次）→ 请在中控台轻点 NFC 钥匙卡",
           (unsigned)n, (unsigned)m_pairSends, (unsigned)CFG_TESLA_PAIR_MAX_SENDS);
+  if (m_pairSends >= 2 && !m_pairWaitLogged) {
+    CFG_LOG("[PAIR] 仍未收到车端 WAIT 回包：确认车辆已唤醒、人在车内、中控屏亮起"
+            "（真车的刷卡提示只显示在中控屏上）");
+  }
 }
 
 void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
@@ -538,6 +558,8 @@ bool TeslaClient::decodeVehicleData(const uint8_t* data, size_t len) {
 
 void TeslaClient::feed(const uint8_t* data, size_t len) {
   if (!data || len == 0) return;
+  // 有任何入站字节即视为「车辆有回包」，用于区分「车辆不理睬」与「公钥未配对」
+  m_rxAnyFrame = true;
 
   // 缓冲容量按单帧上限设计：一帧处理完立即消费，不会堆积多帧
   if (len > sizeof(m_buf) - m_len) {

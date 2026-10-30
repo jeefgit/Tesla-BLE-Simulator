@@ -53,7 +53,7 @@ ToVCSECMessage        field 1  signedMessage
         PermissionChange
                       field 1  key (PublicKey)
                       field 4  keyRole (Keys.Role: 2=OWNER, 3=DRIVER)
-        KeyMetadata   field 1  keyFormFactor (7=ANDROID_DEVICE)
+        KeyMetadata   field 1  keyFormFactor (本仓库用 9=CLOUD_KEY；7=ANDROID_DEVICE)
 ```
 
 ### 1.2 add-key（已配对的常规流程）
@@ -243,6 +243,54 @@ tesla-control -ble -key-file private_key.pem remove-key public_key.pem
 > 生产环境请把私钥放进 ESP32 的 NVS 加密分区或硬件安全芯片，
 > 不要把真实私钥提交进代码仓库（`secrets/` 已在 `.gitignore` 中）。
 
+### 4.4 真车「发了 add-key-request 但车机没反应」怎么查
+
+先确认报文本身没问题（固件信封已逐字节对齐官方实现）：
+
+```bat
+py -3 _tmp_pair_frame_check.py
+```
+
+输出应为：
+
+```
+官方 pb2 编码 : 86B
+固件手写编码 : 86B
+带长度前缀后 : 88B
+长度前缀     : 0056
+RESULT: IDENTICAL —— 信封与官方 vehicle-command 完全一致
+```
+
+即 `0a54 1250 8201 4d2a...1802`（`0x0A54` 后的 `0x0A` = field1、`0x12` = SignedMessage field2、
+`0x82 0x01` = UnsignedMessage field16、`0x2a` = WhitelistOperation field5、
+`0x32` = metadataForKey field6、`0x18 0x02` = signatureType=PRESENT_KEY）。
+**这 5 个关键点（PRESENT_KEY=2 / 65B 0x04 公钥 / ROLE_OWNER=2 / CLOUD_KEY=9 / 2 字节大端长度）全部满足。**
+
+排查看串口日志（按顺序判断）：
+
+| 串口现象 | 结论 / 处理 |
+| --- | --- |
+| 没有 `BLE 已连接: S……C` | 没连上车：查 `CFG_TESLA_VIN` 与实车 VIN 是否一致（广播名 `S+sha1(VIN)[:16]+C`） |
+| 有连接但没有 `[PAIR] 已发送 add-key-request` | 固件在等握手 `status=1`；新固件已在 **4 次握手无回包** 时自动改发配钥请求（`CFG_TESLA_PAIR_FALLBACK_TRIES`） |
+| 有 `已发送`，但没有 `[PAIR] 配钥状态 operationStatus=1` | **车端没受理**：见下面车端条件 |
+| `[PAIR] 配钥状态 operationStatus=1`（等待刷卡） | 正常：去中控屏点确认并贴卡片 |
+| `info=4` / `5` / `13` / `24` / `25` | 白名单满 / 非 OWNER / 已登记 / 车主拒绝 / 刷卡超时 |
+
+车端（真车）必须满足的条件：
+
+1. **车辆必须处于唤醒状态**：人在车内、踩一脚刹车或按屏幕让中控屏亮起（官方文档原话是
+   “Get in your car … have your NFC card handy”）。休眠状态下 VCSEC 不会弹刷卡提示。
+2. **车辆在 P 挡**，且未开启 **代客模式 / 服务模式**。
+3. **NFC 钥匙卡在手**，请求发出后 30s 内贴到中控台读卡区。
+4. 车端钥匙槽未满（`info=4` 会明确返回，但部分老固件只在屏幕上提示）。
+5. 同一时间只能有一个待授权的 add-key 请求，上一次请求超时后再发起。
+6. `tesla-control` 本身**不能在 Windows 原生运行**（Go BLE 限制），PC 侧测试请用
+   Linux/macOS/WSL；Windows 上只能用本仓库 ESP32 或模拟器。
+
+> 连续 2 次发出仍无任何车端回包时，固件会打印
+> `[PAIR] 仍未收到车端 WAIT 回包：确认车辆已唤醒、人在车内、中控屏亮起`，
+> 这通常就是车端条件 1/2 未满足。
+
 
 ---
 
@@ -250,10 +298,13 @@ tesla-control -ble -key-file private_key.pem remove-key public_key.pem
 
 ```bat
 py -3 _tmp_crypto_test.py
+py -3 _tmp_pair_frame_check.py
 ```
 
 其中：
 
 - `test_pairing_add_key_request()`：未配对握手 `status=1` → 明文信封 → `WAIT`
   → 刷卡 → 终态 `info=0` → 重新握手 HMAC 校验通过；
-- `test_encrypted_add_key()`：OWNER 加密 `add-key` 成功；DRIVER 加钥被拒（info=5）。
+- `test_encrypted_add_key()`：OWNER 加密 `add-key` 成功；DRIVER 加钥被拒（info=5）；
+- `_tmp_pair_frame_check.py`：把固件手写的 add-key-request 信封与官方 `.proto`（pb2）
+  生成的字节逐字节比对，用于确认真车收到的是标准报文（应为 `IDENTICAL`，86B/前缀 `0056`）。
