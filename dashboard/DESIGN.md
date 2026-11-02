@@ -1,6 +1,8 @@
 # 特斯拉 ESP32 2.8" 仪表盘 · 界面设计规范 v1.0
 
 > 可视化原型：`dashboard/ui-mockup.html`（浏览器打开，可切换 7 种状态、2:1/1:1 缩放）
+> 固件实机对齐预览图：`dashboard/preview/dashboard_states.png`（4 状态）、`dashboard/preview/dashboard_normal_2x.png`，
+> 由 `python dashboard/preview/mock_render.py` 生成（Pillow，坐标与本规范同步）
 > 数据源：`Tesla-BLE-Simulator` 的 **SimPayload（53 字节）**，与 `ble_adapter.cpp` 结构体一一对应
 
 ---
