@@ -61,6 +61,7 @@ class BleLink {
 
   bool scanForTarget();
   bool connectAndSubscribe();
+  void scheduleReconnect();
   void dropTarget();
 
   State m_state = State::Idle;
@@ -70,7 +71,7 @@ class BleLink {
   NimBLERemoteCharacteristic* m_writeChar = nullptr;
   NimBLERemoteCharacteristic* m_notifyChar = nullptr;
 
-  // 目标设备信息（重连时不再扫描）
+  // 目标设备信息（断链后重新扫描以刷新广播地址）
   std::string m_targetAddr;
   uint8_t m_targetType = 0;
   bool m_hasTarget = false;

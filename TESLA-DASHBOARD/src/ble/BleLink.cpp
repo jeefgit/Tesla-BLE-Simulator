@@ -48,6 +48,9 @@ void BleLink::loop() {
         m_state = State::Ready;
         CFG_LOG("BLE 已连接: %s，链路就绪", m_remoteName.c_str());
       } else {
+        CFG_LOG("连接准备失败 (%u/%u)", (unsigned)(m_failCount + 1),
+                (unsigned)CFG_CONNECT_FAIL_LIMIT);
+        if (++m_failCount >= CFG_CONNECT_FAIL_LIMIT) dropTarget();
         m_state = State::Reconnecting;
         m_nextAttemptAt = millis() + CFG_RECONNECT_INTERVAL_MS;
       }
@@ -56,16 +59,13 @@ void BleLink::loop() {
     case State::Ready:
       if (!m_client || !m_client->isConnected()) {
         CFG_LOG("BLE 连接断开");
-        m_writeChar = nullptr;
-        m_notifyChar = nullptr;
-        m_state = State::Reconnecting;
-        m_nextAttemptAt = millis() + CFG_RECONNECT_INTERVAL_MS;
+        scheduleReconnect();
       }
       break;
 
     case State::Reconnecting:
       if ((int32_t)(millis() - m_nextAttemptAt) >= 0) {
-        // 还记得目标地址就直接重连，否则重新扫描
+        // 断链后清除了缓存地址，因此重新扫描获取最新广播地址
         m_state = m_hasTarget ? State::Connecting : State::Scanning;
       }
       break;
@@ -143,6 +143,12 @@ bool BleLink::connectAndSubscribe() {
   if (!m_hasTarget) return false;
 
   if (!m_client) m_client = NimBLEDevice::createClient();
+  if (!m_client) {
+    CFG_LOG("创建 BLE 客户端失败");
+    return false;
+  }
+  m_client->setConnectTimeout(CFG_CONNECT_TIMEOUT_MS);
+  m_client->setConnectRetries(0);
 
   m_writeChar = nullptr;
   m_notifyChar = nullptr;
@@ -151,9 +157,7 @@ bool BleLink::connectAndSubscribe() {
   CFG_LOG("连接 %s (%s)...", m_remoteName.c_str(), m_targetAddr.c_str());
   const NimBLEAddress addr(m_targetAddr, m_targetType);
   if (!m_client->connect(addr)) {
-    CFG_LOG("连接失败 (%u/%u)", (unsigned)(m_failCount + 1),
-            (unsigned)CFG_CONNECT_FAIL_LIMIT);
-    if (++m_failCount >= CFG_CONNECT_FAIL_LIMIT) dropTarget();
+    CFG_LOG("BLE 连接失败");
     return false;
   }
 
@@ -199,6 +203,20 @@ void BleLink::dropTarget() {
   m_failCount = 0;
 }
 
+void BleLink::scheduleReconnect() {
+  m_writeChar = nullptr;
+  m_notifyChar = nullptr;
+  m_hasTarget = false;
+  m_targetAddr.clear();
+  m_failCount = 0;
+  m_state = State::Reconnecting;
+  m_nextAttemptAt = millis() + CFG_RECONNECT_INTERVAL_MS;
+
+  if (m_client && m_client->isConnected() && !m_client->disconnect()) {
+    CFG_LOG("BLE 主动断开失败，等待链路释放");
+  }
+}
+
 bool BleLink::send(const char* cmd) {
   if (!cmd) return false;
   String out(cmd);
@@ -207,7 +225,12 @@ bool BleLink::send(const char* cmd) {
 }
 
 bool BleLink::sendRaw(const uint8_t* data, size_t len) {
-  if (!isConnected() || !m_writeChar || !data || len == 0) return false;
+  if (!data || len == 0 || m_state != State::Ready) return false;
+  if (!m_client || !m_client->isConnected() || !m_writeChar) {
+    CFG_LOG("BLE 链路或写特征不可用，启动重连");
+    scheduleReconnect();
+    return false;
+  }
 
   // 特斯拉协议要求写 00000212 时必须用 write-with-response
   // （tesla_protocol/protobuf/protocol_reference.md §BLE）。即使特征值同时
@@ -222,7 +245,12 @@ bool BleLink::sendRaw(const uint8_t* data, size_t len) {
 
   for (size_t off = 0; off < len; off += chunk) {
     const size_t n = (len - off) < chunk ? (len - off) : chunk;
-    if (!m_writeChar->writeValue(data + off, n, true)) return false;
+    if (!m_writeChar->writeValue(data + off, n, true)) {
+      CFG_LOG("BLE GATT 写入失败（%u/%uB，MTU=%u）", (unsigned)off,
+              (unsigned)len, (unsigned)mtu);
+      scheduleReconnect();
+      return false;
+    }
   }
   return true;
 }

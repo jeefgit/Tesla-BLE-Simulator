@@ -48,6 +48,9 @@
 // 断线后重连间隔（毫秒）
 #define CFG_RECONNECT_INTERVAL_MS 3000
 
+// 单次 BLE 连接等待上限（毫秒）
+#define CFG_CONNECT_TIMEOUT_MS 10000
+
 // 连续连接失败多少次后放弃该地址、重新扫描
 #define CFG_CONNECT_FAIL_LIMIT 3
 
@@ -95,7 +98,7 @@
 #define CFG_TESLA_HANDSHAKE_RETRY_LONG_MS 15000
 
 // GetVehicleData 轮询间隔（毫秒）
-#define CFG_TESLA_POLL_INTERVAL_MS 1500
+#define CFG_TESLA_POLL_INTERVAL_MS 500
 
 // ---------------------------------------------------------------------------
 // BLE 配钥（add-key-request，对齐官方 vehicle-command cmd/tesla-control）
