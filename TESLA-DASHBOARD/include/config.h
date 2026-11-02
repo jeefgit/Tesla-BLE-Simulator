@@ -43,7 +43,7 @@
 // ---------------------------------------------------------------------------
 
 // 扫描时长（秒）
-#define CFG_SCAN_SECONDS 20
+#define CFG_SCAN_SECONDS 3
 
 // 断线后重连间隔（毫秒）
 #define CFG_RECONNECT_INTERVAL_MS 3000
