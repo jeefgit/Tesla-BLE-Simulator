@@ -66,7 +66,7 @@
 | 车身栏 `carcol` | 0, 24, 104, 216 | `TIRE PRESSURE` 8px 标签 → 车身俯视 52×120（前后风挡 + 6 开口 + 四轮着色）→ 每轮「轮位 8px + 数值 10px + 迷你量程条 16×3」贴在轮外侧 |
 | 中区 `hero` | 104, 24, 146, 216 | 车速(48px，内置最大号) + `KM/H`（12px，字距 3）；**充电模式扩展为 x104–320 全宽(216px)**，仅显示充电数据 |
 | 电量列 `col-batt` | 250, 24, 70, 216 | `SOC 数字(26px) + %(12px)` → 电量条(14×110) → 续航(16px) → `RANGE` 标签(8px)；左侧 1px 分割线；**充电模式隐藏** |
-| 断连遮罩 | 0, 24, 320, 216 | 黑 80% 遮罩 + 三点脉冲 + `Waiting for Tesla BLE...` |
+| 断连/连接遮罩 | 0, 24, 320, 216 | 全黑遮罩状态页：`TESLA BLE LINK` 小标签(8px,字距2) → 状态大字(26px: SCANNING/CONNECTING/SYNCING/RECONNECTING) → 说明(12px) → 三点脉冲 → `SCAN › CONNECT › SYNC` 阶段面包屑(完成绿/当前琥珀/未到暗灰) → VIN(8px) → `ELAPSED n s` → 底部提示(8px) |
 
 **对齐规则**：SOC 与温度数值顶部对齐（y32–62）；四轮胎压块与车轮同高（y98/142 起）；
 电量条 y70–180，与中区车速块（y94–170）垂直居中；区域标签统一 8px + 字距 1。
@@ -123,7 +123,7 @@
 | **车门告警 `doors`** | 任一 `doors[i]=1` | 对应开口红闪 + 底部红条 `FL DOOR OPEN` / `FRUNK OPEN` … |
 | **胎压告警 `tpms`** | 任一胎压 `<2.8` 或 `>3.1` | 对应轮位/数值/迷你条变红 + 底部红条 `RL TIRE 1.90 bar` |
 | **低电量 `low`** | `battery_level ≤ 15` | SOC 与电量条变红 + 琥珀条 `LOW BATTERY · 48 km RANGE` |
-| **断连 `offline`** | `SYNC_TIMEOUT` / BLE 断开 | 全屏遮罩 `--` + 三点脉冲 + 重连文案 |
+| **断连/未就绪 `offline`** | BLE 未 Ready，或 Ready 但数据/握手未就绪 | 全黑状态遮罩：状态大字 + 说明 + 三点脉冲 + `SCAN › CONNECT › SYNC` 进程 + VIN + 已耗时 + 提示（按 BLE 状态切换标题：SCANNING/CONNECTING/SYNCING/RECONNECTING） |
 
 **告警条规则**：位于屏幕最底部 `y224, h16` 的 ticker（不覆盖 SOC/车速/车身）；同一时刻只显示 1 条，优先级 `车门 > 胎压 > 低电`；文案前自动加 `LV_SYMBOL_WARNING`；1Hz 闪烁（背景不透明度 60% ↔ 20%）；断连时强制隐藏。
 
@@ -189,7 +189,8 @@ scr_main
 │  ├─ rangeLbl lv_label(16px "312 km")
 │  └─ battCap lv_label(8px "RANGE", 字距 1)
 ├─ banner     (lv_obj, 0,224, 320×16, 半透明红, 可见性 + 1Hz 闪烁)
-├─ overlay    (lv_obj, 隐藏) 断连文案 + 3 dots
+├─ overlay    (lv_obj, 0,24, 320×216, 隐藏) 状态页：cap + title(26px) + sub(12px)
+│   + dots[3] + step[3](SCAN/CONNECT/SYNC) + target(VIN) + elapsed + hint
 └─ pairCard   (lv_obj, 0,24, 320×216, 配钥引导卡片, 覆盖 overlay)
 ```
 

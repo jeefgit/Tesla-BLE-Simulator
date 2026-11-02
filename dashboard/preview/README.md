@@ -5,7 +5,7 @@ README 展示，不用反复烧板。
 
 | 文件 | 说明 |
 | :--- | :--- |
-| `dashboard_states.png` | 4 状态横排：正常行驶 / 车门+胎压+低电告警 / 充电 / 断连扫描 |
+| `dashboard_states.png` | 6 状态横排：正常行驶 / 车门+胎压+低电告警 / 充电 / 扫描 / 连接 / 同步 |
 | `dashboard_normal_2x.png` | 正常行驶状态 2 倍放大（看对齐细节） |
 | `mock_render.py` | 生成上面两张图的脚本（Pillow，只依赖系统字体） |
 

@@ -10,7 +10,7 @@
     python dashboard/preview/mock_render.py
 
 产物（与本脚本同目录）：
-    dashboard_states.png     4 状态横排（正常 / 车门+胎压+低电 / 充电 / 断连）
+    dashboard_states.png     6 状态横排（正常 / 车门+胎压+低电 / 充电 / 扫描 / 连接 / 同步）
     dashboard_normal_2x.png  正常状态 2x 放大（看细节）
 
 配色与 DESIGN.md 第 4 节一致；坐标与 Dashboard.cpp 同步，改 UI 时两边一起改。
@@ -213,14 +213,33 @@ def screen(drive=True, gear="D", t_out="23.5°", t_in="25.0°", locked=True,
     return im
 
 
-def offline_screen():
-    im = screen(drive=False, link="SCAN", ble_col=C_CAUTION)
+STEP_NAMES = ("SCAN", "CONNECT", "SYNC")
+STEP_X = ((76, 44), (128, 64), (200, 44))
+
+
+def connect_screen(title, sub, hint, accent, stage, elapsed=4):
+    """连接/扫描/断连铺满遮罩（与固件 Dashboard::buildOverlay/updateOverlay 同步）。"""
+    im = Image.new("RGB", (W, H), C_BG)
     d = ImageDraw.Draw(im)
     d.rectangle([0, 24, W, H], fill=(0, 0, 0))
-    txt(d, 0, 24 + 92, W, "Waiting for Tesla BLE...", 16, C_DIM)
+
+    txt(d, 0, 34, W, "TESLA BLE LINK", 8, accent, ls=2)
+    txt(d, 0, 52, W, title, 26, C_FG)
+    txt(d, 0, 90, W, sub, 12, C_DIM)
+
     for i in range(3):
-        d.ellipse([W // 2 - 20 + i * 14, 24 + 124, W // 2 - 15 + i * 14,
-                   24 + 129], fill=(60, 70, 90))
+        d.ellipse([W // 2 - 20 + i * 14, 116, W // 2 - 15 + i * 14, 121],
+                  fill=accent)
+
+    for i, (x, w) in enumerate(STEP_X):
+        c = C_REGEN if i < stage else (accent if i == stage else C_GEAR_OFF)
+        txt(d, x, 140, w, STEP_NAMES[i], 8, c, ls=1)
+    txt(d, 120, 140, 8, ">", 8, C_GEAR_OFF)
+    txt(d, 192, 140, 8, ">", 8, C_GEAR_OFF)
+
+    txt(d, 0, 166, W, "VIN LRWYGCFJ8RC571213", 8, accent, ls=1)
+    txt(d, 0, 182, W, f"ELAPSED {elapsed}s", 8, accent, ls=1)
+    txt(d, 0, 204, W, hint, 8, accent, ls=1)
     return im
 
 
@@ -232,7 +251,15 @@ def main():
                 banner="RL TIRE 1.90 bar", speed="64", soc=12, rng="48",
                 locked=False)),
         ("CHARGING", screen(charging=True, soc=62, kw=110, gear="P")),
-        ("OFFLINE / SCANNING", offline_screen()),
+        ("SCANNING",
+         connect_screen("SCANNING", "SEARCHING FOR TESLA BROADCAST",
+                        "MAKE SURE THE CAR IS AWAKE", C_CAUTION, 0, elapsed=4)),
+        ("CONNECTING",
+         connect_screen("CONNECTING", "OPENING BLE LINK TO VEHICLE",
+                        "STAY WITHIN A FEW METERS", C_CAUTION, 1, elapsed=7)),
+        ("SYNCING",
+         connect_screen("SYNCING", "WAITING FOR VEHICLE DATA",
+                        "HANDSHAKE IN PROGRESS", C_FG, 2, elapsed=3)),
     ]
 
     pad, gap, cap_h = 12, 10, 22

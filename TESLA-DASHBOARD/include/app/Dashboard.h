@@ -45,6 +45,7 @@ class Dashboard {
   void updateCar();
   void updateHero();
   void updateBattery();
+  void updateOverlay();
   void updatePairCard();
   bool pairCardVisible() const;
   void setChargingLayout(bool charging);
@@ -108,8 +109,15 @@ class Dashboard {
   lv_obj_t* rangeLbl = nullptr;
   lv_obj_t* battCap = nullptr;
 
-  // ---- overlay ----
-  lv_obj_t* dots[3] = {nullptr, nullptr, nullptr};
+  // ---- overlay（连接/扫描/断连状态页）----
+  lv_obj_t* ovCap = nullptr;      // 顶部小标签 "TESLA BLE LINK"
+  lv_obj_t* ovTitle = nullptr;    // 26px 状态大字
+  lv_obj_t* ovSub = nullptr;      // 12px 说明
+  lv_obj_t* dots[3] = {nullptr, nullptr, nullptr};   // 三点脉冲
+  lv_obj_t* ovStep[3] = {nullptr, nullptr, nullptr}; // SCAN / CONNECT / SYNC
+  lv_obj_t* ovTarget = nullptr;   // VIN 目标
+  lv_obj_t* ovElapsed = nullptr;  // 当前状态已持续秒数
+  lv_obj_t* ovHint = nullptr;     // 底部操作提示
 
   // ---- pairing card（配钥引导，盖在断连遮罩之上）----
   PairingHint m_pair;
@@ -123,4 +131,6 @@ class Dashboard {
   lv_obj_t* pairAttempt = nullptr;
   lv_obj_t* pairStatus = nullptr;
   uint32_t m_pairShownSec = 0xFFFFFFFF;  // 倒计时脏值守卫
+  uint32_t m_stateSince = 0;             // 当前 BLE 状态起始时刻（overlay 计时）
+  uint32_t m_elapsedShown = 0xFFFFFFFF;  // 秒数脏值守卫
 };

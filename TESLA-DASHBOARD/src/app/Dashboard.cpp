@@ -433,21 +433,64 @@ void Dashboard::buildBatteryColumn() {
 void Dashboard::buildOverlay() {
   overlay = mkObj(lv_screen_active(), 0, 24, CFG_LCD_WIDTH, 216);
   lv_obj_set_style_bg_color(overlay, lv_color_hex(C_BG), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(overlay, LV_OPA_80, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
 
-  lv_obj_t* msg = mkLabel(overlay, 0, 92, CFG_LCD_WIDTH, 20,
-                          &lv_font_montserrat_16, C_DIM);
-  lv_label_set_text(msg, "Waiting for Tesla BLE...");
+  // 顶部区域小标签（与主数据页同一套 8px 字距 2 的语言）
+  ovCap = mkLabel(overlay, 0, 10, CFG_LCD_WIDTH, 10, &lv_font_montserrat_8,
+                  C_FAINT);
+  lv_obj_set_style_text_letter_space(ovCap, 2, LV_PART_MAIN);
+  lv_label_set_text(ovCap, "TESLA BLE LINK");
 
-  // 三点脉冲（错相 0.2s）
+  // 状态大字 + 说明
+  ovTitle = mkLabel(overlay, 0, 28, CFG_LCD_WIDTH, 32,
+                    &lv_font_montserrat_26, C_FG);
+  lv_label_set_text(ovTitle, "SCANNING");
+
+  ovSub = mkLabel(overlay, 0, 66, CFG_LCD_WIDTH, 16,
+                  &lv_font_montserrat_12, C_DIM);
+  lv_label_set_text(ovSub, "SEARCHING FOR TESLA BROADCAST");
+
+  // 三点脉冲（错相 200ms，颜色随状态走）
   for (int i = 0; i < 3; ++i) {
-    dots[i] = mkObj(overlay, CFG_LCD_WIDTH / 2 - 20 + i * 14, 124, 6, 6);
+    dots[i] = mkObj(overlay, CFG_LCD_WIDTH / 2 - 20 + i * 14, 92, 6, 6);
     lv_obj_set_style_radius(dots[i], 3, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(dots[i], lv_color_hex(C_DIM),
+    lv_obj_set_style_bg_color(dots[i], lv_color_hex(C_CAUTION),
                               LV_PART_MAIN);
     lv_obj_set_style_bg_opa(dots[i], LV_OPA_40, LV_PART_MAIN);
   }
+
+  // 阶段面包屑：SCAN — CONNECT — SYNC（done 绿 / active 琥珀 / pending 暗灰）
+  static const char* const kSteps[3] = {"SCAN", "CONNECT", "SYNC"};
+  const int32_t xPos[3] = {76, 128, 200};
+  const int32_t wPos[3] = {44, 64, 44};
+  for (int i = 0; i < 3; ++i) {
+    ovStep[i] = mkLabel(overlay, xPos[i], 116, wPos[i], 10,
+                        &lv_font_montserrat_8, C_GEAR_OFF);
+    lv_obj_set_style_text_letter_space(ovStep[i], 1, LV_PART_MAIN);
+    lv_label_set_text(ovStep[i], kSteps[i]);
+  }
+  for (int i = 0; i < 2; ++i) {
+    lv_obj_t* sep = mkLabel(overlay, i == 0 ? 120 : 192, 116, 8, 10,
+                            &lv_font_montserrat_8, C_GEAR_OFF);
+    lv_label_set_text(sep, ">");
+  }
+
+  // 目标（VIN）与耗时；断连时可以据此确认扫的是哪台车
+  ovTarget = mkLabel(overlay, 0, 142, CFG_LCD_WIDTH, 10,
+                     &lv_font_montserrat_8, C_FAINT);
+  lv_obj_set_style_text_letter_space(ovTarget, 1, LV_PART_MAIN);
+  lv_label_set_text(ovTarget, "VIN --");
+
+  ovElapsed = mkLabel(overlay, 0, 158, CFG_LCD_WIDTH, 10,
+                      &lv_font_montserrat_8, C_FAINT);
+  lv_obj_set_style_text_letter_space(ovElapsed, 1, LV_PART_MAIN);
+  lv_label_set_text(ovElapsed, "ELAPSED 0s");
+
+  ovHint = mkLabel(overlay, 0, 180, CFG_LCD_WIDTH, 10,
+                   &lv_font_montserrat_8, C_FAINT);
+  lv_obj_set_style_text_letter_space(ovHint, 1, LV_PART_MAIN);
+  lv_label_set_text(ovHint, "MAKE SURE THE CAR IS AWAKE");
 }
 
 // ---------------------------------------------------------------------------
@@ -518,6 +561,10 @@ void Dashboard::render(const VehicleData& v, BleLink::State bleState,
                              pair.phase != m_pair.phase;
 
   m_v = v;
+  if (bleState != m_bleState) {
+    m_stateSince = now;      // overlay 的“当前状态已持续秒数”重新计时
+    m_elapsedShown = 0xFFFFFFFF;  // 强制立刻刷新秒数
+  }
   m_bleState = bleState;
   // 未握手成功时即使车端数据未过期也不渲染，避免"没握手就有数据"的假象
   m_ok = ok;
@@ -541,6 +588,7 @@ void Dashboard::updateAll() {
   updateCar();
   updateHero();
   updateBattery();
+  updateOverlay();
 
   // 配钥提示优先于断连遮罩：两者都在同一块区域，只显示更相关的那个
   const bool showPair = pairCardVisible();
@@ -878,6 +926,88 @@ void Dashboard::updateBattery() {
     setTextColorC(socLbl, C_FG);
     setTextColorC(socPct, C_DIM);
   }
+}
+
+void Dashboard::updateOverlay() {
+  // 状态大字 / 说明 / 提示 / 强调色 / 当前阶段：与主数据页同一套风格，ASCII
+  const char* title = "SCANNING";
+  const char* sub = "SEARCHING FOR TESLA BROADCAST";
+  const char* hint = "MAKE SURE THE CAR IS AWAKE";
+  uint32_t accent = C_CAUTION;
+  int stage = 0;
+
+  switch (m_bleState) {
+    case BleLink::State::Idle:
+      title = "BLE IDLE";
+      sub = "STACK NOT STARTED";
+      hint = "CHECK SERIAL LOG";
+      accent = C_FAINT;
+      stage = 0;
+      break;
+    case BleLink::State::Scanning:
+      title = "SCANNING";
+      sub = "SEARCHING FOR TESLA BROADCAST";
+      hint = "MAKE SURE THE CAR IS AWAKE";
+      accent = C_CAUTION;
+      stage = 0;
+      break;
+    case BleLink::State::Connecting:
+      title = "CONNECTING";
+      sub = "OPENING BLE LINK TO VEHICLE";
+      hint = "STAY WITHIN A FEW METERS";
+      accent = C_CAUTION;
+      stage = 1;
+      break;
+    case BleLink::State::Ready:
+      // 链路已通但数据/握手未就绪
+      title = "SYNCING";
+      sub = "WAITING FOR VEHICLE DATA";
+      hint = "HANDSHAKE IN PROGRESS";
+      accent = C_FG;
+      stage = 2;
+      break;
+    case BleLink::State::Reconnecting:
+      title = "RECONNECTING";
+      sub = "LINK LOST - RETRYING";
+      hint = "MOVE CLOSER TO THE CAR";
+      accent = C_ALERT;
+      stage = 1;
+      break;
+  }
+
+  setText(ovTitle, title);
+  setTextColorC(ovTitle, C_FG);
+  setText(ovSub, sub);
+  setTextColorC(ovSub, C_DIM);
+  setText(ovHint, hint);
+  setTextColorC(ovCap, accent);
+  // 三点脉冲强调色随状态（Idle/Scan 琥珀，Conn 琥珀，Ready 白，Reconn 红）
+  for (int i = 0; i < 3; ++i) setBgColorC(dots[i], accent);
+
+  // 阶段面包屑：完成=绿，当前=强调色，未到=暗灰
+  for (int i = 0; i < 3; ++i) {
+    uint32_t c;
+    if (i < stage) c = C_REGEN;
+    else if (i == stage) c = accent;
+    else c = C_GEAR_OFF;
+    setTextColorC(ovStep[i], c);
+  }
+
+  // 目标 VIN（config.h 提供，空则提示未设置）
+  char buf[40];
+  const char* vin = CFG_TESLA_VIN;
+  snprintf(buf, sizeof(buf), "VIN %s", (vin != nullptr && vin[0]) ? vin : "--");
+  setText(ovTarget, buf);
+  setTextColorC(ovTarget, accent);
+
+  // 当前状态已持续秒数：状态切换时 render 会重置 m_stateSince
+  const uint32_t sec = (millis() - m_stateSince) / 1000;
+  if (sec != m_elapsedShown) {
+    m_elapsedShown = sec;
+    snprintf(buf, sizeof(buf), "ELAPSED %lus", (unsigned long)sec);
+    setText(ovElapsed, buf);
+  }
+  setTextColorC(ovElapsed, accent);
 }
 
 // ---------------------------------------------------------------------------
