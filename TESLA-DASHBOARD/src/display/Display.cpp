@@ -1,9 +1,38 @@
 #include "display/Display.h"
 
 #include <LovyanGFX.hpp>
+#include <esp_heap_caps.h>
+#include <esp_system.h>
 #include <lvgl.h>
 
 #include "config.h"
+
+// LVGL 断言处理器（lv_conf.h 里用 LV_ASSERT_HANDLER 指向这里）。
+// 默认的 while(1) 会静默卡死，实车上看不出是内存不够还是代码写错；
+// 这里打一行中文日志再重启，至少串口能留下线索。
+extern "C" void lvglAssertFailed(const char* file, int line) {
+  CFG_LOG("错误: LVGL 断言失败 (%s:%d) —— 内存不足或参数非法，重启",
+          file, line);
+  Serial.flush();
+  delay(100);
+  esp_restart();
+}
+
+// LVGL 对象池（lv_conf.h: LV_MEM_POOL_ALLOC = 这里，LV_MEM_SIZE = 64KB）。
+// 必须 8 字节以上对齐：TLSF 会按 ALIGN_SIZE 检查，普通 malloc 在 ESP32 上
+// 只保证 4 字节，对齐不够时 add/create 会失败。这里给 16 字节。
+extern "C" void* lvglPoolAlloc(size_t size) {
+  void* p = heap_caps_aligned_alloc(16, size, MALLOC_CAP_8BIT);
+  if (p == nullptr) {
+    CFG_LOG("错误: LVGL 池申请 %u B 失败（ESP 空闲 %u B / 最大块 %u B）",
+            (unsigned)size, (unsigned)ESP.getFreeHeap(),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    Serial.flush();
+    delay(100);
+    esp_restart();  // 没有池，LVGL 后续必然写 NULL：直接重启等下次
+  }
+  return p;
+}
 
 // ---------------------------------------------------------------------------
 // LovyanGFX 面板配置：2.8 寸 320×240 SPI
@@ -155,6 +184,16 @@ void Display::begin() {
   lv_init();
   lv_tick_set_cb(tickCb);
 
+  // LVGL 对象池已在 lv_init() 里由 lvglPoolAlloc() 从堆整块申请（LV_MEM_SIZE=64KB）。
+  // 之前用 lv_mem_add_pool() 追加池失败的原因：TLSF 的单池上限由 LV_MEM_SIZE 决定
+  // （block_size_max = 1 << log2ceil(LV_MEM_SIZE)），静态池只有 8KB 时追加 56KB
+  // 会被 lv_tlsf_add_pool 直接拒绝，返回 0 且只打一行 LV_LOG（LV_USE_LOG=0 时看不到）。
+  lv_mem_monitor_t mon0;
+  lv_mem_monitor(&mon0);
+  CFG_LOG("LVGL 堆: 共 %uKB, ESP 空闲 %u B / 最大块 %u B",
+          (unsigned)(mon0.total_size / 1024), (unsigned)ESP.getFreeHeap(),
+          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
   lv_display_t* disp =
       lv_display_create(CFG_LCD_WIDTH, CFG_LCD_HEIGHT);
   lv_display_set_flush_cb(disp, flushCb);
@@ -176,4 +215,25 @@ void Display::begin() {
 void Display::loop() {
   if (!m_ok) return;
   lv_timer_handler();
+
+  // LVGL 堆水位监控：lv_malloc 返回 NULL 时 LVGL 不检查，会直接写 NULL+offset
+  // 触发 StoreProhibited（EXCVADDR 0x8），很难从 backtrace 看出来。
+  // 启动后 10s 打一次，之后每 30s 一次；用到 85% 以上立刻告警。
+  static uint32_t nextMs = 10000;
+  static bool first = true;
+  if ((int32_t)(millis() - nextMs) >= 0) {
+    nextMs = millis() + 30000;
+    lv_mem_monitor_t mon;
+    lv_mem_monitor(&mon);
+    if (first || mon.used_pct >= 85) {
+      first = false;
+      CFG_LOG("%s LVGL 堆: %u%% 已用 (%u/%u B), 峰值 %u B, 碎片 %u%% | ESP 空闲 %u B, 最低 %u B",
+              mon.used_pct >= 85 ? "警告:" : "监控:",
+              (unsigned)mon.used_pct,
+              (unsigned)(mon.total_size - mon.free_size),
+              (unsigned)mon.total_size, (unsigned)mon.max_used,
+              (unsigned)mon.frag_pct, (unsigned)ESP.getFreeHeap(),
+              (unsigned)ESP.getMinFreeHeap());
+    }
+  }
 }

@@ -60,6 +60,7 @@ class Dashboard {
   bool m_blinkOn = true;        // 1Hz 方波相位
   uint32_t m_tick = 0;          // 50ms 定时器节拍计数
   float m_spdShown = 0;         // 补间中的显示车速
+  bool m_doorOpen[6] = {false, false, false, false, false, false};
 
   // ---- 顶层容器 ----
   lv_obj_t* hdr = nullptr;
@@ -72,7 +73,11 @@ class Dashboard {
 
   // ---- hdr ----
   lv_obj_t* gearLbl[4] = {nullptr, nullptr, nullptr, nullptr};
-  lv_obj_t* tempsLbl = nullptr;
+  lv_obj_t* outCap = nullptr;
+  lv_obj_t* outVal = nullptr;
+  lv_obj_t* tempDiv = nullptr;
+  lv_obj_t* inCap = nullptr;
+  lv_obj_t* inVal = nullptr;
   lv_obj_t* lockLbl = nullptr;
   lv_obj_t* bleLbl = nullptr;
 
@@ -80,10 +85,14 @@ class Dashboard {
   lv_obj_t* doorObj[6] = {nullptr, nullptr, nullptr,
                           nullptr, nullptr, nullptr};
   lv_obj_t* wheelObj[4] = {nullptr, nullptr, nullptr, nullptr};
+  lv_obj_t* tpmsName[4] = {nullptr, nullptr, nullptr, nullptr};
   lv_obj_t* tpmsVal[4] = {nullptr, nullptr, nullptr, nullptr};
+  lv_obj_t* tpmsBarBg[4] = {nullptr, nullptr, nullptr, nullptr};
+  lv_obj_t* tpmsBar[4] = {nullptr, nullptr, nullptr, nullptr};
 
   // ---- hero ----
   lv_obj_t* spdLbl = nullptr;
+  lv_obj_t* spdUnit = nullptr;
   lv_obj_t* chargePanel = nullptr;
   lv_obj_t* chargeKwLbl = nullptr;
   lv_obj_t* chargeTrack = nullptr;   // 功率柱槽
@@ -93,9 +102,11 @@ class Dashboard {
 
   // ---- col-batt ----
   lv_obj_t* socLbl = nullptr;
+  lv_obj_t* socPct = nullptr;
   lv_obj_t* battTrack = nullptr;  // 竖向电量条槽
   lv_obj_t* battFill = nullptr;   // 竖向电量条填充
   lv_obj_t* rangeLbl = nullptr;
+  lv_obj_t* battCap = nullptr;
 
   // ---- overlay ----
   lv_obj_t* dots[3] = {nullptr, nullptr, nullptr};

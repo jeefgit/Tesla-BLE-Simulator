@@ -61,6 +61,10 @@ constexpr uint32_t C_OFFLINE = 0x232A36;   // 断连暗灰
 constexpr float TPMS_LO = 2.8f;
 constexpr float TPMS_HI = 3.1f;
 
+// 车身轮廓色（比分区线亮一档，黑色背景上才看得见）
+constexpr uint32_t C_CAR_LINE = 0x39414F;
+constexpr uint32_t C_DOOR_OFF = 0x14181F;
+
 const char* bleStateText(BleLink::State s) {
   switch (s) {
     case BleLink::State::Idle: return "--";
@@ -109,36 +113,38 @@ lv_obj_t* mkLabel(lv_obj_t* parent, int32_t x, int32_t y, int32_t w,
 // 车身俯视图几何（carcol 内相对坐标，车头朝上，车身 52×120）
 // DESIGN.md §7：底图用圆角矩形组合代替 C 数组位图（省 12KB Flash，矢量更清晰）
 constexpr int32_t CAR_X = 26;   // carcol 宽 104，车身居中
-constexpr int32_t CAR_Y = 40;
+constexpr int32_t CAR_Y = 48;
 constexpr int32_t CAR_W = 52;
 constexpr int32_t CAR_H = 120;
 
 // 6 开口高亮位置（相对 carcol）：顶前盖 / 左前 / 右前 / 左后 / 右后 / 尾箱
 // 与 TeslaPayload doors[6] 顺序 fl,fr,rl,rr,frunk,trunk 一一对应
 const int32_t kDoorXY[6][4] = {
-    {CAR_X + 2, CAR_Y + 26, 5, 30},          // FL 左前门
-    {CAR_X + CAR_W - 7, CAR_Y + 26, 5, 30},  // FR 右前门
-    {CAR_X + 2, CAR_Y + 64, 5, 28},          // RL 左后门
-    {CAR_X + CAR_W - 7, CAR_Y + 64, 5, 28},  // RR 右后门
+    {CAR_X + 2, CAR_Y + 22, 5, 30},          // FL 左前门
+    {CAR_X + CAR_W - 7, CAR_Y + 22, 5, 30},  // FR 右前门
+    {CAR_X + 2, CAR_Y + 60, 5, 30},          // RL 左后门
+    {CAR_X + CAR_W - 7, CAR_Y + 60, 5, 30},  // RR 右后门
     {CAR_X + 12, CAR_Y + 2, CAR_W - 24, 6},  // FRUNK 前盖
     {CAR_X + 12, CAR_Y + CAR_H - 8, CAR_W - 24, 6},  // TRUNK 尾箱
 };
 
 // 4 车轮位置（相对 carcol）：与 tpms[4] fl,fr,rl,rr 对应
 const int32_t kWheelXY[4][4] = {
-    {CAR_X - 6, CAR_Y + 28, 6, 24},                    // FL
-    {CAR_X + CAR_W, CAR_Y + 28, 6, 24},                // FR
-    {CAR_X - 6, CAR_Y + 66, 6, 24},                    // RL
-    {CAR_X + CAR_W, CAR_Y + 66, 6, 24},                // RR
+    {CAR_X - 6, CAR_Y + 26, 6, 24},  // FL
+    {CAR_X + CAR_W, CAR_Y + 26, 6, 24},  // FR
+    {CAR_X - 6, CAR_Y + 70, 6, 24},  // RL
+    {CAR_X + CAR_W, CAR_Y + 70, 6, 24},  // RR
 };
 
-// 胎压数值块：各轮外侧（FL/RL 贴左缘右对齐，FR/RR 贴右缘左对齐）
-const int32_t kTpmsXY[4][4] = {
-    {0, CAR_Y + 26, 22, 28},                  // FL 左外
-    {CAR_W + 12, CAR_Y + 26, 22, 28},         // FR 右外
-    {0, CAR_Y + 64, 22, 28},                  // RL 左外
-    {CAR_W + 12, CAR_Y + 64, 22, 28},         // RR 右外
+// 胎压数据块（轮位 + 数值 + 迷你量程条）：贴在车轮外侧的 20px 空隙里
+const int32_t kTpmsBlkXY[4][2] = {
+    {0, CAR_Y + 26},                 // FL 左外
+    {CAR_W + 32, CAR_Y + 26},        // FR 右外
+    {0, CAR_Y + 70},                 // RL 左外
+    {CAR_W + 32, CAR_Y + 70},        // RR 右外
 };
+constexpr int32_t kTpmsBlkW = 20;
+constexpr int32_t kTpmsBarW = 16;  // 迷你量程条满宽
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -147,8 +153,15 @@ const int32_t kTpmsXY[4][4] = {
 void Dashboard::begin() {
   buildUi();
   lv_timer_create(&Dashboard::timerCb, 50, this);  // 50ms 动画节拍
-  CFG_LOG("仪表层就绪（LVGL 对象树, %dx%d）", CFG_LCD_WIDTH,
-          CFG_LCD_HEIGHT);
+
+  // 对象树占了多少 LVGL 堆：内存不够时 LVGL 会静默拿到 NULL 指针然后崩，
+  // 所以这里先打一行，崩溃在首帧之前也能看到真实用量。
+  lv_mem_monitor_t mon;
+  lv_mem_monitor(&mon);
+  CFG_LOG("仪表层就绪（LVGL 对象树, %dx%d）: 堆 %u%% 已用 (%u/%u B), 峰值 %u B",
+          CFG_LCD_WIDTH, CFG_LCD_HEIGHT, (unsigned)mon.used_pct,
+          (unsigned)(mon.total_size - mon.free_size),
+          (unsigned)mon.total_size, (unsigned)mon.max_used);
 }
 
 void Dashboard::buildUi() {
@@ -160,7 +173,7 @@ void Dashboard::buildUi() {
   buildCarColumn();  // x0-104, y24-240
   buildHero();       // x104-250, y24-240（充电时扩展到 x320）
   buildBatteryColumn();  // x250-320, y24-240（充电时隐藏）
-  buildBanner();     // y24-44 覆盖式（最后建保证 z 序在车身上方）
+  buildBanner();     // y224-240 底部告警 ticker（最后建保证 z 序在最上层）
   buildOverlay();    // 断连遮罩
   buildPairCard();   // 配钥引导卡片（最顶层）
 }
@@ -174,35 +187,57 @@ void Dashboard::buildHeader() {
   lv_obj_set_style_bg_color(hdr, lv_color_hex(C_BG), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, LV_PART_MAIN);
 
-  // 档位 P R N D（左对齐一排）
+  // 档位 P R N D（左对齐一排，当前档白色、其余暗灰）
   const char gears[4] = {'P', 'R', 'N', 'D'};
   for (int i = 0; i < 4; ++i) {
-    gearLbl[i] = mkLabel(hdr, 8 + i * 20, 3, 18, 18,
-                         &lv_font_montserrat_16, C_GEAR_OFF);
+    gearLbl[i] = mkLabel(hdr, 9 + i * 18, 3, 16, 18,
+                         &lv_font_montserrat_14, C_GEAR_OFF);
+    lv_obj_set_style_text_letter_space(gearLbl[i], 1, LV_PART_MAIN);
     lv_label_set_text_fmt(gearLbl[i], "%c", gears[i]);
   }
 
-  // 内外温（居中）
-  tempsLbl = mkLabel(hdr, 90, 4, 140, 16, &lv_font_montserrat_16, C_DIM);
-  lv_label_set_text(tempsLbl, "OUT --.-  IN --.-");
+  // 内外温：小号 OUT/IN 标签 + 大号数值，中间 1px 竖线分隔
+  outCap = mkLabel(hdr, 88, 9, 20, 10, &lv_font_montserrat_8, C_FAINT,
+                   LV_TEXT_ALIGN_LEFT);
+  lv_obj_set_style_text_letter_space(outCap, 1, LV_PART_MAIN);
+  lv_label_set_text(outCap, "OUT");
 
-  // 锁 + BLE 状态（右侧）
-  lockLbl = mkLabel(hdr, 240, 4, 34, 16, &lv_font_montserrat_16, C_DIM,
+  outVal = mkLabel(hdr, 108, 4, 36, 16, &lv_font_montserrat_14, C_FG,
+                   LV_TEXT_ALIGN_LEFT);
+  lv_label_set_text(outVal, "--.-");
+
+  tempDiv = mkObj(hdr, 146, 7, 1, 10);
+  lv_obj_set_style_bg_color(tempDiv, lv_color_hex(C_TRACK_BRD), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(tempDiv, LV_OPA_COVER, LV_PART_MAIN);
+
+  inCap = mkLabel(hdr, 152, 9, 14, 10, &lv_font_montserrat_8, C_FAINT,
+                  LV_TEXT_ALIGN_LEFT);
+  lv_obj_set_style_text_letter_space(inCap, 1, LV_PART_MAIN);
+  lv_label_set_text(inCap, "IN");
+
+  inVal = mkLabel(hdr, 168, 4, 36, 16, &lv_font_montserrat_14, C_FG,
+                  LV_TEXT_ALIGN_LEFT);
+  lv_label_set_text(inVal, "--.-");
+
+  // 锁状态 + BLE 状态（右侧）
+  lockLbl = mkLabel(hdr, 240, 4, 34, 16, &lv_font_montserrat_14, C_DIM,
                     LV_TEXT_ALIGN_RIGHT);
   lv_label_set_text(lockLbl, "UNLK");
-  bleLbl = mkLabel(hdr, 278, 4, 38, 16, &lv_font_montserrat_14, C_FAINT,
+  bleLbl = mkLabel(hdr, 278, 6, 38, 12, &lv_font_montserrat_10, C_FAINT,
                    LV_TEXT_ALIGN_RIGHT);
   lv_label_set_text(bleLbl, "--");
 }
 
 void Dashboard::buildBanner() {
-  banner = mkObj(lv_screen_active(), 0, 24, CFG_LCD_WIDTH, 20);
+  // 告警条放屏幕最底部：顶部状态栏和 SOC/车速都不被遮住，
+  // 16px 高、整宽，1Hz 闪烁（DESIGN.md 原设计是覆盖式，这里改为底部 ticker）
+  banner = mkObj(lv_screen_active(), 0, CFG_LCD_HEIGHT - 16, CFG_LCD_WIDTH, 16);
   lv_obj_set_style_bg_color(banner, lv_color_hex(C_ALERT), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(banner, LV_OPA_60, LV_PART_MAIN);
   lv_obj_add_flag(banner, LV_OBJ_FLAG_HIDDEN);
 
-  bannerLbl = mkLabel(banner, 0, 2, CFG_LCD_WIDTH, 16,
-                      &lv_font_montserrat_16, C_FG);
+  bannerLbl = mkLabel(banner, 0, 0, CFG_LCD_WIDTH, 16,
+                      &lv_font_montserrat_14, C_FG);
   lv_label_set_text(bannerLbl, "");
 }
 
@@ -214,10 +249,11 @@ void Dashboard::buildCarColumn() {
   lv_obj_set_style_border_color(carcol, lv_color_hex(C_LINE),
                                 LV_PART_MAIN);
 
-  // 标题
-  lv_obj_t* cap = mkLabel(carcol, 0, 4, 104, 12, &lv_font_montserrat_14,
+  // 区域标签：8px 大写 + 字距（DESIGN.md §4.2）
+  lv_obj_t* cap = mkLabel(carcol, 0, 6, 104, 10, &lv_font_montserrat_8,
                           C_FAINT);
-  lv_label_set_text(cap, "TPMS · BAR");
+  lv_obj_set_style_text_letter_space(cap, 1, LV_PART_MAIN);
+  lv_label_set_text(cap, "TIRE PRESSURE");
 
   // 车身轮廓（圆角矩形，车头朝上）
   lv_obj_t* body = mkObj(carcol, CAR_X, CAR_Y, CAR_W, CAR_H);
@@ -225,22 +261,31 @@ void Dashboard::buildCarColumn() {
   lv_obj_set_style_bg_color(body, lv_color_hex(C_TRACK), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(body, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(body, 1, LV_PART_MAIN);
-  lv_obj_set_style_border_color(body, lv_color_hex(C_TRACK_BRD),
+  lv_obj_set_style_border_color(body, lv_color_hex(C_CAR_LINE),
                                 LV_PART_MAIN);
   // 车顶中线（1px 竖线，示意轴线）
   lv_obj_t* spine = mkObj(body, CAR_W / 2, 8, 1, CAR_H - 16);
   lv_obj_set_style_bg_color(spine, lv_color_hex(C_LINE), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(spine, LV_OPA_COVER, LV_PART_MAIN);
 
-  // 6 开口高亮块（默认隐藏 = 全关）
+  // 前后风挡：两块深色圆角带，让俯视图能看出车头/车尾
+  lv_obj_t* glassF = mkObj(body, 5, 16, CAR_W - 10, 10);
+  lv_obj_set_style_radius(glassF, 4, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(glassF, lv_color_hex(0x171C26), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(glassF, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_t* glassR = mkObj(body, 5, CAR_H - 26, CAR_W - 10, 10);
+  lv_obj_set_style_radius(glassR, 4, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(glassR, lv_color_hex(0x171C26), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(glassR, LV_OPA_COVER, LV_PART_MAIN);
+
+  // 6 开口（默认暗色区块 = 关闭，打开时红色 + 1Hz 闪烁）
   for (int i = 0; i < 6; ++i) {
     doorObj[i] = mkObj(carcol, kDoorXY[i][0], kDoorXY[i][1],
                        kDoorXY[i][2], kDoorXY[i][3]);
     lv_obj_set_style_radius(doorObj[i], 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(doorObj[i], lv_color_hex(C_ALERT),
+    lv_obj_set_style_bg_color(doorObj[i], lv_color_hex(C_DOOR_OFF),
                               LV_PART_MAIN);
     lv_obj_set_style_bg_opa(doorObj[i], LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_add_flag(doorObj[i], LV_OBJ_FLAG_HIDDEN);
   }
 
   // 4 车轮（着色随胎压状态变化）
@@ -253,27 +298,48 @@ void Dashboard::buildCarColumn() {
     lv_obj_set_style_bg_opa(wheelObj[i], LV_OPA_COVER, LV_PART_MAIN);
   }
 
-  // 4 胎压数值（车轮外侧，数值 + 位号）
+  // 4×胎压块：轮位(8px) + 数值(12px) + 迷你量程条(20×3)，贴在车轮外侧
+  static const char* const kWheelName[4] = {"FL", "FR", "RL", "RR"};
   for (int i = 0; i < 4; ++i) {
-    tpmsVal[i] = mkLabel(carcol, kTpmsXY[i][0], kTpmsXY[i][1],
-                         kTpmsXY[i][2], kTpmsXY[i][3],
-                         &lv_font_montserrat_14, C_FG,
-                         i % 2 == 0 ? LV_TEXT_ALIGN_RIGHT
-                                    : LV_TEXT_ALIGN_LEFT);
+    const int32_t bx = kTpmsBlkXY[i][0];
+    const int32_t by = kTpmsBlkXY[i][1];
+
+    tpmsName[i] = mkLabel(carcol, bx, by, kTpmsBlkW, 8,
+                          &lv_font_montserrat_8, C_FAINT);
+    lv_obj_set_style_text_letter_space(tpmsName[i], 1, LV_PART_MAIN);
+    lv_label_set_text(tpmsName[i], kWheelName[i]);
+
+    tpmsVal[i] = mkLabel(carcol, bx, by + 9, kTpmsBlkW, 12,
+                         &lv_font_montserrat_10, C_FG);
     lv_label_set_text(tpmsVal[i], "--");
+
+    tpmsBarBg[i] = mkObj(carcol, bx + 2, by + 23, kTpmsBarW, 3);
+    lv_obj_set_style_radius(tpmsBarBg[i], 2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(tpmsBarBg[i], lv_color_hex(C_TRACK),
+                              LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(tpmsBarBg[i], LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(tpmsBarBg[i], 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(tpmsBarBg[i], lv_color_hex(C_TRACK_BRD),
+                                  LV_PART_MAIN);
+
+    tpmsBar[i] = mkObj(carcol, bx + 2, by + 23, 0, 3);
+    lv_obj_set_style_radius(tpmsBar[i], 2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(tpmsBar[i], lv_color_hex(C_TPMS_OK),
+                              LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(tpmsBar[i], LV_OPA_COVER, LV_PART_MAIN);
   }
 }
 
 void Dashboard::buildHero() {
   hero = mkObj(lv_screen_active(), 104, 24, 146, 216);
 
-  // 车速大字
-  spdLbl = mkLabel(hero, 0, 50, 146, 64, &lv_font_montserrat_48, C_FG);
+  // 车速大字（48px，垂直居中于 hero）
+  spdLbl = mkLabel(hero, 0, 70, 146, 56, &lv_font_montserrat_48, C_FG);
   lv_label_set_text(spdLbl, "--");
 
-  lv_obj_t* unit = mkLabel(hero, 0, 118, 146, 18, &lv_font_montserrat_16,
-                           C_DIM);
-  lv_label_set_text(unit, "km/h");
+  spdUnit = mkLabel(hero, 0, 130, 146, 16, &lv_font_montserrat_12, C_DIM);
+  lv_obj_set_style_text_letter_space(spdUnit, 3, LV_PART_MAIN);
+  lv_label_set_text(spdUnit, "KM/H");
 
   // ---- 充电面板（默认隐藏，charging=1 时替换整个中右区）----
   chargePanel = mkObj(hero, 0, 0, 216, 216);
@@ -325,14 +391,22 @@ void Dashboard::buildHero() {
 
 void Dashboard::buildBatteryColumn() {
   colBatt = mkObj(lv_screen_active(), 250, 24, 70, 216);
+  // 左侧 1px 分割线，让电量列与中区有结构边界
+  lv_obj_set_style_border_side(colBatt, LV_BORDER_SIDE_LEFT, LV_PART_MAIN);
+  lv_obj_set_style_border_width(colBatt, 1, LV_PART_MAIN);
+  lv_obj_set_style_border_color(colBatt, lv_color_hex(C_LINE), LV_PART_MAIN);
 
-  // SOC 数值
-  socLbl = mkLabel(colBatt, 0, 8, 70, 30, &lv_font_montserrat_26, C_FG);
+  // SOC 数值 + 小号 % 单位
+  socLbl = mkLabel(colBatt, 0, 8, 54, 30, &lv_font_montserrat_26, C_FG,
+                   LV_TEXT_ALIGN_RIGHT);
   lv_label_set_text(socLbl, "--");
+  socPct = mkLabel(colBatt, 55, 22, 15, 16, &lv_font_montserrat_12, C_DIM,
+                   LV_TEXT_ALIGN_LEFT);
+  lv_label_set_text(socPct, "%");
 
-  // 竖向电量条（10×68 胶囊，y36-104）
-  battTrack = mkObj(colBatt, 30, 40, 10, 68);
-  lv_obj_set_style_radius(battTrack, 5, LV_PART_MAIN);
+  // 竖向电量条（14×110 胶囊，y46-156，从底部长）
+  battTrack = mkObj(colBatt, 28, 46, 14, 110);
+  lv_obj_set_style_radius(battTrack, 7, LV_PART_MAIN);
   lv_obj_set_style_bg_color(battTrack, lv_color_hex(C_TRACK),
                             LV_PART_MAIN);
   lv_obj_set_style_bg_opa(battTrack, LV_OPA_COVER, LV_PART_MAIN);
@@ -340,19 +414,20 @@ void Dashboard::buildBatteryColumn() {
   lv_obj_set_style_border_color(battTrack, lv_color_hex(C_TRACK_BRD),
                                 LV_PART_MAIN);
   // 填充从底部往上长（自底对齐，高度随 SOC）
-  battFill = mkObj(colBatt, 30, 108, 10, 0);
-  lv_obj_set_style_radius(battFill, 5, LV_PART_MAIN);
+  battFill = mkObj(colBatt, 28, 46, 14, 0);
+  lv_obj_set_style_radius(battFill, 7, LV_PART_MAIN);
   lv_obj_set_style_bg_color(battFill, lv_color_hex(C_FG), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(battFill, LV_OPA_COVER, LV_PART_MAIN);
 
-  // 续航
-  rangeLbl = mkLabel(colBatt, 0, 116, 70, 20, &lv_font_montserrat_16,
+  // 续航 + 区域标签
+  rangeLbl = mkLabel(colBatt, 0, 164, 70, 20, &lv_font_montserrat_16,
                      C_FG);
-  lv_label_set_text(rangeLbl, "--");
+  lv_label_set_text(rangeLbl, "-- km");
 
-  lv_obj_t* cap = mkLabel(colBatt, 0, 140, 70, 12,
-                          &lv_font_montserrat_14, C_FAINT);
-  lv_label_set_text(cap, "RANGE");
+  battCap = mkLabel(colBatt, 0, 190, 70, 10,
+                    &lv_font_montserrat_8, C_FAINT);
+  lv_obj_set_style_text_letter_space(battCap, 1, LV_PART_MAIN);
+  lv_label_set_text(battCap, "RANGE");
 }
 
 void Dashboard::buildOverlay() {
@@ -601,32 +676,48 @@ void Dashboard::updateHeader() {
     setTextColorC(gearLbl[i], on ? C_FG : C_GEAR_OFF);
   }
 
-  char buf[32];
+  char buf[16];
   if (m_ok) {
-    snprintf(buf, sizeof(buf), "OUT %.1f  IN %.1f", m_v.outsideTempC,
-             m_v.insideTempC);
-    setText(tempsLbl, buf);
+    snprintf(buf, sizeof(buf), "%.1f°", m_v.outsideTempC);
+    setText(outVal, buf);
+    snprintf(buf, sizeof(buf), "%.1f°", m_v.insideTempC);
+    setText(inVal, buf);
     setText(lockLbl, m_v.locked ? "LOCK" : "UNLK");
     setTextColorC(lockLbl, m_v.locked ? C_DIM : C_CAUTION);
   } else {
-    setText(tempsLbl, "OUT --.-  IN --.-");
+    setText(outVal, "--.-");
+    setText(inVal, "--.-");
     setText(lockLbl, "UNLK");
   }
-  setText(bleLbl, pairCardVisible() ? "KEY" : bleStateText(m_bleState));
+
+  // BLE 状态：已连接绿色、扫描/连接/重连琥珀、未启动灰、配钥中 KEY
+  const bool pairing = pairCardVisible();
+  setText(bleLbl, pairing ? "KEY" : bleStateText(m_bleState));
+  uint32_t c = C_FAINT;
+  if (pairing) {
+    c = C_CAUTION;
+  } else if (m_bleState == BleLink::State::Ready) {
+    c = C_REGEN;
+  } else if (m_bleState == BleLink::State::Scanning ||
+             m_bleState == BleLink::State::Connecting ||
+             m_bleState == BleLink::State::Reconnecting) {
+    c = C_CAUTION;
+  }
+  setTextColorC(bleLbl, c);
 }
 
 void Dashboard::updateCar() {
-  // 6 开口高亮（打开=红色块 + banner 提示，闪烁由 onTimer 处理）
+  // 6 开口：关闭=暗色区块，打开=红色（闪烁由 onTimer 处理）
   for (int i = 0; i < 6; ++i) {
     const bool open = m_ok && m_v.doors[i];
-    if (open) {
-      lv_obj_clear_flag(doorObj[i], LV_OBJ_FLAG_HIDDEN);
-    } else {
-      lv_obj_add_flag(doorObj[i], LV_OBJ_FLAG_HIDDEN);
-    }
+    m_doorOpen[i] = open;
+    setBgColorC(doorObj[i], open ? C_ALERT : C_DOOR_OFF);
+    lv_obj_set_style_bg_opa(
+        doorObj[i], open && !m_blinkOn ? LV_OPA_30 : LV_OPA_COVER,
+        LV_PART_MAIN);
   }
 
-  // 四轮着色 + 胎压数值
+  // 四轮着色 + 胎压数值 + 迷你量程条（1.5–3.5 bar 映射到 20px）
   for (int i = 0; i < 4; ++i) {
     const float bar = m_ok ? m_v.tpms[i] : 0.0f;
     const bool bad = m_ok && (bar < TPMS_LO || bar > TPMS_HI);
@@ -635,14 +726,27 @@ void Dashboard::updateCar() {
     else if (bad) wheelColor = C_ALERT;
     setBgColorC(wheelObj[i], wheelColor);
 
-    char buf[8];
+    int32_t fillW = 0;
     if (m_ok) {
+      float frac = (bar - 1.5f) / 2.0f;  // 1.5..3.5 bar
+      if (frac < 0.0f) frac = 0.0f;
+      if (frac > 1.0f) frac = 1.0f;
+      fillW = (int32_t)(frac * kTpmsBarW);
+
+      char buf[8];
       snprintf(buf, sizeof(buf), "%.1f", bar);
       setText(tpmsVal[i], buf);
       setTextColorC(tpmsVal[i], bad ? C_ALERT : C_FG);
+      setTextColorC(tpmsName[i], bad ? C_ALERT : C_FAINT);
+      setBgColorC(tpmsBar[i], bad ? C_ALERT : C_TPMS_OK);
     } else {
       setText(tpmsVal[i], "--");
       setTextColorC(tpmsVal[i], C_OFFLINE);
+      setTextColorC(tpmsName[i], C_OFFLINE);
+      setBgColorC(tpmsBar[i], C_OFFLINE);
+    }
+    if (lv_obj_get_width(tpmsBar[i]) != fillW) {
+      lv_obj_set_width(tpmsBar[i], fillW);
     }
   }
 
@@ -684,8 +788,10 @@ void Dashboard::updateCar() {
   }
 
   if (text) {
+    char bbuf[56];
+    snprintf(bbuf, sizeof(bbuf), "%s %s", LV_SYMBOL_WARNING, text);
     setBgColorC(banner, color);
-    setText(bannerLbl, text);
+    setText(bannerLbl, bbuf);
     lv_obj_clear_flag(banner, LV_OBJ_FLAG_HIDDEN);
   } else {
     lv_obj_add_flag(banner, LV_OBJ_FLAG_HIDDEN);
@@ -735,11 +841,13 @@ void Dashboard::setChargingLayout(bool charging) {
   if (charging) {
     lv_obj_set_width(hero, 216);  // x104-320 全宽
     lv_obj_add_flag(spdLbl, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(spdUnit, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(colBatt, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(chargePanel, LV_OBJ_FLAG_HIDDEN);
   } else {
     lv_obj_set_width(hero, 146);  // 回到 x104-250
     lv_obj_clear_flag(spdLbl, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(spdUnit, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(colBatt, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(chargePanel, LV_OBJ_FLAG_HIDDEN);
   }
@@ -748,24 +856,27 @@ void Dashboard::setChargingLayout(bool charging) {
 void Dashboard::updateBattery() {
   char buf[16];
   if (m_ok) {
-    snprintf(buf, sizeof(buf), "%ld%%", (long)m_v.soc);
+    snprintf(buf, sizeof(buf), "%ld", (long)m_v.soc);
     setText(socLbl, buf);
     snprintf(buf, sizeof(buf), "%.0f km", m_v.rangeKm);
     setText(rangeLbl, buf);
 
-    // 电量条：底部向上生长（y = 108 - h, 高 = SOC% × 68）
-    const int32_t fh = (int32_t)(m_v.soc * 68 / 100);
+    // 电量条：底部向上生长（y = 46 + 110 - h, 高 = SOC% × 110）
+    const int32_t fh = (int32_t)(m_v.soc * 110 / 100);
     setHeightIfChanged(battFill, fh);
-    setPosIfChanged(battFill, 30, 108 - fh);
+    setPosIfChanged(battFill, 28, 46 + 110 - fh);
     uint32_t c = C_FG;
     if (m_v.charging) c = C_REGEN;
     else if (m_v.soc <= 15) c = C_ALERT;
     setBgColorC(battFill, c);
     setTextColorC(socLbl, m_v.soc <= 15 ? C_ALERT : C_FG);
+    setTextColorC(socPct, m_v.soc <= 15 ? C_ALERT : C_DIM);
   } else {
     setText(socLbl, "--");
-    setText(rangeLbl, "--");
+    setText(rangeLbl, "-- km");
     setHeightIfChanged(battFill, 0);
+    setTextColorC(socLbl, C_FG);
+    setTextColorC(socPct, C_DIM);
   }
 }
 
@@ -800,7 +911,7 @@ void Dashboard::onTimer() {
     m_blinkOn = !m_blinkOn;
     const lv_opa_t opa = m_blinkOn ? LV_OPA_COVER : LV_OPA_30;
     for (int i = 0; i < 6; ++i) {
-      if (!lv_obj_has_flag(doorObj[i], LV_OBJ_FLAG_HIDDEN)) {
+      if (m_doorOpen[i]) {
         lv_obj_set_style_bg_opa(doorObj[i], opa, LV_PART_MAIN);
       }
     }
