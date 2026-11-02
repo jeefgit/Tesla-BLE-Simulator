@@ -274,6 +274,12 @@ void TeslaClient::begin(BleLink* link) {
 }
 
 void TeslaClient::loop() {
+  // 屏幕提示的短时状态（成功/失败）到期后自动收起，恢复正常仪表
+  if ((m_hint.phase == PairingHint::Success ||
+       m_hint.phase == PairingHint::Failed) &&
+      due(m_hintUntil)) {
+    m_hint = PairingHint{};
+  }
   const bool connected = m_link && m_link->isConnected();
   if (!connected) {
     if (m_wasConnected) {
@@ -363,6 +369,7 @@ void TeslaClient::onConnected() {
   m_nextPairAt = 0;
   m_pairWaitAt = 0;
   m_pairFallbackTried = false;
+  m_hint = PairingHint{};
   m_rxNotifies = 0;
   m_rxBytes = 0;
   m_rxLogs = 0;
@@ -383,6 +390,7 @@ void TeslaClient::onDisconnected() {
   m_pairSends = 0;
   m_pairWaitAt = 0;
   m_pairFallbackTried = false;
+  m_hint = PairingHint{};
   m_crypto.reset();
   CFG_LOG("BLE 断开，加密会话已清除");
 }
@@ -432,6 +440,7 @@ void TeslaClient::onCryptoSession(bool ok) {
     m_pairSends = 0;
     m_pairWaitAt = 0;
     m_pairFallbackTried = false;
+    m_hint = PairingHint{};
     m_nextActionAt = millis();  // 立即发第一条 GetVehicleData
   } else {
     m_nextActionAt = millis() + CFG_TESLA_HANDSHAKE_RETRY_MS;
@@ -467,26 +476,33 @@ void TeslaClient::sendPairingRequest() {
   if (!m_crypto.buildPairingRequest(m_tx, sizeof(m_tx), &n)) {
     CFG_LOG("[PAIR] add-key-request 构造失败");
     m_nextPairAt = millis() + CFG_TESLA_PAIR_RETRY_MS;
+    m_hint.phase = PairingHint::Retry;
     return;
   }
   if (!m_link || !m_link->sendRaw(m_tx, n)) {
     CFG_LOG("[PAIR] add-key-request 发送失败（链路未就绪）");
     m_nextPairAt = millis() + CFG_TESLA_PAIR_RETRY_MS;
+    m_hint.phase = PairingHint::Retry;
     return;
   }
   ++m_pairSends;
   m_nextPairAt = millis() + CFG_TESLA_PAIR_RETRY_MS;
   // 超时基准：最后一次发送时刻；若随后收到 WAIT 会用 WAIT 时刻刷新
   m_pairWaitAt = millis();
+  // 屏幕提示：开始贴卡倒计时（真车要先贴卡，中控屏才弹确认框）
+  m_hint.phase = PairingHint::TapCard;
+  m_hint.attempt = (uint8_t)m_pairSends;
+  m_hint.info = 0;
   if (m_pairSends == 1) {
     // 重新采样车端对配钥请求的响应（前几条 notify / 完整帧）
     m_rxLogs = 0;
   }
-  CFG_LOG("[PAIR] 已发送 add-key-request %uB（第 %u/%u 次）→ 请在中控台轻点 NFC 钥匙卡",
+  CFG_LOG("[PAIR] 已发送 add-key-request %uB（第 %u/%u 次）→ 请把 NFC 卡贴到中控台读卡区"
+          "（贴卡后屏幕才会弹出确认，不会提前提示）",
           (unsigned)n, (unsigned)m_pairSends, (unsigned)CFG_TESLA_PAIR_MAX_SENDS);
   if (m_pairSends >= 2 && !m_pairWaitLogged) {
-    CFG_LOG("[PAIR] 仍未收到车端 WAIT 回包：确认车辆已唤醒、人在车内、中控屏亮起"
-            "（真车的刷卡提示只显示在中控屏上）");
+    CFG_LOG("[PAIR] 仍未收到车端 WAIT 回包：部分真车不主动回 WAIT，"
+            "直接贴卡即可；同时确认车辆已唤醒、人在车内、中控屏亮起");
   }
 }
 
@@ -497,6 +513,8 @@ void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
       // 车辆已受理：停止重发和握手，纯等待刷卡（超时由 loop 统一处理）
       m_pairWaitNfc = true;
       m_pairWaitAt = millis();
+      m_hint.phase = PairingHint::WaitConfirm;
+      m_hint.info = 0;
       if (!m_pairWaitLogged) {
         m_pairWaitLogged = true;
         CFG_LOG("[PAIR] 车辆已受理请求，等待 NFC 卡授权（中控台轻点钥匙卡，"
@@ -514,6 +532,24 @@ void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
     m_notPaired = false;
     m_handshakeTries = 0;
     m_nextActionAt = millis() + 300;
+    m_hint.phase = PairingHint::Success;
+    m_hint.info = 0;
+    m_hintUntil = millis() + 4000;
+    return;
+  }
+
+  // 车端等待贴卡超时（25/26）：提示已消失，自动重新挂起一轮配钥，
+  // 免去重启 ESP32；用户拒绝/取消（24/28）则保持停止，等人工处理。
+  if (info == 25 || info == 26) {
+    m_pairDone = false;
+    m_pairWaitNfc = false;
+    m_pairWaitLogged = false;
+    m_pairSends = 0;
+    m_nextPairAt = millis() + 3000;
+    m_hint.phase = PairingHint::Retry;
+    m_hint.info = info;
+    CFG_LOG("[PAIR] 车端等待贴卡超时 info=%u，3s 后重新发起（请贴卡后看屏幕确认）",
+            (unsigned)info);
     return;
   }
 
@@ -532,6 +568,9 @@ void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
   CFG_LOG("[PAIR] ❌ 配钥失败 info=%u（%s）", (unsigned)info, reason);
   // 保留 m_notPaired，后续可用长间隔握手探测；需人工处理后重启/重连重试
   m_nextActionAt = millis() + CFG_TESLA_HANDSHAKE_RETRY_LONG_MS;
+  m_hint.phase = PairingHint::Failed;
+  m_hint.info = info;
+  m_hintUntil = millis() + 8000;
 }
 
 void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
@@ -749,6 +788,23 @@ bool TeslaClient::ready() const {
 #endif
   if (m_packets == 0) return false;
   return (millis() - m_lastPacketAt) < CFG_DATA_STALE_MS;
+}
+
+PairingHint TeslaClient::pairingHint() const {
+  PairingHint h = m_hint;
+  h.maxAttempts = CFG_TESLA_PAIR_MAX_SENDS;
+  if (h.phase == PairingHint::TapCard ||
+      h.phase == PairingHint::WaitConfirm) {
+    // 倒计时以「最后一次发送/车端受理时刻」为基准，按车端 ~30s 窗口算
+    const uint32_t elapsed = millis() - m_pairWaitAt;
+    h.remainMs = elapsed < CFG_TESLA_PAIR_TAP_WINDOW_MS
+                     ? (CFG_TESLA_PAIR_TAP_WINDOW_MS - elapsed)
+                     : 0;
+  } else if (h.phase == PairingHint::Success ||
+             h.phase == PairingHint::Failed) {
+    h.remainMs = 0;
+  }
+  return h;
 }
 
 String TeslaClient::advertisedNameFromVin(const char* vin) {

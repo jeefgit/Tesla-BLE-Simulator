@@ -4,6 +4,7 @@
 
 #include "ble/BleLink.h"
 #include "data/VehicleData.h"
+#include "tesla/PairingState.h"
 
 // ---------------------------------------------------------------------------
 // Dashboard：仪表 UI 层（LVGL 9 对象树，布局见 dashboard/DESIGN.md）
@@ -21,8 +22,9 @@ class Dashboard {
  public:
   void begin();
   // handshakeOk：加密会话是否已握手成功；false 时一律按无数据渲染
+  // pair：配钥流程提示（Idle = 不显示配钥卡片）
   void render(const VehicleData& v, BleLink::State bleState, bool dataReady,
-              bool handshakeOk);
+              bool handshakeOk, const PairingHint& pair = PairingHint{});
 
  private:
   // LVGL 定时器：数值补间(50ms) + 告警 1Hz 闪烁 + 断连三点脉冲
@@ -36,12 +38,15 @@ class Dashboard {
   void buildHero();
   void buildBatteryColumn();
   void buildOverlay();
+  void buildPairCard();
 
   void updateAll();
   void updateHeader();
   void updateCar();
   void updateHero();
   void updateBattery();
+  void updatePairCard();
+  bool pairCardVisible() const;
   void setChargingLayout(bool charging);
   void printSerial();
 
@@ -94,4 +99,17 @@ class Dashboard {
 
   // ---- overlay ----
   lv_obj_t* dots[3] = {nullptr, nullptr, nullptr};
+
+  // ---- pairing card（配钥引导，盖在断连遮罩之上）----
+  PairingHint m_pair;
+  lv_obj_t* pairCard = nullptr;
+  lv_obj_t* pairTitle = nullptr;
+  lv_obj_t* pairStep = nullptr;
+  lv_obj_t* pairWhere = nullptr;
+  lv_obj_t* pairCount = nullptr;   // 剩余秒数大字
+  lv_obj_t* pairBarTrack = nullptr;
+  lv_obj_t* pairBarFill = nullptr;
+  lv_obj_t* pairAttempt = nullptr;
+  lv_obj_t* pairStatus = nullptr;
+  uint32_t m_pairShownSec = 0xFFFFFFFF;  // 倒计时脏值守卫
 };

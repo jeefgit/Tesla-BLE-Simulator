@@ -161,7 +161,8 @@ void Dashboard::buildUi() {
   buildHero();       // x104-250, y24-240（充电时扩展到 x320）
   buildBatteryColumn();  // x250-320, y24-240（充电时隐藏）
   buildBanner();     // y24-44 覆盖式（最后建保证 z 序在车身上方）
-  buildOverlay();    // 断连遮罩最顶层
+  buildOverlay();    // 断连遮罩
+  buildPairCard();   // 配钥引导卡片（最顶层）
 }
 
 void Dashboard::buildHeader() {
@@ -375,26 +376,85 @@ void Dashboard::buildOverlay() {
 }
 
 // ---------------------------------------------------------------------------
+// 配钥引导卡片：真车不发提示、必须贴卡才弹确认框，因此屏幕直接把「现在贴卡」
+// 和车端刷卡窗口倒计时显示出来，用户不用盯串口日志。
+// ---------------------------------------------------------------------------
+void Dashboard::buildPairCard() {
+  pairCard = mkObj(lv_screen_active(), 0, 24, CFG_LCD_WIDTH, 216);
+  lv_obj_set_style_bg_color(pairCard, lv_color_hex(C_BG), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(pairCard, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_add_flag(pairCard, LV_OBJ_FLAG_HIDDEN);
+
+  pairTitle = mkLabel(pairCard, 0, 8, CFG_LCD_WIDTH, 30,
+                      &lv_font_montserrat_26, C_FG);
+  lv_label_set_text(pairTitle, "ADD NEW KEY");
+
+  pairStep = mkLabel(pairCard, 0, 42, CFG_LCD_WIDTH, 30,
+                     &lv_font_montserrat_26, C_CAUTION);
+  lv_label_set_text(pairStep, "TAP CARD");
+
+  // 一行说明（位置/下一步动作），16 号字保证 320px 宽内不折行
+  pairWhere = mkLabel(pairCard, 0, 76, CFG_LCD_WIDTH, 18,
+                      &lv_font_montserrat_16, C_DIM);
+  lv_label_set_text(pairWhere, "ON CONSOLE READER BY ARMREST");
+
+  // 剩余秒数大字（车端刷卡窗口 ~30s）
+  pairCount = mkLabel(pairCard, 0, 96, CFG_LCD_WIDTH, 52,
+                      &lv_font_montserrat_48, C_FG);
+  lv_label_set_text(pairCount, "30");
+
+  // 倒计时进度条（手写两条矩形，LV_USE_BAR 为省 Flash 已关闭）
+  pairBarTrack = mkObj(pairCard, 40, 152, 240, 8);
+  lv_obj_set_style_radius(pairBarTrack, 4, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(pairBarTrack, lv_color_hex(C_TRACK), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(pairBarTrack, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(pairBarTrack, 1, LV_PART_MAIN);
+  lv_obj_set_style_border_color(pairBarTrack, lv_color_hex(C_TRACK_BRD),
+                                LV_PART_MAIN);
+
+  pairBarFill = mkObj(pairCard, 40, 152, 240, 8);
+  lv_obj_set_style_radius(pairBarFill, 4, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(pairBarFill, lv_color_hex(C_CAUTION),
+                            LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(pairBarFill, LV_OPA_COVER, LV_PART_MAIN);
+
+  pairAttempt = mkLabel(pairCard, 0, 164, CFG_LCD_WIDTH, 16,
+                        &lv_font_montserrat_14, C_DIM);
+  lv_label_set_text(pairAttempt, "TRY 1/3");
+
+  pairStatus = mkLabel(pairCard, 0, 184, CFG_LCD_WIDTH, 20,
+                       &lv_font_montserrat_16, C_CAUTION);
+  lv_label_set_text(pairStatus, "WAITING FOR KEY CARD");
+}
+
+// ---------------------------------------------------------------------------
 // 数据刷新（render 每帧调用；内部节流 + 只改脏属性）
 // ---------------------------------------------------------------------------
 void Dashboard::render(const VehicleData& v, BleLink::State bleState,
-                       bool dataReady, bool handshakeOk) {
+                       bool dataReady, bool handshakeOk,
+                       const PairingHint& pair) {
   const uint32_t now = millis();
   if (now - m_lastPrint < CFG_RENDER_INTERVAL_MS) return;
   m_lastPrint = now;
 
   const bool ok =
       dataReady && handshakeOk && v.fresh(VF_SPEED, CFG_DATA_STALE_MS);
-  const bool statusChanged = bleState != m_bleState || ok != m_ok;
+  const bool statusChanged = bleState != m_bleState || ok != m_ok ||
+                             pair.phase != m_pair.phase;
 
   m_v = v;
   m_bleState = bleState;
   // 未握手成功时即使车端数据未过期也不渲染，避免"没握手就有数据"的假象
   m_ok = ok;
+  m_pair = pair;
   // CFG_LOG("仪表更新检查: BLE=%s 数据就绪=%s 握手=%s",
           // bleStateText(m_bleState), dataReady ? "是" : "否",
           // handshakeOk ? "是" : "否");
-  if (!m_ok && m_hasRendered && !statusChanged) return;
+  // 配钥进行中（Idle 以外）也要持续刷新，否则倒计时会卡住
+  if (!m_ok && m_hasRendered && !statusChanged &&
+      pair.phase == PairingHint::Idle) {
+    return;
+  }
 
   updateAll();
   printSerial();
@@ -407,10 +467,131 @@ void Dashboard::updateAll() {
   updateHero();
   updateBattery();
 
-  lv_obj_add_flag(overlay, m_ok ? LV_OBJ_FLAG_HIDDEN : LV_OBJ_FLAG_HIDDEN);
-  if (!m_ok) lv_obj_clear_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+  // 配钥提示优先于断连遮罩：两者都在同一块区域，只显示更相关的那个
+  const bool showPair = pairCardVisible();
+  updatePairCard();
+  if (!m_ok && !showPair) {
+    lv_obj_clear_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+  }
   // 断连时强制清空告警条（DESIGN.md §5）
   if (!m_ok) lv_obj_add_flag(banner, LV_OBJ_FLAG_HIDDEN);
+}
+
+bool Dashboard::pairCardVisible() const {
+  if (m_pair.phase == PairingHint::Idle) return false;
+  // 只在本机连上车端时提示配钥；链路掉了先显示断连遮罩
+  return m_bleState == BleLink::State::Ready;
+}
+
+void Dashboard::updatePairCard() {
+  const bool show = pairCardVisible();
+  if (!show) {
+    lv_obj_add_flag(pairCard, LV_OBJ_FLAG_HIDDEN);
+    m_pairShownSec = 0xFFFFFFFF;  // 下次显示时强制重画倒计时
+    return;
+  }
+  lv_obj_clear_flag(pairCard, LV_OBJ_FLAG_HIDDEN);
+
+  const char* step = "";
+  const char* detail = "";
+  char detailBuf[40] = "";
+  const char* status = "";
+  uint32_t stepColor = C_CAUTION;
+  uint32_t barColor = C_CAUTION;
+  bool counting = false;
+
+  switch (m_pair.phase) {
+    case PairingHint::TapCard:
+      step = "TAP CARD";
+      detail = "ON CONSOLE READER BY ARMREST";
+      status = "WAITING FOR KEY CARD";
+      counting = true;
+      break;
+    case PairingHint::WaitConfirm:
+      step = "CONFIRM";
+      detail = "TAP YES ON THE TOUCHSCREEN";
+      status = "CARD READ - CHECK SCREEN";
+      stepColor = C_REGEN;
+      barColor = C_REGEN;
+      counting = true;
+      break;
+    case PairingHint::Retry:
+      step = "TIMEOUT";
+      detail = "TAP CARD ON NEXT ATTEMPT";
+      status = "RETRYING IN A FEW SECONDS";
+      break;
+    case PairingHint::Success:
+      step = "KEY ADDED";
+      detail = "PUBLIC KEY SAVED";
+      status = "PAIRED - RECONNECTING";
+      stepColor = C_REGEN;
+      barColor = C_REGEN;
+      break;
+    case PairingHint::Failed:
+      step = "FAILED";
+      snprintf(detailBuf, sizeof(detailBuf), "ERROR %u - CHECK SERIAL LOG",
+               (unsigned)m_pair.info);
+      detail = detailBuf;
+      status = "PAIRING STOPPED";
+      stepColor = C_ALERT;
+      barColor = C_ALERT;
+      break;
+    default:
+      break;
+  }
+
+  // 车端刷卡窗口已过：继续挂着「请贴卡」会误导，改成提示即将重试
+  // （车端也不回 WAIT 时只能靠这个倒计时判断时机，不能用日志）
+  if (counting && m_pair.remainMs == 0) {
+    step = "WINDOW CLOSED";
+    detail = "WILL RETRY AUTOMATICALLY";
+    status = "WAITING TO RETRY...";
+    stepColor = C_CAUTION;
+    barColor = C_CAUTION;
+    counting = false;
+  }
+
+  setText(pairStep, step);
+  setTextColorC(pairStep, stepColor);
+  setText(pairWhere, detail);
+  setText(pairStatus, status);
+  setTextColorC(pairStatus, stepColor);
+  setBgColorC(pairBarFill, barColor);
+
+  // 倒计时秒数（只在整秒变化时写，避免整屏重绘）
+  const uint32_t sec = counting ? (m_pair.remainMs + 999) / 1000 : 0;
+  if (sec != m_pairShownSec) {
+    m_pairShownSec = sec;
+    char buf[8];
+    if (counting) {
+      snprintf(buf, sizeof(buf), "%u", (unsigned)sec);
+    } else {
+      snprintf(buf, sizeof(buf), "--");
+    }
+    setText(pairCount, buf);
+    setTextColorC(pairCount, sec > 0 || !counting ? C_FG : C_ALERT);
+  }
+
+  // 进度条：按「车端刷卡窗口」满量程
+  int32_t w = 0;
+  if (counting) {
+    float frac = (float)m_pair.remainMs / (float)CFG_TESLA_PAIR_TAP_WINDOW_MS;
+    if (frac > 1.0f) frac = 1.0f;
+    w = (int32_t)(frac * 240.0f);
+  }
+  if (lv_obj_get_width(pairBarFill) != w) lv_obj_set_width(pairBarFill, w);
+
+  // 第几次尝试
+  char abuf[24];
+  if (m_pair.maxAttempts > 0) {
+    snprintf(abuf, sizeof(abuf), "TRY %u/%u", (unsigned)m_pair.attempt,
+             (unsigned)m_pair.maxAttempts);
+  } else {
+    snprintf(abuf, sizeof(abuf), " ");
+  }
+  setText(pairAttempt, abuf);
 }
 
 void Dashboard::updateHeader() {
@@ -431,7 +612,7 @@ void Dashboard::updateHeader() {
     setText(tempsLbl, "OUT --.-  IN --.-");
     setText(lockLbl, "UNLK");
   }
-  setText(bleLbl, bleStateText(m_bleState));
+  setText(bleLbl, pairCardVisible() ? "KEY" : bleStateText(m_bleState));
 }
 
 void Dashboard::updateCar() {

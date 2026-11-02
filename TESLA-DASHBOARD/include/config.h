@@ -100,10 +100,11 @@
 // ---------------------------------------------------------------------------
 // BLE 配钥（add-key-request，对齐官方 vehicle-command cmd/tesla-control）
 //
-// 车辆握手回 SessionInfo.status = KEY_NOT_ON_WHITELIST 时，说明本机公钥
-// 还没登记。此时按官方 add-key-request 流程发送「明文 ToVCSECMessage +
-// SIGNATURE_TYPE_PRESENT_KEY」，车辆会在中控台提示「轻点 NFC 钥匙卡」，
-// 刷卡确认后回 WhitelistOperation_status 终态，之后重新握手即可。
+// 车辆握手回 SessionInfo.status = KEY_NOT_ON_WHITELIST（或协议 fault=3）时，
+// 说明本机公钥还没登记。此时按官方 add-key-request 流程发送「明文
+// ToVCSECMessage + SIGNATURE_TYPE_PRESENT_KEY」；真车不会先弹提示，必须把
+// NFC 卡贴到中控台读卡区后才弹「是否添加钥匙」，确认后回
+// WhitelistOperation_status 终态，之后重新握手即可。
 //
 //   1 = 握手被拒时自动发起配钥请求
 //   0 = 不自动配钥（公钥未登记时只打印提示，需自己在车机/模拟器授权）
@@ -115,6 +116,11 @@
 // 真车从休眠被 BLE 唤醒需要几秒，未收到 WAIT 时按此间隔补发，最多 3 次。
 #define CFG_TESLA_PAIR_RETRY_MS 8000
 #define CFG_TESLA_PAIR_MAX_SENDS 3
+
+// 等待刷卡的「车端窗口」（毫秒）：真车约 30s 内没读到卡就回 info=25
+// （TIMED_OUT_WAITING_FOR_TAP）。屏幕倒计时按这个值显示，比固件自己的
+// CFG_TESLA_PAIR_WAIT_TIMEOUT_MS 短，避免提示「还有时间」其实车端已放弃。
+#define CFG_TESLA_PAIR_TAP_WINDOW_MS 30000
 
 // 等待刷卡超时（毫秒）：超时后清空发送计数并重新发起 add-key-request，
 // 避免车端提示已消失/超时后固件永久停在「只等不重试」的状态。

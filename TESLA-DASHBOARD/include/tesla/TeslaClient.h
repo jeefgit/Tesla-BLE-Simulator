@@ -5,6 +5,7 @@
 #include "ble/BleLink.h"
 #include "config.h"
 #include "data/VehicleData.h"
+#include "tesla/PairingState.h"
 #include "tesla/TeslaCrypto.h"
 #include "tesla/TeslaPayload.h"
 
@@ -36,6 +37,9 @@ class TeslaClient {
 
   // 加密会话是否已建立（仪表状态页可用来区分"旁路/加密"）
   bool encrypted() const { return m_crypto.hasSession(); }
+
+  // 配钥流程的屏幕提示状态（仪表层据此显示「请贴卡 / 倒计时 / 结果」）
+  PairingHint pairingHint() const;
 
   // 特斯拉广播名 = "S" + sha1(VIN) 前16位hex + "C"（与 sim_server.py 规则一致）
   static String advertisedNameFromVin(const char* vin);
@@ -90,6 +94,8 @@ class TeslaClient {
   uint32_t m_nextPairAt = 0;
   uint32_t m_pairWaitAt = 0;       // 进入等待/最后一次发送的时刻（超时基准）
   bool m_pairFallbackTried = false; // 握手无回包时是否已改发 add-key-request
+  PairingHint m_hint;              // 屏幕提示状态（Dashboard 轮询）
+  uint32_t m_hintUntil = 0;        // Success/Failed 的展示截止时刻
 
   // 入站诊断：真车不回包时用于区分「完全无通知」与「有通知但解析不出帧」
   uint32_t m_rxNotifies = 0;

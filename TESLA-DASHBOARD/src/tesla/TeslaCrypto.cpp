@@ -57,8 +57,12 @@ constexpr uint32_t kFlagEncryptResponse = 1u << 1;
 // 仪表只走 Infotainment（遥测/充电/空调/门锁状态都在这一域）
 constexpr uint32_t kCommandDomain = kDomainInfotainment;
 
-// UniversalMessage.MessageFault_E
+// UniversalMessage.MessageFault_E（见 universal_message.proto）
+//   3 = UNKNOWN_KEY_ID：车端不认识本机公钥（= 还没配钥，不是签名错误）
+//   5 = INVALID_SIGNATURE
 constexpr uint32_t kFaultNone = 0;
+constexpr uint32_t kFaultUnknownKeyId = 3;
+constexpr uint32_t kFaultInactiveKey = 4;
 constexpr uint32_t kFaultInvalidSignature = 5;
 constexpr uint32_t kFaultInvalidDomains = 8;
 
@@ -417,54 +421,71 @@ uint32_t parseDestinationDomain(pb::Reader& r) {
   return domain;
 }
 
-// 解析 FromVCSECMessage.commandStatus（配钥进度）
+// 解析一个 CommandStatus（配钥进度）
 //   CommandStatus            : operationStatus=1, whitelistOperationStatus=3
 //   WhitelistOperation_status: whitelistOperationInformation=1, operationStatus=3
 // terminal=true 表示已收到 WhitelistOperation_status（配钥终态）。
+bool parseCommandStatus(pb::Reader& cs, uint32_t* opStatus, uint32_t* info,
+                        bool* terminal) {
+  bool found = false;
+  while (!cs.atEnd()) {
+    uint32_t cf = 0, cw = 0;
+    if (!cs.next(&cf, &cw)) break;
+    if (cf == 1 && cw == pb::WIRE_VARINT) {
+      uint64_t v = 0;
+      if (cs.readVarint(&v)) {
+        *opStatus = (uint32_t)v;
+        found = true;
+      }
+    } else if (cf == 3 && cw == pb::WIRE_LEN) {
+      pb::Reader wl;
+      if (!cs.readMessage(&wl)) break;
+      *terminal = true;
+      found = true;
+      while (!wl.atEnd()) {
+        uint32_t wf = 0, ww = 0;
+        if (!wl.next(&wf, &ww)) break;
+        if (wf == 1 && ww == pb::WIRE_VARINT) {
+          uint64_t v = 0;
+          if (wl.readVarint(&v)) *info = (uint32_t)v;
+        } else {
+          wl.skip(ww);
+        }
+      }
+    } else {
+      cs.skip(cw);
+    }
+  }
+  return found;
+}
+
+// 解析配钥状态，兼容真车出现过的三种封装：
+//   A. FromVCSECMessage{commandStatus}   （field 4 外壳，模拟器/部分固件）
+//   B. 裸 CommandStatus                  （RoutableMessage.payload 里直接就是它）
+//   C. 无 RoutableMessage 外壳的 A/B
 bool parsePairingStatus(const uint8_t* data, size_t len, uint32_t* opStatus,
                         uint32_t* info, bool* terminal) {
   *opStatus = 0;
   *info = 0;
   *terminal = false;
-  bool found = false;
 
+  // A/C：先按 FromVCSECMessage 找 field 4（commandStatus）
   pb::Reader r(data, len);
   while (!r.atEnd()) {
     uint32_t f = 0, w = 0;
     if (!r.next(&f, &w)) break;
-    if (f == 4 && w == pb::WIRE_LEN) {  // FromVCSECMessage.commandStatus
+    if (f == 4 && w == pb::WIRE_LEN) {
       pb::Reader cs;
       if (!r.readMessage(&cs)) break;
-      found = true;
-      while (!cs.atEnd()) {
-        uint32_t cf = 0, cw = 0;
-        if (!cs.next(&cf, &cw)) break;
-        if (cf == 1 && cw == pb::WIRE_VARINT) {
-          uint64_t v = 0;
-          if (cs.readVarint(&v)) *opStatus = (uint32_t)v;
-        } else if (cf == 3 && cw == pb::WIRE_LEN) {
-          pb::Reader wl;
-          if (!cs.readMessage(&wl)) break;
-          *terminal = true;
-          while (!wl.atEnd()) {
-            uint32_t wf = 0, ww = 0;
-            if (!wl.next(&wf, &ww)) break;
-            if (wf == 1 && ww == pb::WIRE_VARINT) {
-              uint64_t v = 0;
-              if (wl.readVarint(&v)) *info = (uint32_t)v;
-            } else {
-              wl.skip(ww);
-            }
-          }
-        } else {
-          cs.skip(cw);
-        }
-      }
+      if (parseCommandStatus(cs, opStatus, info, terminal)) return true;
     } else {
       r.skip(w);
     }
   }
-  return found;
+
+  // B/C：整个负载本身就是 CommandStatus（真车 RoutableMessage 实测）
+  pb::Reader cs(data, len);
+  return parseCommandStatus(cs, opStatus, info, terminal);
 }
 
 }  // namespace
@@ -882,27 +903,48 @@ void TeslaCrypto::handleFrame(const uint8_t* payload, size_t len) {
     return;
   }
 
-  if (ciphertext && ciphertextLen) {
-    // 未握手成功时不存在可用密钥；但 VCSEC 明文配钥状态必须放行，
-    // 否则无法完成 add-key-request -> 刷卡 -> 终态 的引导流程。
-    if (!m_hasSession) {
-      if (fromDomain == kDomainVcsec) {
-        uint32_t opStatus = 0;
-        uint32_t info = 0;
-        bool terminal = false;
-        if (parsePairingStatus(ciphertext, ciphertextLen, &opStatus, &info,
-                               &terminal)) {
-          CFG_LOG("[PAIR] 配钥状态 operationStatus=%u info=%u%s",
-                  (unsigned)opStatus, (unsigned)info,
-                  terminal ? "（终态）" : "（等待刷卡）");
-          if (m_onPairing) m_onPairing(opStatus, info, terminal);
-          return;
-        }
+  // 未握手：只关心配钥状态。车端可能把 CommandStatus 放在
+  // RoutableMessage.payload（裸 CommandStatus 或 FromVCSECMessage）里，
+  // 也可能完全不带 RoutableMessage 外壳，统一交给 parsePairingStatus。
+  if (!m_hasSession) {
+    if (!ciphertext && fault != kFaultNone) {
+      m_lastFault = fault;
+      if (fault == kFaultUnknownKeyId || fault == kFaultInactiveKey) {
+        // fault=3 UNKNOWN_KEY_ID 是「本机公钥不在车端白名单」的信号，
+        // 不是签名/协议错误。直接进入 add-key-request，不必等握手重试耗尽。
+        CFG_LOG("[CRYPTO] 车辆不认识本机公钥 fault=%u（未配对），准备配钥",
+                (unsigned)fault);
+        if (m_onNotPaired) m_onNotPaired();
+        return;
       }
-      CFG_LOG("[CRYPTO] 未握手 RX %uB fromDomain=%u（非配钥状态，忽略）",
-              (unsigned)ciphertextLen, (unsigned)fromDomain);
+      CFG_LOG("[CRYPTO] 协议层错误响应 fault=%u", (unsigned)fault);
+      report(nullptr, 0, fault);
       return;
     }
+
+    const uint8_t* body = ciphertext ? ciphertext : payload;
+    const size_t bodyLen = ciphertext ? ciphertextLen : len;
+    uint32_t opStatus = 0;
+    uint32_t info = 0;
+    bool terminal = false;
+    if (body && bodyLen &&
+        parsePairingStatus(body, bodyLen, &opStatus, &info, &terminal) &&
+        (opStatus != 0 || terminal)) {
+      CFG_LOG("[PAIR] 配钥状态 operationStatus=%u info=%u%s",
+              (unsigned)opStatus, (unsigned)info,
+              terminal ? "（终态）" : "（等待刷卡）");
+      if (m_onPairing) m_onPairing(opStatus, info, terminal);
+      return;
+    }
+    if (ciphertext && ciphertextLen) {
+      CFG_LOG("[CRYPTO] 未握手 RX %uB fromDomain=%u（非配钥状态，忽略）",
+              (unsigned)ciphertextLen, (unsigned)fromDomain);
+    }
+    // 普通 VCSEC 状态帧（vehicleStatus 等）静默忽略
+    return;
+  }
+
+  if (ciphertext && ciphertextLen) {
     if (sig.hasResponse) {
       handleResponse(ciphertext, ciphertextLen, sig.nonce, sig.nonceLen,
                      sig.counter, sig.tag, sig.tagLen, flags, fault);
@@ -932,24 +974,6 @@ void TeslaCrypto::handleFrame(const uint8_t* payload, size_t len) {
     CFG_LOG("[CRYPTO] 协议层错误响应 fault=%u", (unsigned)fault);
     report(nullptr, 0, fault);
     return;
-  }
-
-  // 未封装的 VCSEC 明文：实测真车把配钥 WAIT/终态直接以 FromVCSECMessage
-  // 下发，不带 RoutableMessage 外壳，例如：
-  //   0a 08 18 01 20 02 42 02 08 02   (vehicleStatus: awake / present)
-  //   22 06 08 02 1a 02 08 19         (commandStatus: info=25 刷卡超时)
-  // 未握手时按配钥状态处理；已握手时无需处理（配钥流程早已结束）。
-  if (!m_hasSession && !sessionInfo && !ciphertext && fromDomain == 0) {
-    uint32_t opStatus = 0;
-    uint32_t info = 0;
-    bool terminal = false;
-    if (parsePairingStatus(payload, len, &opStatus, &info, &terminal) &&
-        (opStatus != 0 || terminal)) {
-      CFG_LOG("[PAIR] 配钥状态(Raw VCSEC) operationStatus=%u info=%u%s",
-              (unsigned)opStatus, (unsigned)info,
-              terminal ? "（终态）" : "（等待刷卡）");
-      if (m_onPairing) m_onPairing(opStatus, info, terminal);
-    }
   }
 }
 

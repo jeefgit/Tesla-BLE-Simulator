@@ -63,9 +63,10 @@ void loop() {
 #else
   bleLink.loop();
   teslaClient.loop();
-  // ready() 已含握手门禁，encrypted() 再显式传入握手状态，仪表层双重校验
+  // ready() 已含握手门禁，encrypted() 再显式传入握手状态，仪表层双重校验；
+  // pairingHint() 让屏幕直接显示「请贴卡 / 倒计时 / 结果」，不必盯串口
   dashboard.render(g_vehicle, bleLink.state(), teslaClient.ready(),
-                   teslaClient.encrypted());
+                   teslaClient.encrypted(), teslaClient.pairingHint());
 #endif
   display.loop();  // LVGL 事务驱动（内部按 LV_DEF_REFR_PERIOD 自我限流）
   // 之前 delay(50) 会把 LVGL 刷新压到 ~20fps，加剧闪烁。

@@ -33,12 +33,15 @@ return v.conn.Send(ctx, encodedEnvelope)   // 明文，不经加密会话
 
 - **`SIGNATURE_TYPE_PRESENT_KEY` 不是 ECDSA 签名**。`SignedMessage` 里根本没有
   签名字段，这个枚举只是告诉 VCSEC「这是钥匙登记请求，需要本地实体授权」。
-- 车辆收到后在中控台提示「轻点 NFC 钥匙卡」，先回
-  `CommandStatus{operationStatus = OPERATIONSTATUS_WAIT}`；
-  刷卡 + UI 确认后再回终态 `CommandStatus{whitelistOperationStatus = ...}`。
-- 未配对公钥握手时，车辆不是回协议 fault，而是回
+- 车辆收到后进入「等待本地实体授权」状态，先回
+  `CommandStatus{operationStatus = OPERATIONSTATUS_WAIT}`（部分真车实测不回这条）；
+  车主**把 NFC 卡贴到中控台读卡区后，屏幕才会弹出「是否添加钥匙」确认框**，
+  确认后再回终态 `CommandStatus{whitelistOperationStatus = ...}`。
+  **贴卡前中控屏不会提前提示**，这是真车与模拟器最容易被误判的差异。
+- 未配对公钥握手时，车辆可能回协议 fault（`fault=3 UNKNOWN_KEY_ID`，含义是
+  「车端不认识本机公钥」），也可能回
   `SessionInfo{status = SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST}`，
-  官方客户端把它映射为 `ErrKeyNotPaired`。
+  两者都等价于官方客户端的 `ErrKeyNotPaired`。
 
 报文（wire 字段号）：
 
@@ -234,9 +237,11 @@ tesla-control -ble -key-file private_key.pem remove-key public_key.pem
 1. 把方式 B 生成的私钥写入 `include/secrets/tesla_client_key.h` 并烧录（烧录请自行执行）；
 2. 串口确认打印 `[CRYPTO] 客户端密钥就绪 pub=...`，记下这串公钥；
 3. 车辆通电、中控屏保持亮起，ESP32 连接车机 BLE；
-4. 固件握手被拒后自动发 `add-key-request`（日志：`[PAIR] 已发送 add-key-request ...`）；
-5. 按车机提示在中控台轻点 NFC 钥匙卡；
-6. 固件收到终态 `✅ 配钥成功` 后自动重新握手，进入正常遥测。
+4. 固件握手被拒（`fault=3`）后自动发 `add-key-request`；
+5. **看 ESP32 屏幕**：出现 `ADD NEW KEY / TAP CARD` 卡片和 30 秒倒计时时，
+   立刻把 NFC 卡贴到中控台读卡区（杯托后、扶手箱前）；
+6. 中控屏弹出「是否添加新钥匙」→ 点确认；ESP32 屏幕变成绿色的
+   `KEY ADDED`，随后自动重新握手，进入正常遥测。
 
 > 注意：真车**不存在** `--pair-auto`，授权只能由车主在中控台完成。
 > 配钥是不可逆的授权行为；公钥一旦登记，持有对应私钥的设备即可控车。
@@ -271,10 +276,22 @@ RESULT: IDENTICAL —— 信封与官方 vehicle-command 完全一致
 | 串口现象 | 结论 / 处理 |
 | --- | --- |
 | 没有 `BLE 已连接: S……C` | 没连上车：查 `CFG_TESLA_VIN` 与实车 VIN 是否一致（广播名 `S+sha1(VIN)[:16]+C`） |
-| 有连接但没有 `[PAIR] 已发送 add-key-request` | 固件在等握手 `status=1`；新固件已在 **4 次握手无回包** 时自动改发配钥请求（`CFG_TESLA_PAIR_FALLBACK_TRIES`） |
-| 有 `已发送`，但没有 `[PAIR] 配钥状态 operationStatus=1` | **车端没受理**：见下面车端条件 |
-| `[PAIR] 配钥状态 operationStatus=1`（等待刷卡） | 正常：去中控屏点确认并贴卡片 |
-| `info=4` / `5` / `13` / `24` / `25` | 白名单满 / 非 OWNER / 已登记 / 车主拒绝 / 刷卡超时 |
+| `[CRYPTO] 车辆不认识本机公钥 fault=3` | 正常（未配对）：`fault=3` 是 `MESSAGEFAULT_ERROR_UNKNOWN_KEY_ID`，不是签名错误；固件会立刻转去发 add-key-request |
+| 有连接但没有 `[PAIR] 已发送 add-key-request` | 固件在等握手回包；新固件收到 fault=3 会立即配钥，或在 4 次握手无果后兜底发送（`CFG_TESLA_PAIR_FALLBACK_TRIES`） |
+| 有 `已发送`，但没有 `[PAIR] 配钥状态 operationStatus=1` | **真车通常就不回 WAIT**，不是没受理；直接按下一步贴卡 |
+| 贴卡后中控屏弹出「是否添加钥匙」 | 正常：在屏幕上点确认 |
+| `info=4` / `5` / `13` / `24` / `25` / `26` | 白名单满 / 非 OWNER / 已登记 / 车主拒绝 / 贴卡超时 / 屏幕确认超时；25/26 固件会自动重试 |
+
+> **真车实测（2026-11，Model 3/Y 一代）：add-key-request 发出后，中控屏
+> 不会主动显示「请刷卡」提示。** 必须先把 NFC 卡贴到中控台读卡区
+> （杯托后、扶手箱前的钥匙读取器），屏幕才会弹出「是否添加新钥匙」确认框。
+> 只发请求不贴卡时，车端约 30s 后会回
+> `22 06 08 02 1a 02 08 19`（`FromVCSECMessage.commandStatus`：
+> `operationStatus=ERROR` + `whitelistOperationInformation=25`
+> `TIMED_OUT_WAITING_FOR_TAP`），这不是报文错误，而是没在窗口内贴卡。
+> 官方 issue
+> [#216](https://github.com/teslamotors/vehicle-command/issues/216)
+> 也确认了「贴卡前没有提示」。
 
 车端（真车）必须满足的条件：
 
@@ -290,6 +307,25 @@ RESULT: IDENTICAL —— 信封与官方 vehicle-command 完全一致
 > 连续 2 次发出仍无任何车端回包时，固件会打印
 > `[PAIR] 仍未收到车端 WAIT 回包：确认车辆已唤醒、人在车内、中控屏亮起`，
 > 这通常就是车端条件 1/2 未满足。
+
+### 4.5 ESP32 屏幕上的配钥提示（不用盯串口）
+
+固件把配钥流程做成了仪表上的一块全宽卡片（`Dashboard::buildPairCard`），
+`TeslaClient::pairingHint()` 提供状态，屏幕按阶段切换：
+
+| 屏幕内容 | 含义 / 该做什么 |
+| --- | --- |
+| `ADD NEW KEY` + `TAP CARD` + 倒计时秒数（橙） | 已发 add-key-request。**立刻贴卡**，倒计时是车端刷卡窗口（`CFG_TESLA_PAIR_TAP_WINDOW_MS`，30s） |
+| `CONFIRM` + `CARD READ - CHECK SCREEN`（绿） | 车端读到卡了：去中控屏点「添加」确认 |
+| `TIMEOUT` + `RETRYING IN A FEW SECONDS`（橙） | 收到 `info=25/26` 或窗口已过；固件会自动重发，下一轮再贴卡 |
+| `WINDOW CLOSED` | 当前这轮窗口用完了，等自动重发（不发请求时贴卡无效） |
+| `KEY ADDED` + `PAIRED - RECONNECTING`（绿） | 配钥成功，正在重新握手取数据 |
+| `FAILED` + `ERROR n`（红） | 被拒/白名单满等，`n` 对应 `info` 码，详见串口日志 |
+
+卡片底部的 `TRY 1/3` 是本轮第几次重发；副标题会写明
+`ON CONSOLE READER BY ARMREST`（读卡区位置）。
+
+> 屏幕字体用的是 Montserrat（只有 ASCII），所以界面文案是英文；串口日志仍是中文。
 
 
 ---
