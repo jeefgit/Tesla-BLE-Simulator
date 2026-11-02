@@ -1101,13 +1101,33 @@ void Dashboard::printSerial() {
              v.tpms[1], v.tpms[2], v.tpms[3]);
   }
 
-  Serial.printf(
+  char output[sizeof(m_lastSerialOutput)];
+  int written = snprintf(
+      output, sizeof(output),
       "[仪表] BLE:%s | 数据:%s | 车速 %s km/h | SOC %s | 续航 %s | 档位 %s\r\n",
       bleStateText(m_bleState), m_ok ? "就绪" : "----", speed, soc, range,
       gear);
-  if (m_ok) {
-    Serial.printf(
-        "        充电:%s | 内%.1f 外%.1f | 胎压(FL/FR/RL/RR):%s\r\n",
-        charge, v.insideTempC, v.outsideTempC, tpms);
+  if (written < 0 || (size_t)written >= sizeof(output)) {
+    CFG_LOG("仪表串口状态格式化失败");
+    return;
   }
+
+  if (m_ok) {
+    const int appended = snprintf(
+        output + written, sizeof(output) - (size_t)written,
+        "        充电:%s | 内%.1f 外%.1f | 胎压(FL/FR/RL/RR):%s\r\n", charge,
+        v.insideTempC, v.outsideTempC, tpms);
+    if (appended < 0 ||
+        (size_t)appended >= sizeof(output) - (size_t)written) {
+      CFG_LOG("仪表串口数据格式化失败");
+      return;
+    }
+    written += appended;
+  }
+
+  if (m_serialPrinted && strcmp(output, m_lastSerialOutput) == 0) return;
+
+  memcpy(m_lastSerialOutput, output, (size_t)written + 1);
+  m_serialPrinted = true;
+  Serial.print(output);
 }

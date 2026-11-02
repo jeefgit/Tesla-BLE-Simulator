@@ -54,6 +54,8 @@ class Dashboard {
   // 数据快照副本（定时器动画需要，render 时刷新）
   VehicleData m_v;
   uint32_t m_lastPrint = 0;
+  char m_lastSerialOutput[256] = {};
+  bool m_serialPrinted = false;
   BleLink::State m_bleState = BleLink::State::Idle;
   bool m_ok = false;
   bool m_hasRendered = false;
