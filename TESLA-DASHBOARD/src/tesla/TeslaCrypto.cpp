@@ -1217,52 +1217,81 @@ bool TeslaCrypto::handleResponse(const uint8_t* ciphertext, size_t len,
     return false;
   }
 
-  // 如果是第一条响应，打印足够的原始数据用于分析真实结构
-  if (!m_firstResponseLogged) {
+  // 打印每次响应的完整报文内容（用于分析真车响应结构）
+  // 第一条响应额外标记并尽量多打印内容
+  const bool isFirst = !m_firstResponseLogged;
+  if (isFirst) {
     m_firstResponseLogged = true;
-    CFG_LOG("[CRYPTO] 第一条响应解密成功，原始 %uB（完整打印用于分析）", (unsigned)len);
+    CFG_LOG("[CRYPTO] ⭐ 第一条响应解密成功，原始 %uB（完整分析）", (unsigned)len);
+    if (len >= 4) {
+      // 关键：打印前4字节以判断CarServer.Response结构
+      CFG_LOG("[CRYPTO]   Protobuf头: %02x %02x %02x %02x", 
+              m_plain[0], m_plain[1], m_plain[2], m_plain[3]);
+    }
+  } else {
+    CFG_LOG("[CRYPTO] 响应 #%u/%u 解密成功，原始 %uB", 
+            m_responsesOk + 1, m_commandsSent + 1, (unsigned)len);
+  }
+  
+  // 打印完整的hex dump（分多行，每行16字节）
+  const size_t totalLines = (len + 15) / 16;
+  size_t bytesPrinted = 0;
+  
+  for (size_t line = 0; line < totalLines && line < 10; ++line) { // 最多10行，避免刷屏
+    const size_t lineStart = line * 16;
+    const size_t lineLen = (len - lineStart) > 16 ? 16 : (len - lineStart);
     
-    // 安全地打印前32字节（足以看到 protobuf 结构头）
-    const size_t printLen = len < 32 ? len : 32;
-    char line[100];
-    char* p = line;
-    size_t remaining = sizeof(line);
+    char hexLine[80]; // 16 * 3 + 前缀 + 终止符
+    char* p = hexLine;
+    size_t remaining = sizeof(hexLine);
     
-    for (size_t i = 0; i < printLen; ++i) {
+    // 行前缀（地址偏移）
+    int written = snprintf(p, remaining, "  [%03x] ", (unsigned)lineStart);
+    if (written < 0 || (size_t)written >= remaining) break;
+    p += written;
+    remaining -= (size_t)written;
+    
+    // hex字节
+    for (size_t i = 0; i < lineLen; ++i) {
       if (i > 0) {
         if (remaining < 1) break;
         *p++ = ' ';
         --remaining;
       }
-      int written = snprintf(p, remaining, "%02x", m_plain[i]);
+      written = snprintf(p, remaining, "%02x", m_plain[lineStart + i]);
       if (written < 0 || (size_t)written >= remaining) break;
       p += written;
       remaining -= (size_t)written;
     }
-    *p = '\0';
-    CFG_LOG("[CRYPTO]   HEX: %s", line);
     
-    // 如果是 129B（如日志所示），也打印最后几个字节
-    if (len > 32 && len <= 150) {
-      p = line;
-      remaining = sizeof(line);
-      const size_t tailStart = len > 16 ? len - 16 : 0;
-      
-      CFG_LOG("[CRYPTO]   ... (中间省略)");
-      for (size_t i = tailStart; i < len; ++i) {
-        if (i > tailStart) {
-          if (remaining < 1) break;
-          *p++ = ' ';
-          --remaining;
-        }
-        int written = snprintf(p, remaining, "%02x", m_plain[i]);
-        if (written < 0 || (size_t)written >= remaining) break;
-        p += written;
-        remaining -= (size_t)written;
+    // ASCII字符（可选，但有助于识别文本字段）
+    if (remaining > 2) {
+      // 填充空格对齐
+      const size_t hexChars = lineLen * 3 - 1; // "XX XX ..."
+      const size_t padding = 16 * 3 - hexChars; // 补齐到48字符
+      for (size_t i = 0; i < padding && remaining > 2; ++i) {
+        *p++ = ' ';
+        --remaining;
       }
-      *p = '\0';
-      CFG_LOG("[CRYPTO]   HEX: %s", line);
+      
+      *p++ = ' ';
+      *p++ = '|';
+      --remaining;
+      
+      for (size_t i = 0; i < lineLen && remaining > 1; ++i) {
+        uint8_t c = m_plain[lineStart + i];
+        *p++ = (c >= 0x20 && c <= 0x7E) ? c : '.';
+        --remaining;
+      }
     }
+    
+    *p = '\0';
+    CFG_LOG("%s", hexLine);
+    bytesPrinted += lineLen;
+  }
+  
+  if (bytesPrinted < len) {
+    CFG_LOG("      ... 还有 %u 字节未显示", (unsigned)(len - bytesPrinted));
   }
 
   m_lastRespCounter = counter;
