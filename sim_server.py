@@ -230,7 +230,7 @@ class TelemetryState:
 
         # 初始车况数据
         self.data = {
-            'speed_kmh': 0.0,
+            'speed_kmh': 13.0,
             'motor_power_kw': 0.0,
             'battery_level': 62,
             'battery_range_km': 248.0,
@@ -246,10 +246,10 @@ class TelemetryState:
             'charge_power_kw': 0.0,
             'inside_temp': 35.0,
             'outside_temp': 16.0,
-            'tpms_fl': 2.3,
-            'tpms_fr': 2.3,
-            'tpms_rl': 2.3,
-            'tpms_rr': 2.3
+            'tpms_fl': 2.9,
+            'tpms_fr': 2.9,
+            'tpms_rl': 2.9,
+            'tpms_rr': 2.9
         }
 
     def get_data(self):

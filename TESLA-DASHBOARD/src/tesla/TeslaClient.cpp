@@ -365,6 +365,7 @@ void TeslaClient::onConnected() {
   m_pairDone = false;
   m_pairWaitLogged = false;
   m_pairWaitNfc = false;
+  m_pairSuccessReported = false;
   m_pairSends = 0;
   m_nextPairAt = 0;
   m_pairWaitAt = 0;
@@ -387,6 +388,7 @@ void TeslaClient::onDisconnected() {
   m_pairDone = false;
   m_pairWaitLogged = false;
   m_pairWaitNfc = false;
+  m_pairSuccessReported = false;
   m_pairSends = 0;
   m_pairWaitAt = 0;
   m_pairFallbackTried = false;
@@ -457,6 +459,7 @@ void TeslaClient::onNotPaired() {
 
   m_notPaired = true;
   m_pairDone = false;
+  m_pairSuccessReported = false;
   m_pairWaitNfc = false;
   m_pairWaitLogged = false;
   m_pairSends = 0;
@@ -525,9 +528,12 @@ void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
     return;
   }
 
+  if (m_pairSuccessReported && operationStatus == 0 && info == 0) return;
+
   m_pairDone = true;
   m_pairWaitNfc = false;
   if (operationStatus == 0 && info == 0) {
+    m_pairSuccessReported = true;
     CFG_LOG("[PAIR] ✅ 配钥成功：公钥已写入车端白名单，重新握手");
     m_notPaired = false;
     m_handshakeTries = 0;

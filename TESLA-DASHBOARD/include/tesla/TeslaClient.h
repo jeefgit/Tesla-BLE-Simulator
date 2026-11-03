@@ -90,6 +90,7 @@ class TeslaClient {
   bool m_pairDone = false;        // 已收到配钥终态
   bool m_pairWaitLogged = false;  // WAIT 日志只打一次
   bool m_pairWaitNfc = false;     // 车辆已回 WAIT，正在等待 NFC 刷卡
+  bool m_pairSuccessReported = false;
   uint32_t m_pairSends = 0;
   uint32_t m_nextPairAt = 0;
   uint32_t m_pairWaitAt = 0;       // 进入等待/最后一次发送的时刻（超时基准）
