@@ -107,6 +107,19 @@ class TeslaClient {
   uint32_t m_rxBytes = 0;
   uint8_t m_rxLogs = 0;
 
+  // fault=25（车端认为响应超过 BLE MTU）计数：仅用于日志限流，
+  // 0 表示本次连接内还没出现过（下一条会完整打印 MTU 便于定位）。
+  uint32_t m_mtuFaults = 0;
+
+  // 加密命令"在途"保护：上一条 GetVehicleData 回包/超时前不发下一条。
+  // 并发请求会覆盖 m_lastReqTag，导致先到的响应认证失败（fault=5）。
+  bool m_pollPending = false;
+  bool m_pollTimeoutLogged = false;
+  uint32_t m_pollPendingUntil = 0;
+
+  // "握手成功但一直没数据"的周期诊断（每 10s 一条，现场不用盯日志刷屏）
+  uint32_t m_diagAt = 0;
+
   uint32_t m_packets = 0;
   uint32_t m_lastPacketAt = 0;
   uint32_t m_droppedBytes = 0;

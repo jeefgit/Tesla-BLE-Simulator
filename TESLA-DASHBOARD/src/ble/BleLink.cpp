@@ -160,6 +160,18 @@ bool BleLink::connectAndSubscribe() {
     CFG_LOG("BLE 连接失败");
     return false;
   }
+  {
+    // MTU 在 connect() 内完成交换（NimBLE 默认 exchangeMTU=true）。
+    // 这里必须打印实际协商值：setMTU() 只是本地偏好，最终由车端决定。
+    const uint16_t mtu = m_client->getMTU();
+    CFG_LOG("BLE 已连接，协商 MTU=%u（本地偏好 %u，单次可收 %uB）",
+            (unsigned)mtu, (unsigned)NimBLEDevice::getMTU(),
+            (unsigned)(mtu > 3 ? mtu - 3 : 0));
+    if (mtu <= 23) {
+      CFG_LOG("MTU 仍为默认 23（单次仅 20B）：车端大响应会回 fault=25，"
+              "仪表会一直停在 SYNCING");
+    }
+  }
 
   NimBLERemoteService* service = m_client->getService(NimBLEUUID(CFG_SERVICE_UUID));
   if (!service) {
@@ -192,8 +204,35 @@ bool BleLink::connectAndSubscribe() {
     return false;
   }
 
+  // 对齐官方 vehicle-command（pkg/connector/ble/ble.go:349）：订阅完成后再
+  // 确认/请求一次最大 MTU。NimBLE 的 connect() 已自动交换过一次；若这次仍
+  // 停在默认 23，说明交换没生效，这里补发一次（车端可能在订阅后才接受）。
+  // exchangeMTU() 是异步的，真实协商结果以首帧数据/故障日志打印的 MTU 为准。
+  const uint16_t mtuNow = m_client->getMTU();
+  if (mtuNow <= 23) {
+    if (m_client->exchangeMTU()) {
+      CFG_LOG("MTU 仍为默认 23，订阅后补发 MTU=%u 交换请求",
+              (unsigned)CFG_MTU);
+    } else {
+      CFG_LOG("MTU 交换请求发送失败，沿用当前 MTU=%u（单次仅 %uB）",
+              (unsigned)mtuNow, (unsigned)(mtuNow > 3 ? mtuNow - 3 : 0));
+    }
+  } else {
+    CFG_LOG("MTU 已协商为 %u，跳过重复交换", (unsigned)mtuNow);
+  }
+
+  // 服务发现/订阅后 MTU 可能被协议栈更新，再确认一次。
+  CFG_LOG("已订阅通知，协商 MTU=%u（单次通知上限 %uB）",
+          (unsigned)m_client->getMTU(),
+          (unsigned)(m_client->getMTU() > 3 ? m_client->getMTU() - 3 : 0));
+
   m_failCount = 0;
   return true;
+}
+
+uint16_t BleLink::mtu() const {
+  if (!m_client || !m_client->isConnected()) return 0;
+  return m_client->getMTU();
 }
 
 void BleLink::dropTarget() {

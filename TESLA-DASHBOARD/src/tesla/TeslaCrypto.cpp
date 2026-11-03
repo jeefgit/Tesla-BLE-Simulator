@@ -65,6 +65,9 @@ constexpr uint32_t kFaultUnknownKeyId = 3;
 constexpr uint32_t kFaultInactiveKey = 4;
 constexpr uint32_t kFaultInvalidSignature = 5;
 constexpr uint32_t kFaultInvalidDomains = 8;
+// 25 = RESPONSE_MTU_EXCEEDED：车端收到了请求，但响应体积超过协商的 ATT MTU。
+// 该故障由 TeslaClient 统一打印（带 MTU 值并限流），这里不重复刷屏。
+constexpr uint32_t kFaultResponseMtuExceeded = 25;
 
 constexpr size_t kTlvCap = 128;
 
@@ -930,7 +933,9 @@ void TeslaCrypto::handleFrame(const uint8_t* payload, size_t len) {
         if (m_onNotPaired) m_onNotPaired();
         return;
       }
-      CFG_LOG("[CRYPTO] 协议层错误响应 fault=%u", (unsigned)fault);
+      if (fault != kFaultResponseMtuExceeded) {
+        CFG_LOG("[CRYPTO] 协议层错误响应 fault=%u", (unsigned)fault);
+      }
       report(nullptr, 0, fault);
       return;
     }
@@ -984,7 +989,9 @@ void TeslaCrypto::handleFrame(const uint8_t* payload, size_t len) {
 
   if (fault != kFaultNone) {
     m_lastFault = fault;
-    CFG_LOG("[CRYPTO] 协议层错误响应 fault=%u", (unsigned)fault);
+    if (fault != kFaultResponseMtuExceeded) {
+      CFG_LOG("[CRYPTO] 协议层错误响应 fault=%u", (unsigned)fault);
+    }
     report(nullptr, 0, fault);
     return;
   }
@@ -1140,7 +1147,9 @@ bool TeslaCrypto::handleResponse(const uint8_t* ciphertext, size_t len,
                                  size_t tagLen, uint32_t flags, uint32_t fault) {
   m_lastFault = fault;
   if (fault != kFaultNone) {
-    CFG_LOG("[CRYPTO] 命令被拒 fault=%u", (unsigned)fault);
+    if (fault != kFaultResponseMtuExceeded) {
+      CFG_LOG("[CRYPTO] 命令被拒 fault=%u", (unsigned)fault);
+    }
     report(nullptr, 0, fault);
     return false;
   }

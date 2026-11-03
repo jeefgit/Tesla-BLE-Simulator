@@ -347,6 +347,17 @@ void TeslaClient::loop() {
   } else if (due(m_nextActionAt)) {
     sendPoll();
   }
+
+  // 握手成功但一直拿不到可解析数据：每 10s 打一条诊断，便于现场判断
+  if (m_crypto.hasSession() && m_packets == 0 &&
+      (uint32_t)(millis() - m_diagAt) >= 10000) {
+    m_diagAt = millis();
+    CFG_LOG("[CRYPTO] 握手成功但 10s 内无可解析数据：MTU=%u 最后 fault=%u "
+            "fault25 累计=%u 已解响应=%u",
+            (unsigned)(m_link ? m_link->mtu() : 0),
+            (unsigned)m_crypto.lastFault(), (unsigned)m_mtuFaults,
+            (unsigned)m_crypto.responsesOk());
+  }
 #else
   if (m_packets == 0 && !m_timeoutLogged) {
     CFG_LOG("已连接但尚未收到数据帧（检查 --vin、服务 UUID 与订阅）");
@@ -377,6 +388,9 @@ void TeslaClient::onConnected() {
   m_rxNotifies = 0;
   m_rxBytes = 0;
   m_rxLogs = 0;
+  m_mtuFaults = 0;
+  m_pollPending = false;
+  m_pollTimeoutLogged = false;
   m_crypto.reset();
 #if CFG_TESLA_CRYPTO
   m_nextActionAt = millis();
@@ -387,6 +401,9 @@ void TeslaClient::onConnected() {
 void TeslaClient::onDisconnected() {
   m_len = 0;
   m_handshakeTries = 0;
+  m_mtuFaults = 0;
+  m_pollPending = false;
+  m_pollTimeoutLogged = false;
   m_notPaired = false;
   m_pairDone = false;
   m_pairWaitLogged = false;
@@ -423,6 +440,23 @@ void TeslaClient::sendHandshake() {
 }
 
 void TeslaClient::sendPoll() {
+  // 同一时刻只允许一条加密命令在途（官方 connector 也是发一条等一条）：
+  // 若上一条没回包就发下一条，m_lastReqTag 会被覆盖，先到的响应会因
+  // AAD 不匹配而认证失败（fault=5），进而触发无谓的重新握手。
+  if (m_pollPending) {
+    if (!due(m_pollPendingUntil)) {
+      m_nextActionAt = m_pollPendingUntil;
+      return;
+    }
+    // 超时：放弃这条，允许重发；日志只打一次，避免刷屏
+    m_pollPending = false;
+    if (!m_pollTimeoutLogged) {
+      m_pollTimeoutLogged = true;
+      CFG_LOG("[CRYPTO] 上一条 GetVehicleData 超过 %u ms 未回包，重发",
+              (unsigned)CFG_TESLA_POLL_RESPONSE_TIMEOUT_MS);
+    }
+  }
+
   size_t n = 0;
   // 单次只请求一种车辆状态，减少响应体积，降低车端返回 fault=25 的概率。
   // 两个周期独立计时；同时到期时优先驾驶数据。
@@ -450,6 +484,9 @@ void TeslaClient::sendPoll() {
     m_nextActionAt = millis() + CFG_TESLA_POLL_RETRY_MS;
   } else {
     const uint32_t now = millis();
+    // 标记在途：回包/故障（onCryptoResponse）或超时前不再发下一条
+    m_pollPending = true;
+    m_pollPendingUntil = now + CFG_TESLA_POLL_RESPONSE_TIMEOUT_MS;
     if (request == TeslaCrypto::VehicleDataRequest::Drive) {
       // 驾驶状态（车速、档位等）按 500ms 周期刷新。
       m_nextDrivePollAt = now + CFG_TESLA_DRIVE_POLL_INTERVAL_MS;
@@ -503,6 +540,9 @@ void TeslaClient::onCryptoSession(bool ok) {
     m_nextAuxiliaryPollAt =
         now + CFG_TESLA_DRIVE_POLL_INTERVAL_MS / 2;
     m_nextActionAt = now;
+    m_diagAt = now;
+    m_pollPending = false;
+    m_pollTimeoutLogged = false;
   } else {
     m_nextActionAt = millis() + CFG_TESLA_HANDSHAKE_RETRY_MS;
   }
@@ -640,9 +680,29 @@ void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
 
 void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
                                    uint32_t fault) {
+  // 收到任何响应（含故障）都说明上一条加密命令已结束：解除在途标记，
+  // 并把下一次调度提前到"现在"，由 sendPoll 按各自周期决定发不发。
+  if (m_pollPending) {
+    m_pollPending = false;
+    m_pollTimeoutLogged = false;
+    if (m_crypto.hasSession()) m_nextActionAt = millis();
+  }
+
   if (fault != 0) {
     if (fault == 25) {
-      CFG_LOG("[CRYPTO] 响应超过 BLE MTU（fault=25），跳过该响应并继续分项轮询");
+      // 车端收到请求但拒绝回包：响应体积超过双方协商的 ATT MTU。
+      // 高频轮询下会 2 条/秒刷屏，这里限流：首次完整打印（含 MTU），
+      // 之后每 CFG_TESLA_MTU_FAULT_LOG_EVERY 次汇总一条。
+      ++m_mtuFaults;
+      const uint16_t mtu = m_link ? m_link->mtu() : 0;
+      if (m_mtuFaults == 1) {
+        CFG_LOG("[CRYPTO] 车端拒绝回包：响应超过 BLE MTU（fault=25）；"
+                "当前 MTU=%u，单次可收 %uB，仪表会停在 SYNCING",
+                (unsigned)mtu, (unsigned)(mtu > 3 ? mtu - 3 : 0));
+      } else if (m_mtuFaults % CFG_TESLA_MTU_FAULT_LOG_EVERY == 0) {
+        CFG_LOG("[CRYPTO] 响应仍超过 BLE MTU（fault=25）累计 %u 次，MTU=%u",
+                (unsigned)m_mtuFaults, (unsigned)mtu);
+      }
       return;
     }
     CFG_LOG("[CRYPTO] 协议层错误 fault=%u", (unsigned)fault);
@@ -661,9 +721,15 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
     ++m_packets;
     m_lastPacketAt = millis();
     m_timeoutLogged = false;
+    if (m_mtuFaults) {
+      CFG_LOG("[CRYPTO] 已收到可解析数据，MTU 拒绝消失（此前累计 %u 次）",
+              (unsigned)m_mtuFaults);
+      m_mtuFaults = 0;
+    }
     if (!m_decodeLogged) {
       m_decodeLogged = true;
-      CFG_LOG("[CRYPTO] 首帧 VehicleData 解密成功（%uB）", (unsigned)len);
+      CFG_LOG("[CRYPTO] 首帧 VehicleData 解密成功（%uB，MTU=%u）",
+              (unsigned)len, (unsigned)(m_link ? m_link->mtu() : 0));
     }
   }
 }

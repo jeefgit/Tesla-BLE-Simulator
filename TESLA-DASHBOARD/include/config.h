@@ -54,8 +54,10 @@
 // 连续连接失败多少次后放弃该地址、重新扫描
 #define CFG_CONNECT_FAIL_LIMIT 3
 
-// 连接后请求的 MTU（SimPayload 53 字节依赖大 MTU 一次推完）
-#define CFG_MTU 512
+// 连接后请求的 ATT MTU。
+// 与官方 vehicle-command 的 ble.MaxMTU（512 + 3 字节 ATT 头 = 515）对齐；
+// 实际值由车端决定，见 BleLink::connectAndSubscribe() 的协商日志。
+#define CFG_MTU 515
 
 // 名称前缀兜底名单：广播名按 VIN 精确匹配（setTargetName），
 // 只有未配置精确名时才退回前缀扫描，留空则完全依赖精确名 + 服务 UUID
@@ -103,6 +105,13 @@
 #define CFG_TESLA_AUX_POLL_INTERVAL_MS 1000
 // GATT 发送失败时的重试间隔（毫秒）
 #define CFG_TESLA_POLL_RETRY_MS 500
+// 等待车端响应的上限（毫秒）。超时前不发下一条加密命令：
+// 官方 connector 是"发一条等一条"，并发请求会覆盖请求 tag，导致响应认证失败。
+#define CFG_TESLA_POLL_RESPONSE_TIMEOUT_MS 1500
+
+// fault=25（车端认为响应超过 BLE MTU）日志限流：
+// 首次完整打印（含协商后的 MTU），之后每 N 次打一条汇总，避免 2 条/秒刷屏。
+#define CFG_TESLA_MTU_FAULT_LOG_EVERY 30
 
 // ---------------------------------------------------------------------------
 // BLE 配钥（add-key-request，对齐官方 vehicle-command cmd/tesla-control）

@@ -50,6 +50,9 @@ class BleLink {
   bool isConnected() const {
     return m_state == State::Ready && m_client && m_client->isConnected();
   }
+  // 当前连接协商后的 ATT MTU（未连接/未协商返回 0）。
+  // fault=25（响应超过 MTU）排查用，实际可用负载为 MTU-3。
+  uint16_t mtu() const;
   const String& remoteName() const { return m_remoteName; }
 
  private:
