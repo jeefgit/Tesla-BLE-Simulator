@@ -370,6 +370,8 @@ void TeslaClient::onConnected() {
   m_nextPairAt = 0;
   m_pairWaitAt = 0;
   m_pairFallbackTried = false;
+  m_nextPollRequest = TeslaCrypto::VehicleDataRequest::Drive;
+  m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
   m_hint = PairingHint{};
   m_rxNotifies = 0;
   m_rxBytes = 0;
@@ -421,13 +423,43 @@ void TeslaClient::sendHandshake() {
 
 void TeslaClient::sendPoll() {
   size_t n = 0;
-  if (!m_crypto.buildGetVehicleData(m_tx, sizeof(m_tx), &n)) {
+  const auto request = m_nextPollRequest;
+  if (!m_crypto.buildGetVehicleData(m_tx, sizeof(m_tx), &n, request)) {
     CFG_LOG("[CRYPTO] GetVehicleData 构造失败（会话已失效？）");
     m_nextActionAt = millis() + CFG_TESLA_HANDSHAKE_RETRY_MS;
     return;
   }
   if (!m_link || !m_link->sendRaw(m_tx, n)) {
     CFG_LOG("[CRYPTO] GetVehicleData 发送失败");
+  } else {
+    switch (request) {
+      case TeslaCrypto::VehicleDataRequest::Drive:
+        m_nextPollRequest = m_nextAuxiliaryRequest;
+        break;
+      case TeslaCrypto::VehicleDataRequest::Charge:
+      case TeslaCrypto::VehicleDataRequest::Climate:
+      case TeslaCrypto::VehicleDataRequest::Closures:
+      case TeslaCrypto::VehicleDataRequest::TirePressure:
+        m_nextPollRequest = TeslaCrypto::VehicleDataRequest::Drive;
+        switch (request) {
+          case TeslaCrypto::VehicleDataRequest::Charge:
+            m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Climate;
+            break;
+          case TeslaCrypto::VehicleDataRequest::Climate:
+            m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Closures;
+            break;
+          case TeslaCrypto::VehicleDataRequest::Closures:
+            m_nextAuxiliaryRequest =
+                TeslaCrypto::VehicleDataRequest::TirePressure;
+            break;
+          case TeslaCrypto::VehicleDataRequest::TirePressure:
+            m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
+            break;
+          case TeslaCrypto::VehicleDataRequest::Drive:
+            break;
+        }
+        break;
+    }
   }
   m_nextActionAt = millis() + CFG_TESLA_POLL_INTERVAL_MS;
 }
@@ -442,6 +474,8 @@ void TeslaClient::onCryptoSession(bool ok) {
     m_pairSends = 0;
     m_pairWaitAt = 0;
     m_pairFallbackTried = false;
+    m_nextPollRequest = TeslaCrypto::VehicleDataRequest::Drive;
+    m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
     m_hint = PairingHint{};
     m_nextActionAt = millis();  // 立即发第一条 GetVehicleData
   } else {
@@ -582,6 +616,10 @@ void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
 void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
                                    uint32_t fault) {
   if (fault != 0) {
+    if (fault == 25) {
+      CFG_LOG("[CRYPTO] 响应超过 BLE MTU（fault=25），跳过该响应并继续分项轮询");
+      return;
+    }
     CFG_LOG("[CRYPTO] 协议层错误 fault=%u", (unsigned)fault);
     // 认证/域/epoch/过期：会话状态可能已不同步，丢弃后重新握手
     if (fault == 5 || fault == 6 || fault == 8 || fault == 15 || fault == 17) {

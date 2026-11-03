@@ -24,6 +24,14 @@
 // ---------------------------------------------------------------------------
 class TeslaCrypto {
  public:
+  enum class VehicleDataRequest : uint8_t {
+    Drive,
+    Charge,
+    Climate,
+    Closures,
+    TirePressure,
+  };
+
   // 解密后的业务负载（CarServer.Response / VCSEC.FromVCSECMessage）
   using ResponseHandler =
       std::function<void(const uint8_t* plaintext, size_t len, uint32_t fault)>;
@@ -56,8 +64,9 @@ class TeslaCrypto {
   //                              SIGNATURE_TYPE_PRESENT_KEY}}
   bool buildPairingRequest(uint8_t* out, size_t cap, size_t* outLen);
 
-  // 构造 GetVehicleData 加密命令帧（含 2 字节长度前缀）
-  bool buildGetVehicleData(uint8_t* out, size_t cap, size_t* outLen);
+  // 构造只查询一类状态的 GetVehicleData 帧，避免响应超过 BLE MTU
+  bool buildGetVehicleData(uint8_t* out, size_t cap, size_t* outLen,
+                           VehicleDataRequest request);
 
   // 喂入一个已去掉长度前缀的 RoutableMessage 负载
   void handleFrame(const uint8_t* payload, size_t len);

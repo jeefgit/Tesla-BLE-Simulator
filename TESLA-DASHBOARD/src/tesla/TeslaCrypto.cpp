@@ -706,7 +706,8 @@ bool TeslaCrypto::buildPairingRequest(uint8_t* out, size_t cap,
 // ---------------------------------------------------------------------------
 // GetVehicleData 加密命令
 // ---------------------------------------------------------------------------
-bool TeslaCrypto::buildGetVehicleData(uint8_t* out, size_t cap, size_t* outLen) {
+bool TeslaCrypto::buildGetVehicleData(uint8_t* out, size_t cap, size_t* outLen,
+                                      VehicleDataRequest request) {
   if (!out || !outLen) return false;
   if (!m_hasSession) return false;
   if (!ensureKeys()) return false;
@@ -714,11 +715,23 @@ bool TeslaCrypto::buildGetVehicleData(uint8_t* out, size_t cap, size_t* outLen) 
   // CarServer.Action { vehicleAction { getVehicleData { ... } } }
   uint8_t gvdBuf[48];
   pb::Writer gvd(gvdBuf, sizeof(gvdBuf));
-  gvd.putEmptyMessage(2);   // getChargeState
-  gvd.putEmptyMessage(3);   // getClimateState
-  gvd.putEmptyMessage(4);   // getDriveState
-  gvd.putEmptyMessage(8);   // getClosuresState
-  gvd.putEmptyMessage(14);  // getTirePressureState
+  switch (request) {
+    case VehicleDataRequest::Drive:
+      gvd.putEmptyMessage(4);  // getDriveState
+      break;
+    case VehicleDataRequest::Charge:
+      gvd.putEmptyMessage(2);  // getChargeState
+      break;
+    case VehicleDataRequest::Climate:
+      gvd.putEmptyMessage(3);  // getClimateState
+      break;
+    case VehicleDataRequest::Closures:
+      gvd.putEmptyMessage(8);  // getClosuresState
+      break;
+    case VehicleDataRequest::TirePressure:
+      gvd.putEmptyMessage(14);  // getTirePressureState
+      break;
+  }
 
   uint8_t vaBuf[64];
   pb::Writer va(vaBuf, sizeof(vaBuf));

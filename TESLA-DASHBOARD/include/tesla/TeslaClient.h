@@ -84,6 +84,10 @@ class TeslaClient {
   bool m_wasConnected = false;
   uint32_t m_nextActionAt = 0;
   uint32_t m_handshakeTries = 0;
+  TeslaCrypto::VehicleDataRequest m_nextPollRequest =
+      TeslaCrypto::VehicleDataRequest::Drive;
+  TeslaCrypto::VehicleDataRequest m_nextAuxiliaryRequest =
+      TeslaCrypto::VehicleDataRequest::Charge;
 
   // 配钥（add-key-request）状态
   bool m_notPaired = false;       // 车辆回 KEY_NOT_ON_WHITELIST
