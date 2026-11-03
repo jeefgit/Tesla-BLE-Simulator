@@ -84,8 +84,8 @@ class TeslaClient {
   bool m_wasConnected = false;
   uint32_t m_nextActionAt = 0;
   uint32_t m_handshakeTries = 0;
-  TeslaCrypto::VehicleDataRequest m_nextPollRequest =
-      TeslaCrypto::VehicleDataRequest::Drive;
+  uint32_t m_nextDrivePollAt = 0;
+  uint32_t m_nextAuxiliaryPollAt = 0;
   TeslaCrypto::VehicleDataRequest m_nextAuxiliaryRequest =
       TeslaCrypto::VehicleDataRequest::Charge;
 

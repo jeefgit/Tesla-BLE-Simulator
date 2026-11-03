@@ -97,8 +97,12 @@
 #define CFG_TESLA_HANDSHAKE_MAX_RETRY 3
 #define CFG_TESLA_HANDSHAKE_RETRY_LONG_MS 15000
 
-// GetVehicleData 轮询间隔（毫秒）
-#define CFG_TESLA_POLL_INTERVAL_MS 500
+// GetVehicleData 刷新周期（毫秒）：驾驶状态每 500ms 请求一次；
+// 辅助状态每 1000ms 轮询一类（充电/空调/车门/胎压各约 4s 更新一次）。
+#define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 500
+#define CFG_TESLA_AUX_POLL_INTERVAL_MS 1000
+// GATT 发送失败时的重试间隔（毫秒）
+#define CFG_TESLA_POLL_RETRY_MS 500
 
 // ---------------------------------------------------------------------------
 // BLE 配钥（add-key-request，对齐官方 vehicle-command cmd/tesla-control）

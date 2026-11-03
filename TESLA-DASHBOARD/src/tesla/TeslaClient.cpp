@@ -370,8 +370,9 @@ void TeslaClient::onConnected() {
   m_nextPairAt = 0;
   m_pairWaitAt = 0;
   m_pairFallbackTried = false;
-  m_nextPollRequest = TeslaCrypto::VehicleDataRequest::Drive;
   m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
+  m_nextDrivePollAt = 0;
+  m_nextAuxiliaryPollAt = 0;
   m_hint = PairingHint{};
   m_rxNotifies = 0;
   m_rxBytes = 0;
@@ -423,45 +424,65 @@ void TeslaClient::sendHandshake() {
 
 void TeslaClient::sendPoll() {
   size_t n = 0;
-  const auto request = m_nextPollRequest;
+  // 单次只请求一种车辆状态，减少响应体积，降低车端返回 fault=25 的概率。
+  // 两个周期独立计时；同时到期时优先驾驶数据。
+  const bool driveDue = due(m_nextDrivePollAt);
+  const bool auxiliaryDue = due(m_nextAuxiliaryPollAt);
+  const auto request = driveDue ? TeslaCrypto::VehicleDataRequest::Drive
+                                : m_nextAuxiliaryRequest;
+  if (!driveDue && !auxiliaryDue) {
+    const uint32_t now = millis();
+    const uint32_t driveWait = m_nextDrivePollAt - now;
+    const uint32_t auxiliaryWait = m_nextAuxiliaryPollAt - now;
+    m_nextActionAt = now + (driveWait < auxiliaryWait ? driveWait
+                                                       : auxiliaryWait);
+    return;
+  }
   if (!m_crypto.buildGetVehicleData(m_tx, sizeof(m_tx), &n, request)) {
     CFG_LOG("[CRYPTO] GetVehicleData 构造失败（会话已失效？）");
+    // 构造失败通常表示会话/密钥不可用；稍后重试，不推进刷新周期。
     m_nextActionAt = millis() + CFG_TESLA_HANDSHAKE_RETRY_MS;
     return;
   }
   if (!m_link || !m_link->sendRaw(m_tx, n)) {
     CFG_LOG("[CRYPTO] GetVehicleData 发送失败");
+    // 发送失败时不推进周期或辅助游标，稍后重试同一类数据。
+    m_nextActionAt = millis() + CFG_TESLA_POLL_RETRY_MS;
   } else {
-    switch (request) {
-      case TeslaCrypto::VehicleDataRequest::Drive:
-        m_nextPollRequest = m_nextAuxiliaryRequest;
-        break;
-      case TeslaCrypto::VehicleDataRequest::Charge:
-      case TeslaCrypto::VehicleDataRequest::Climate:
-      case TeslaCrypto::VehicleDataRequest::Closures:
-      case TeslaCrypto::VehicleDataRequest::TirePressure:
-        m_nextPollRequest = TeslaCrypto::VehicleDataRequest::Drive;
-        switch (request) {
-          case TeslaCrypto::VehicleDataRequest::Charge:
-            m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Climate;
-            break;
-          case TeslaCrypto::VehicleDataRequest::Climate:
-            m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Closures;
-            break;
-          case TeslaCrypto::VehicleDataRequest::Closures:
-            m_nextAuxiliaryRequest =
-                TeslaCrypto::VehicleDataRequest::TirePressure;
-            break;
-          case TeslaCrypto::VehicleDataRequest::TirePressure:
-            m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
-            break;
-          case TeslaCrypto::VehicleDataRequest::Drive:
-            break;
-        }
-        break;
+    const uint32_t now = millis();
+    if (request == TeslaCrypto::VehicleDataRequest::Drive) {
+      // 驾驶状态（车速、档位等）按 500ms 周期刷新。
+      m_nextDrivePollAt = now + CFG_TESLA_DRIVE_POLL_INTERVAL_MS;
+    } else {
+      // 每秒只轮询一种辅助状态，四类辅助数据依次轮转。
+      m_nextAuxiliaryPollAt = now + CFG_TESLA_AUX_POLL_INTERVAL_MS;
+      switch (request) {
+        case TeslaCrypto::VehicleDataRequest::Charge:
+          m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Climate;
+          break;
+        case TeslaCrypto::VehicleDataRequest::Climate:
+          m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Closures;
+          break;
+        case TeslaCrypto::VehicleDataRequest::Closures:
+          m_nextAuxiliaryRequest =
+              TeslaCrypto::VehicleDataRequest::TirePressure;
+          break;
+        case TeslaCrypto::VehicleDataRequest::TirePressure:
+          m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
+          break;
+        case TeslaCrypto::VehicleDataRequest::Drive:
+          break;
+      }
     }
+
+    // 下一次动作取两个独立周期中更早到期的那一个。
+    const uint32_t driveWait =
+        due(m_nextDrivePollAt) ? 0 : m_nextDrivePollAt - now;
+    const uint32_t auxiliaryWait =
+        due(m_nextAuxiliaryPollAt) ? 0 : m_nextAuxiliaryPollAt - now;
+    m_nextActionAt =
+        now + (driveWait < auxiliaryWait ? driveWait : auxiliaryWait);
   }
-  m_nextActionAt = millis() + CFG_TESLA_POLL_INTERVAL_MS;
 }
 
 void TeslaClient::onCryptoSession(bool ok) {
@@ -474,10 +495,14 @@ void TeslaClient::onCryptoSession(bool ok) {
     m_pairSends = 0;
     m_pairWaitAt = 0;
     m_pairFallbackTried = false;
-    m_nextPollRequest = TeslaCrypto::VehicleDataRequest::Drive;
     m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
     m_hint = PairingHint{};
-    m_nextActionAt = millis();  // 立即发第一条 GetVehicleData
+    // 首先立即请求驾驶数据；辅助轮询错开半个驾驶周期，减少同时到期。
+    const uint32_t now = millis();
+    m_nextDrivePollAt = now;
+    m_nextAuxiliaryPollAt =
+        now + CFG_TESLA_DRIVE_POLL_INTERVAL_MS / 2;
+    m_nextActionAt = now;
   } else {
     m_nextActionAt = millis() + CFG_TESLA_HANDSHAKE_RETRY_MS;
   }
