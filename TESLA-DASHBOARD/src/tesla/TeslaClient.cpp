@@ -750,14 +750,36 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
               (unsigned)len, (unsigned)(m_link ? m_link->mtu() : 0));
     }
   } else if (m_packets == 0 && (m_crypto.commandsSent() > 0) && m_crypto.responsesOk() > 0) {
-    // 解密成功但无法解析：打印调试信息，帮助定位格式错误
-    CFG_LOG("[CRYPTO] 警告：解密 %uB 成功但无法解析 VehicleData（结构不匹配？）-"
-            " 原始前16字节: %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x",
-            (unsigned)len,
-            plaintext[0], plaintext[1], plaintext[2], plaintext[3],
-            plaintext[4], plaintext[5], plaintext[6], plaintext[7],
-            plaintext[8], plaintext[9], plaintext[10], plaintext[11],
-            plaintext[12], plaintext[13], plaintext[14], plaintext[15]);
+    // 解密成功但无法解析：打印更多原始数据帮助分析
+    CFG_LOG("[CRYPTO] 警告：解密 %uB 成功但无法解析 VehicleData", (unsigned)len);
+    if (len > 0) {
+      const size_t printLen = len < 48 ? len : 48;
+      char line[150];
+      char* p = line;
+      size_t remaining = sizeof(line);
+      for (size_t i = 0; i < printLen; ++i) {
+        if (i > 0 && i % 16 == 0) {
+          // 每16字节换行
+          *p = '\0';
+          CFG_LOG("[CRYPTO]   %s", line);
+          p = line;
+          remaining = sizeof(line);
+        }
+        if (i % 16 != 0) {
+          if (remaining < 1) break;
+          *p++ = ' ';
+          --remaining;
+        }
+        int written = snprintf(p, remaining, "%02x", plaintext[i]);
+        if (written < 0 || (size_t)written >= remaining) break;
+        p += written;
+        remaining -= (size_t)written;
+      }
+      *p = '\0';
+      if (p > line) {
+        CFG_LOG("[CRYPTO]   %s", line);
+      }
+    }
   }
 }
 

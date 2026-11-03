@@ -1217,14 +1217,51 @@ bool TeslaCrypto::handleResponse(const uint8_t* ciphertext, size_t len,
     return false;
   }
 
-  // 如果是第一条响应，简单记录长度
+  // 如果是第一条响应，打印足够的原始数据用于分析真实结构
   if (!m_firstResponseLogged) {
     m_firstResponseLogged = true;
-    CFG_LOG("[CRYPTO] 第一条响应解密成功，原始 %uB", (unsigned)len);
-    // 只打印前几个字节用于调试，避免缓冲区问题
-    if (len >= 4) {
-      CFG_LOG("[CRYPTO]   前4字节: %02x %02x %02x %02x", 
-              m_plain[0], m_plain[1], m_plain[2], m_plain[3]);
+    CFG_LOG("[CRYPTO] 第一条响应解密成功，原始 %uB（完整打印用于分析）", (unsigned)len);
+    
+    // 安全地打印前32字节（足以看到 protobuf 结构头）
+    const size_t printLen = len < 32 ? len : 32;
+    char line[100];
+    char* p = line;
+    size_t remaining = sizeof(line);
+    
+    for (size_t i = 0; i < printLen; ++i) {
+      if (i > 0) {
+        if (remaining < 1) break;
+        *p++ = ' ';
+        --remaining;
+      }
+      int written = snprintf(p, remaining, "%02x", m_plain[i]);
+      if (written < 0 || (size_t)written >= remaining) break;
+      p += written;
+      remaining -= (size_t)written;
+    }
+    *p = '\0';
+    CFG_LOG("[CRYPTO]   HEX: %s", line);
+    
+    // 如果是 129B（如日志所示），也打印最后几个字节
+    if (len > 32 && len <= 150) {
+      p = line;
+      remaining = sizeof(line);
+      const size_t tailStart = len > 16 ? len - 16 : 0;
+      
+      CFG_LOG("[CRYPTO]   ... (中间省略)");
+      for (size_t i = tailStart; i < len; ++i) {
+        if (i > tailStart) {
+          if (remaining < 1) break;
+          *p++ = ' ';
+          --remaining;
+        }
+        int written = snprintf(p, remaining, "%02x", m_plain[i]);
+        if (written < 0 || (size_t)written >= remaining) break;
+        p += written;
+        remaining -= (size_t)written;
+      }
+      *p = '\0';
+      CFG_LOG("[CRYPTO]   HEX: %s", line);
     }
   }
 
