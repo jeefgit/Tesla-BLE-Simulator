@@ -353,10 +353,12 @@ void TeslaClient::loop() {
       (uint32_t)(millis() - m_diagAt) >= 10000) {
     m_diagAt = millis();
     CFG_LOG("[CRYPTO] 握手成功但 10s 内无可解析数据：MTU=%u 最后 fault=%u "
-            "fault25 累计=%u 已解响应=%u",
+            "fault25 累计=%u 已解响应=%u 已发命令=%u 本次连接响应=%u/%u",
             (unsigned)(m_link ? m_link->mtu() : 0),
             (unsigned)m_crypto.lastFault(), (unsigned)m_mtuFaults,
-            (unsigned)m_crypto.responsesOk());
+            (unsigned)m_crypto.responsesOk(),
+            (unsigned)m_crypto.commandsSent(),
+            m_respOk, m_respTotal);
   }
 #else
   if (m_packets == 0 && !m_timeoutLogged) {
@@ -404,6 +406,8 @@ void TeslaClient::onDisconnected() {
   m_mtuFaults = 0;
   m_pollPending = false;
   m_pollTimeoutLogged = false;
+  m_respTotal = 0;
+  m_respOk = 0;
   m_notPaired = false;
   m_pairDone = false;
   m_pairWaitLogged = false;
@@ -688,6 +692,19 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
     if (m_crypto.hasSession()) m_nextActionAt = millis();
   }
 
+  // 连接内响应统计
+  ++m_respTotal;
+  if (fault == 0) {
+    ++m_respOk;
+    if (m_respOk == 1) {
+      CFG_LOG("[CRYPTO] 第一条正常响应（本次连接共%u条，故障%u条）",
+              m_respOk, m_respTotal - m_respOk);
+    } else if (m_respOk <= 5) {
+      CFG_LOG("[CRYPTO] 第%u条正常响应（总计%uB）",
+              m_respOk, (unsigned)len);
+    }
+  }
+
   if (fault != 0) {
     if (fault == 25) {
       // 车端收到请求但拒绝回包：响应体积超过双方协商的 ATT MTU。
@@ -717,7 +734,8 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
   }
   if (!plaintext || len == 0) return;
 
-  if (decodeVehicleData(plaintext, len)) {
+  bool decoded = decodeVehicleData(plaintext, len);
+  if (decoded) {
     ++m_packets;
     m_lastPacketAt = millis();
     m_timeoutLogged = false;
@@ -731,6 +749,15 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
       CFG_LOG("[CRYPTO] 首帧 VehicleData 解密成功（%uB，MTU=%u）",
               (unsigned)len, (unsigned)(m_link ? m_link->mtu() : 0));
     }
+  } else if (m_packets == 0 && (m_crypto.commandsSent() > 0) && m_crypto.responsesOk() > 0) {
+    // 解密成功但无法解析：打印调试信息，帮助定位格式错误
+    CFG_LOG("[CRYPTO] 警告：解密 %uB 成功但无法解析 VehicleData（结构不匹配？）-"
+            " 原始前16字节: %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x",
+            (unsigned)len,
+            plaintext[0], plaintext[1], plaintext[2], plaintext[3],
+            plaintext[4], plaintext[5], plaintext[6], plaintext[7],
+            plaintext[8], plaintext[9], plaintext[10], plaintext[11],
+            plaintext[12], plaintext[13], plaintext[14], plaintext[15]);
   }
 }
 

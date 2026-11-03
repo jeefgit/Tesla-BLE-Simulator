@@ -120,6 +120,10 @@ class TeslaClient {
   // "握手成功但一直没数据"的周期诊断（每 10s 一条，现场不用盯日志刷屏）
   uint32_t m_diagAt = 0;
 
+  // 响应统计（本次连接内）
+  uint32_t m_respTotal = 0;
+  uint32_t m_respOk = 0;
+
   uint32_t m_packets = 0;
   uint32_t m_lastPacketAt = 0;
   uint32_t m_droppedBytes = 0;

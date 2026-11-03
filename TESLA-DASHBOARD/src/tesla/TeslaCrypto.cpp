@@ -25,6 +25,9 @@
 // ---------------------------------------------------------------------------
 namespace {
 
+
+
+
 // UniversalMessage.Domain
 constexpr uint32_t kDomainInfotainment = 3;
 constexpr uint32_t kDomainVcsec = 2;
@@ -515,6 +518,8 @@ void TeslaCrypto::reset() {
   m_clockBase = 0;
   m_clockBaseMs = 0;
   m_lastFault = 0;
+  m_pairLogValid = false;
+  m_firstResponseLogged = false;
 }
 
 bool TeslaCrypto::ensureKeys() {
@@ -820,6 +825,11 @@ bool TeslaCrypto::buildGetVehicleData(uint8_t* out, size_t cap, size_t* outLen,
   memcpy(m_lastReqTag, tag, sizeof(m_lastReqTag));
   memcpy(m_lastReqUuid, uuid, sizeof(m_lastReqUuid));
   m_lastReqCounter = counter;
+  // 对齐官方 vehicle-command：防重放窗口是“每次请求一个”（receiver 内的
+  // SlidingWindow），而不是整个会话单调递增。真车的每条 GetVehicleData 响应
+  // 计数器都从 1 开始，若沿用会话全局单调比较会被误判为重放（fault=5）。
+  // 这里在新请求发出时重置，只拦截“同一请求的重复响应”。
+  m_lastRespCounter = 0;
   m_counter = counter;
   ++m_commandsSent;
   return true;
@@ -973,9 +983,18 @@ void TeslaCrypto::handleFrame(const uint8_t* payload, size_t len) {
       bool terminal = false;
       if (parsePairingStatus(ciphertext, ciphertextLen, &opStatus, &info,
                              &terminal)) {
-        CFG_LOG("[PAIR] 配钥状态 operationStatus=%u info=%u%s",
-                (unsigned)opStatus, (unsigned)info,
-                terminal ? "（终态）" : "（等待刷卡）");
+        // 真车会每秒重播同一状态（白名单/CommandStatus 广播），只在变化时打印，
+        // 否则串口会被刷屏、真正有用的日志被淹没。
+        if (!m_pairLogValid || m_pairLogOp != opStatus ||
+            m_pairLogInfo != info || m_pairLogTerminal != terminal) {
+          m_pairLogValid = true;
+          m_pairLogOp = opStatus;
+          m_pairLogInfo = info;
+          m_pairLogTerminal = terminal;
+          CFG_LOG("[PAIR] 配钥状态 operationStatus=%u info=%u%s",
+                  (unsigned)opStatus, (unsigned)info,
+                  terminal ? "（终态）" : "（等待刷卡）");
+        }
         if (m_onPairing) m_onPairing(opStatus, info, terminal);
       }
     } else {
@@ -1126,7 +1145,10 @@ bool TeslaCrypto::handleHandshake(const uint8_t* sessionInfo, size_t len,
 
   memcpy(m_epoch, epoch, sizeof(m_epoch));
   m_counter = counter;
-  m_lastRespCounter = counter;
+  // SessionInfo.counter 是“会话/时钟”计数器，与后续命令响应的计数器不是
+  // 同一个序列（真车握手后普通响应仍从 1 开始）。不要拿它初始化防重放窗口，
+  // 否则第一条响应就会被判为重放。
+  m_lastRespCounter = 0;
   m_clockBase = clockTime;
   m_clockBaseMs = millis();
   m_hasSession = true;
@@ -1193,6 +1215,17 @@ bool TeslaCrypto::handleResponse(const uint8_t* ciphertext, size_t len,
     CFG_LOG("[CRYPTO] 响应 AES-GCM 解密/认证失败");
     report(nullptr, 0, kFaultInvalidSignature);
     return false;
+  }
+
+  // 如果是第一条响应，简单记录长度
+  if (!m_firstResponseLogged) {
+    m_firstResponseLogged = true;
+    CFG_LOG("[CRYPTO] 第一条响应解密成功，原始 %uB", (unsigned)len);
+    // 只打印前几个字节用于调试，避免缓冲区问题
+    if (len >= 4) {
+      CFG_LOG("[CRYPTO]   前4字节: %02x %02x %02x %02x", 
+              m_plain[0], m_plain[1], m_plain[2], m_plain[3]);
+    }
   }
 
   m_lastRespCounter = counter;

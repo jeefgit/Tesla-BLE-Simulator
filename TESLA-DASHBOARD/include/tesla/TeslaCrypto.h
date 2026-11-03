@@ -74,6 +74,7 @@ class TeslaCrypto {
   uint32_t commandsSent() const { return m_commandsSent; }
   uint32_t responsesOk() const { return m_responsesOk; }
   uint32_t lastFault() const { return m_lastFault; }
+  uint32_t lastRequestCounter() const { return m_lastReqCounter; }
 
  private:
   bool ensureKeys();
@@ -108,6 +109,16 @@ class TeslaCrypto {
   uint32_t m_lastReqCounter = 0;
   uint32_t m_lastRespCounter = 0;
   uint32_t m_lastFault = 0;
+
+  // VCSEC 状态帧去重：真车会每秒重播同一条 CommandStatus/白名单广播，
+  // 原样打印会把串口刷满，这里只在内容变化时打印一次。
+  bool m_pairLogValid = false;
+  uint32_t m_pairLogOp = 0;
+  uint32_t m_pairLogInfo = 0;
+  bool m_pairLogTerminal = false;
+
+  // 解密诊断
+  bool m_firstResponseLogged = false;
 
   uint32_t m_commandsSent = 0;
   uint32_t m_responsesOk = 0;
