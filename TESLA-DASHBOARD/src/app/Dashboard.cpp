@@ -555,11 +555,13 @@ void Dashboard::render(const VehicleData& v, BleLink::State bleState,
   if (now - m_lastPrint < CFG_RENDER_INTERVAL_MS) return;
   m_lastPrint = now;
 
-  const bool ok =
-      dataReady && handshakeOk && 
-      (millis() - v.updatedAt) < CFG_DATA_STALE_MS &&
-      v.valid != 0;  // 确保至少有一个有效字段
-  const bool statusChanged = bleState != m_bleState || ok != m_ok ||
+  const bool prevOk = m_ok;
+  // 遮罩只反映「链路/握手进度」，不再依赖数据是否刷新：
+  //   车辆静止时车速恒为 0，若拿车速新鲜度判断会永远卡在 SYNCING。
+  // 单字段缺数据时由 updateHero/updateBattery 各自降级显示 "--"。
+  // 握手未完成仍显示遮罩，避免"没握手就显示数据"的假象。
+  const bool ok = (bleState == BleLink::State::Ready) && handshakeOk;
+  const bool statusChanged = bleState != m_bleState || ok != prevOk ||
                              pair.phase != m_pair.phase;
 
   m_v = v;
@@ -568,13 +570,12 @@ void Dashboard::render(const VehicleData& v, BleLink::State bleState,
     m_elapsedShown = 0xFFFFFFFF;  // 强制立刻刷新秒数
   }
   m_bleState = bleState;
-  // 未握手成功时即使车端数据未过期也不渲染，避免"没握手就有数据"的假象
   m_ok = ok;
   m_pair = pair;
-  // 诊断日志：帮助理解为什么仪表还是SYNCING
-  if (m_ok != ok) {
+  // 诊断日志：只在状态切换时打印一次，便于现场定位
+  if (prevOk != ok) {
     CFG_LOG("[UI] 仪表状态变化: %s -> %s (ready=%s handshake=%s updatedAt=%ums valid=0x%04x)",
-            m_ok ? "正常" : "SYNCING", ok ? "正常" : "SYNCING",
+            prevOk ? "正常" : "SYNCING", ok ? "正常" : "SYNCING",
             dataReady ? "是" : "否", handshakeOk ? "是" : "否",
             millis() - v.updatedAt, v.valid);
   }
