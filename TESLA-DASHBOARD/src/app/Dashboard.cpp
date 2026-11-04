@@ -556,7 +556,9 @@ void Dashboard::render(const VehicleData& v, BleLink::State bleState,
   m_lastPrint = now;
 
   const bool ok =
-      dataReady && handshakeOk && v.fresh(VF_SPEED, CFG_DATA_STALE_MS);
+      dataReady && handshakeOk && 
+      (millis() - v.updatedAt) < CFG_DATA_STALE_MS &&
+      v.valid != 0;  // 确保至少有一个有效字段
   const bool statusChanged = bleState != m_bleState || ok != m_ok ||
                              pair.phase != m_pair.phase;
 
