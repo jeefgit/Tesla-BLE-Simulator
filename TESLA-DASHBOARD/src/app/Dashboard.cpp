@@ -571,9 +571,13 @@ void Dashboard::render(const VehicleData& v, BleLink::State bleState,
   // 未握手成功时即使车端数据未过期也不渲染，避免"没握手就有数据"的假象
   m_ok = ok;
   m_pair = pair;
-  // CFG_LOG("仪表更新检查: BLE=%s 数据就绪=%s 握手=%s",
-          // bleStateText(m_bleState), dataReady ? "是" : "否",
-          // handshakeOk ? "是" : "否");
+  // 诊断日志：帮助理解为什么仪表还是SYNCING
+  if (m_ok != ok) {
+    CFG_LOG("[UI] 仪表状态变化: %s -> %s (ready=%s handshake=%s updatedAt=%ums valid=0x%04x)",
+            m_ok ? "正常" : "SYNCING", ok ? "正常" : "SYNCING",
+            dataReady ? "是" : "否", handshakeOk ? "是" : "否",
+            millis() - v.updatedAt, v.valid);
+  }
   // 配钥进行中（Idle 以外）也要持续刷新，否则倒计时会卡住
   if (!m_ok && m_hasRendered && !statusChanged &&
       pair.phase == PairingHint::Idle) {
