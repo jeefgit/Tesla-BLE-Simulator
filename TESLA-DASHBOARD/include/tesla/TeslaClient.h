@@ -89,6 +89,10 @@ class TeslaClient {
   TeslaCrypto::VehicleDataRequest m_nextAuxiliaryRequest =
       TeslaCrypto::VehicleDataRequest::Charge;
 
+  // 握手成功后的第一轮取数：4 类辅助状态（充电/空调/车门/胎压）连续拉一遍，
+  // 不受 CFG_TESLA_AUX_POLL_INTERVAL_MS 限制；拉完后恢复按周期轮询。
+  bool m_firstAuxBurst = false;
+
   // 配钥（add-key-request）状态
   bool m_notPaired = false;       // 车辆回 KEY_NOT_ON_WHITELIST
   bool m_pairDone = false;        // 已收到配钥终态

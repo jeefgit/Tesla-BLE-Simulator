@@ -393,6 +393,7 @@ void TeslaClient::onConnected() {
   m_pairWaitAt = 0;
   m_pairFallbackTried = false;
   m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
+  m_firstAuxBurst = false;
   m_nextDrivePollAt = 0;
   m_nextAuxiliaryPollAt = 0;
   m_hint = PairingHint{};
@@ -501,11 +502,21 @@ void TeslaClient::sendPoll() {
     m_pollPending = true;
     m_pollPendingUntil = now + CFG_TESLA_POLL_RESPONSE_TIMEOUT_MS;
     if (request == TeslaCrypto::VehicleDataRequest::Drive) {
-      // 驾驶状态（车速、档位等）按 500ms 周期刷新。
+      // 驾驶状态（车速、档位等）按 CFG_TESLA_DRIVE_POLL_INTERVAL_MS 刷新。
       m_nextDrivePollAt = now + CFG_TESLA_DRIVE_POLL_INTERVAL_MS;
     } else {
-      // 每秒只轮询一种辅助状态，四类辅助数据依次轮转。
-      m_nextAuxiliaryPollAt = now + CFG_TESLA_AUX_POLL_INTERVAL_MS;
+      // 首轮取数：4 类辅助状态连续拉一遍，尽快把仪表填满；
+      // 之后每 CFG_TESLA_AUX_POLL_INTERVAL_MS 轮询一类。
+      if (m_firstAuxBurst) {
+        if (request == TeslaCrypto::VehicleDataRequest::TirePressure) {
+          m_firstAuxBurst = false;  // 第 4 类（胎压）已发，结束首轮
+          m_nextAuxiliaryPollAt = now + CFG_TESLA_AUX_POLL_INTERVAL_MS;
+        } else {
+          m_nextAuxiliaryPollAt = now;  // 紧接着请求下一类
+        }
+      } else {
+        m_nextAuxiliaryPollAt = now + CFG_TESLA_AUX_POLL_INTERVAL_MS;
+      }
       switch (request) {
         case TeslaCrypto::VehicleDataRequest::Charge:
           m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Climate;
@@ -547,11 +558,11 @@ void TeslaClient::onCryptoSession(bool ok) {
     m_pairFallbackTried = false;
     m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
     m_hint = PairingHint{};
-    // 首先立即请求驾驶数据；辅助轮询错开半个驾驶周期，减少同时到期。
+    // 先立即请求驾驶数据；辅助状态进入首轮连续取数，握手后一次拉全。
     const uint32_t now = millis();
     m_nextDrivePollAt = now;
-    m_nextAuxiliaryPollAt =
-        now + CFG_TESLA_DRIVE_POLL_INTERVAL_MS / 2;
+    m_nextAuxiliaryPollAt = now;
+    m_firstAuxBurst = true;
     m_nextActionAt = now;
     m_diagAt = now;
     m_pollPending = false;

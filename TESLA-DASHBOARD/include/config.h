@@ -108,10 +108,13 @@
 #define CFG_TESLA_HANDSHAKE_MAX_RETRY 3
 #define CFG_TESLA_HANDSHAKE_RETRY_LONG_MS 15000
 
-// GetVehicleData 刷新周期（毫秒）：驾驶状态每 500ms 请求一次；
-// 辅助状态每 1000ms 轮询一类（充电/空调/车门/胎压各约 4s 更新一次）。
-#define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 500
-#define CFG_TESLA_AUX_POLL_INTERVAL_MS 1000
+// GetVehicleData 刷新周期（毫秒）：
+//   驾驶状态（车速/档位/功率）按 DRIVE 周期请求；
+//   辅助状态（充电/空调/车门/胎压）按 AUX 周期轮询一类。
+// 注意：握手成功后的第一轮不受 AUX 周期限制，会把 4 类辅助状态连续拉一遍，
+//       先把仪表填满，之后才按下面的周期轮询。
+#define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 300
+#define CFG_TESLA_AUX_POLL_INTERVAL_MS 31000
 // GATT 发送失败时的重试间隔（毫秒）
 #define CFG_TESLA_POLL_RETRY_MS 500
 // 等待车端响应的上限（毫秒）。超时前不发下一条加密命令：
