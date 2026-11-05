@@ -1,25 +1,32 @@
 #include <Arduino.h>
 
+#include "app/AppController.h"
 #include "app/Dashboard.h"
-#include "ble/BleLink.h"
 #include "config.h"
 #include "data/MockSource.h"
-#include "data/VehicleData.h"
+#include "data/TeslaBleSource.h"
 #include "display/Display.h"
-#include "tesla/TeslaClient.h"
+#include "platform/BoardSelect.h"
 
 // ---------------------------------------------------------------------------
-// 数据流：
-//   CFG_DEMO_MODE=1: MockSource(9阶段剧本) --TeslaPayload--> g_vehicle
-//   CFG_DEMO_MODE=0: 模拟器/真车 --BLE notify--> BleLink --53B组帧-->
-//                    TeslaClient --> g_vehicle
-//   两条路径汇合后统一经 applyTesla() 写快照 --> Dashboard(LVGL) 渲染
+// 组合根（Composition Root）：只负责「把谁装给谁」，不含业务逻辑。
+//
+//   CFG_DEMO_MODE=1: MockSource(9阶段剧本) ─┐
+//   CFG_DEMO_MODE=0: TeslaBleSource(BLE)  ─┴─> AppController ─> Dashboard(LVGL)
+//                                                              └> Display(LovyanGFX)
+//
+// 换板/换屏只改 BoardSelect.h 与 platformio.ini；
+// 换数据源只改下面的 #if 分支（编译期选择）。
 // ---------------------------------------------------------------------------
-BleLink bleLink;
-TeslaClient teslaClient;
-MockSource mockSource;
+#if CFG_DEMO_MODE
+MockSource vehicleSource;
+#else
+TeslaBleSource vehicleSource;
+#endif
+
 Dashboard dashboard;
 Display display;
+AppController app(vehicleSource, dashboard, display, board::kDefault);
 
 void setup() {
   Serial.begin(115200);
@@ -28,47 +35,11 @@ void setup() {
   CFG_LOG(" ESP32 BLE Tesla Dashboard");
   CFG_LOG("==============================");
 
-  display.begin();   // 屏幕 + LVGL 先起
-  dashboard.begin(); // UI 对象树
-
-#if CFG_DEMO_MODE
-  // 演示模式：内建剧本，不启动 BLE
-  mockSource.begin();
-#else
-  bleLink.begin();
-
-  // 目标广播名：S + sha1(VIN) 前16位hex + C（与 sim_server.py 规则一致）
-  String targetName =
-      strlen(CFG_TESLA_NAME) > 0
-          ? String(CFG_TESLA_NAME)
-          : TeslaClient::advertisedNameFromVin(CFG_TESLA_VIN);
-  if (targetName.length() == 0) {
-    CFG_LOG("广播名推导失败（VIN 为空？），退回前缀/UUID 扫描");
-  } else {
-    bleLink.setTargetName(targetName);
-    CFG_LOG("目标 VIN=%s  广播名=%s", CFG_TESLA_VIN, targetName.c_str());
-  }
-
-  bleLink.setRxHandler([](const uint8_t* data, size_t len) {
-    teslaClient.feed(data, len);
-  });
-  teslaClient.begin(&bleLink);
-#endif
+  app.begin();
 }
 
 void loop() {
-#if CFG_DEMO_MODE
-  mockSource.loop();
-  dashboard.render(g_vehicle, BleLink::State::Ready, true, true);
-#else
-  bleLink.loop();
-  teslaClient.loop();
-  // ready() 已含握手门禁，encrypted() 再显式传入握手状态，仪表层双重校验；
-  // pairingHint() 让屏幕直接显示「请贴卡 / 倒计时 / 结果」，不必盯串口
-  dashboard.render(g_vehicle, bleLink.state(), teslaClient.ready(),
-                   teslaClient.encrypted(), teslaClient.pairingHint());
-#endif
-  display.loop();  // LVGL 事务驱动（内部按 LV_DEF_REFR_PERIOD 自我限流）
+  app.loop();
   // 之前 delay(50) 会把 LVGL 刷新压到 ~20fps，加剧闪烁。
   // 收紧到 2ms：LVGL 自行按 33ms 节拍刷新，画面更平滑；BLE 轮询本就非阻塞。
   delay(2);

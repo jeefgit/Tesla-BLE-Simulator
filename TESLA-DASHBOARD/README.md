@@ -21,22 +21,36 @@
 
 ```
 特斯拉模拟器 / 真车
-     │  BLE Notify（800ms 节拍，53 字节 SimPayload）
+     │  BLE Notify（加密 GetVehicleData 或 53B SimPayload）
      ▼
-┌────────────┐  字节   ┌──────────────┐  组帧   ┌──────────────┐   渲染   ┌────────────┐
-│  BleLink   │ ──────► │ TeslaClient  │ ──────► │  g_vehicle   │ ───────► │ Dashboard  │
-│ 扫描/连接/  │  队列   │ 53B组帧/重同步 │  解析   │ VehicleData  │          │ 串口模拟，  │
-│ 订阅通知    │         │ 合理性校验    │        │ (唯一数据源) │          │ 后续换 TFT │
-└────────────┘         └──────────────┘         └──────────────┘          └────────────┘
-     ▲                                                     ▲
-     └──────────────── config.h 全局配置 ──────────────────┘
+┌────────────┐  字节   ┌──────────────┐         ┌─────────────────┐
+│  BleLink   │ ──────► │ TeslaClient  │ ──────► │ TeslaBleSource  │
+│ 扫描/连接/  │  队列   │ 组帧/解密/配钥 │         │ 实现 IVehicleSource│
+│ 订阅通知    │         │              │         └────────┬────────┘
+└────────────┘         └──────────────┘                  │
+                                                          ▼
+                                              ┌─────────────────────┐
+                                              │ AppController       │
+                                              │ 组装 UiModel(只读快照)│
+                                              └──────────┬──────────┘
+                                                         │
+                              ┌──────────────────────────┴───────────┐
+                              ▼                                      ▼
+                    ┌──────────────────┐                   ┌──────────────────┐
+                    │ Dashboard (UI)   │                   │ Display (平台)    │
+                    │ 只依赖 core/     │                   │ BoardProfile 驱动 │
+                    └──────────────────┘                   └──────────────────┘
 ```
 
 - **BleLink**（链路层）：扫描 → 连接 → 订阅，收到的字节只入环形缓冲，loop 里再交给上层。
-- **TeslaClient**（协议层）：字节累积成 53 字节帧，逐字节重同步容忍 MTU 拆包；
-  合理性校验通过后写入 `g_vehicle`；超时（`CFG_DATA_STALE_MS`）后仪表降级显示 `--`。
-- **VehicleData**（数据层）：全局唯一数据源 `g_vehicle`，`valid` 位 + `fresh()` 过期判断。
-- **Dashboard**（渲染层）：接屏时只改这一个模块。
+- **TeslaClient**（协议层）：组帧/解密/配钥，写入 `g_vehicle`；超时后仪表降级显示 `--`。
+- **TeslaBleSource / MockSource**（数据源层）：实现 `IVehicleSource`，把内部状态映射成
+  `LinkState` + `SourceStatus`，UI 不感知 BLE 细节。
+- **AppController**（装配层）：`source.loop()` → 组装 `UiModel` → `ui.render()` → `display.loop()`。
+- **Dashboard**（UI 层）：只消费 `core/UiModel.h`，换成别的屏/布局时新增 `IDashboard` 实现即可。
+- **Display / BoardProfile**（平台层）：引脚、面板、旋转、缓冲全部来自板型表，换板不改业务代码。
+
+详见 `docs/ARCHITECTURE.md`。
 
 ## 协议要点
 
@@ -52,20 +66,39 @@
 
 ```
 TESLA-DASHBOARD/
-├── platformio.ini          # PlatformIO 工程配置（板子/库依赖，obd 已排除编译）
+├── platformio.ini              # PlatformIO 配置（板型/库依赖，obd 已排除编译）
 ├── include/
-│   ├── config.h            # 所有可调参数：VIN、广播名、UUID、超时…
-│   ├── ble/BleLink.h       # BLE 链路层：精确名扫描/连接/订阅/收发
-│   ├── tesla/TeslaPayload.h# 53 字节 SimPayload 帧定义（packed + static_assert）
-│   ├── tesla/TeslaClient.h # 特斯拉协议层：组帧/校验/写入快照/广播名推导
-│   ├── data/VehicleData.h  # 车辆数据快照（全局唯一数据源）
-│   └── app/Dashboard.h     # 仪表渲染层（当前串口模拟）
+│   ├── config.h                # 应用可调参数：VIN、UUID、超时、UI 分辨率…
+│   ├── core/                   # 领域模型（无 UI / 无传输依赖）
+│   │   ├── VehicleState.h      # 车辆数据快照
+│   │   ├── LinkState.h         # 抽象链路状态
+│   │   ├── SourceStatus.h      # 数据源状态
+│   │   ├── PairingHint.h       # 配钥提示
+│   │   └── UiModel.h           # 前后端唯一契约
+│   ├── data/                   # 后端数据源
+│   │   ├── IVehicleSource.h    # 数据源接口
+│   │   ├── TeslaBleSource.h    # BLE 数据源（组合 BleLink + TeslaClient）
+│   │   ├── MockSource.h        # 演示剧本
+│   │   └── VehicleData.h       # 兼容旧 include（转发到 core/VehicleState.h）
+│   ├── ble/BleLink.h
+│   ├── tesla/                  # 协议实现（仅被 TeslaBleSource 调用）
+│   ├── app/
+│   │   ├── AppController.h     # 装配 + 主循环
+│   │   └── Dashboard.h         # LVGL UI 实现（IDashboard）
+│   ├── ui/IDashboard.h         # UI 接口
+│   └── platform/               # 硬件平台层
+│       ├── BoardProfile.h      # 板型描述表
+│       ├── BoardSelect.h       # 编译期选择板型
+│       ├── IDisplay.h          # 屏幕接口
+│       └── boards/cyd_2432s028.h
 └── src/
-    ├── main.cpp            # 组装：setup / loop（VIN → 广播名 → 链路）
+    ├── main.cpp                # 组合根：只做装配
+    ├── app/AppController.cpp
+    ├── app/Dashboard.cpp
+    ├── data/{TeslaBleSource,MockSource,VehicleData}.cpp
     ├── ble/BleLink.cpp
     ├── tesla/TeslaClient.cpp
-    ├── data/VehicleData.cpp
-    └── app/Dashboard.cpp
+    └── display/Display.cpp
     （obd/ 保留但不编译）
 ```
 

@@ -97,6 +97,7 @@ Python 侧使用 `struct.pack("<ffifc6BBfff4f", ...)` 编码，结构对齐如�
 更多架构设计与硬件指南请参考 `docs/` 文件夹：
 * 📖 **[USB_BLUETOOTH_DONGLE_SETUP.md](docs/USB_BLUETOOTH_DONGLE_SETUP.md)**：普通 USB 蓝牙接收器 (CSR8510) + Zadig WinUSB 驱动一步一步配置指南。
 * 📖 **[HANDOVER.md](docs/HANDOVER.md)**：模拟器架构设计、旁路劫持原理与二次开发指南。
+* 📖 **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**：ESP32 固件前后端分层、换板/换屏/换数据源指南。
 
 ---
 

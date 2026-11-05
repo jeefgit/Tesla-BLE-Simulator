@@ -65,13 +65,14 @@ constexpr float TPMS_HI = 3.1f;
 constexpr uint32_t C_CAR_LINE = 0x39414F;
 constexpr uint32_t C_DOOR_OFF = 0x14181F;
 
-const char* bleStateText(BleLink::State s) {
+const char* bleStateText(LinkState s) {
   switch (s) {
-    case BleLink::State::Idle: return "--";
-    case BleLink::State::Scanning: return "SCAN";
-    case BleLink::State::Connecting: return "CONN";
-    case BleLink::State::Ready: return "LINK";
-    case BleLink::State::Reconnecting: return "RETRY";
+    case LinkState::Idle: return "--";
+    case LinkState::Scanning: return "SCAN";
+    case LinkState::Connecting: return "CONN";
+    case LinkState::Ready: return "LINK";
+    case LinkState::Reconnecting: return "RETRY";
+    case LinkState::Error: return "ERR";
   }
   return "--";
 }
@@ -548,35 +549,37 @@ void Dashboard::buildPairCard() {
 // ---------------------------------------------------------------------------
 // 数据刷新（render 每帧调用；内部节流 + 只改脏属性）
 // ---------------------------------------------------------------------------
-void Dashboard::render(const VehicleData& v, BleLink::State bleState,
-                       bool dataReady, bool handshakeOk,
-                       const PairingHint& pair) {
+void Dashboard::render(const UiModel& model) {
   const uint32_t now = millis();
   if (now - m_lastPrint < CFG_RENDER_INTERVAL_MS) return;
   m_lastPrint = now;
+
+  const VehicleState& v = model.vehicle;
+  const SourceStatus& st = model.status;
+  const PairingHint& pair = st.pairing;
 
   const bool prevOk = m_ok;
   // 遮罩只反映「链路/握手进度」，不再依赖数据是否刷新：
   //   车辆静止时车速恒为 0，若拿车速新鲜度判断会永远卡在 SYNCING。
   // 单字段缺数据时由 updateHero/updateBattery 各自降级显示 "--"。
   // 握手未完成仍显示遮罩，避免"没握手就显示数据"的假象。
-  const bool ok = (bleState == BleLink::State::Ready) && handshakeOk;
-  const bool statusChanged = bleState != m_bleState || ok != prevOk ||
+  const bool ok = (st.link == LinkState::Ready) && st.encrypted;
+  const bool statusChanged = st.link != m_link || ok != prevOk ||
                              pair.phase != m_pair.phase;
 
   m_v = v;
-  if (bleState != m_bleState) {
+  if (st.link != m_link) {
     m_stateSince = now;      // overlay 的“当前状态已持续秒数”重新计时
     m_elapsedShown = 0xFFFFFFFF;  // 强制立刻刷新秒数
   }
-  m_bleState = bleState;
+  m_link = st.link;
   m_ok = ok;
   m_pair = pair;
   // 诊断日志：只在状态切换时打印一次，便于现场定位
   if (prevOk != ok) {
-    CFG_LOG("[UI] 仪表状态变化: %s -> %s (ready=%s handshake=%s updatedAt=%ums valid=0x%04x)",
+    CFG_LOG("[UI] 仪表状态变化: %s -> %s (ready=%s encrypted=%s updatedAt=%ums valid=0x%04x)",
             prevOk ? "正常" : "SYNCING", ok ? "正常" : "SYNCING",
-            dataReady ? "是" : "否", handshakeOk ? "是" : "否",
+            st.dataReady ? "是" : "否", st.encrypted ? "是" : "否",
             millis() - v.updatedAt, v.valid);
   }
   // 配钥进行中（Idle 以外）也要持续刷新，否则倒计时会卡住
@@ -612,7 +615,7 @@ void Dashboard::updateAll() {
 bool Dashboard::pairCardVisible() const {
   if (m_pair.phase == PairingHint::Idle) return false;
   // 只在本机连上车端时提示配钥；链路掉了先显示断连遮罩
-  return m_bleState == BleLink::State::Ready;
+  return m_link == LinkState::Ready;
 }
 
 void Dashboard::updatePairCard() {
@@ -747,15 +750,15 @@ void Dashboard::updateHeader() {
 
   // BLE 状态：已连接绿色、扫描/连接/重连琥珀、未启动灰、配钥中 KEY
   const bool pairing = pairCardVisible();
-  setText(bleLbl, pairing ? "KEY" : bleStateText(m_bleState));
+  setText(bleLbl, pairing ? "KEY" : bleStateText(m_link));
   uint32_t c = C_FAINT;
   if (pairing) {
     c = C_CAUTION;
-  } else if (m_bleState == BleLink::State::Ready) {
+  } else if (m_link == LinkState::Ready) {
     c = C_REGEN;
-  } else if (m_bleState == BleLink::State::Scanning ||
-             m_bleState == BleLink::State::Connecting ||
-             m_bleState == BleLink::State::Reconnecting) {
+  } else if (m_link == LinkState::Scanning ||
+             m_link == LinkState::Connecting ||
+             m_link == LinkState::Reconnecting) {
     c = C_CAUTION;
   }
   setTextColorC(bleLbl, c);
@@ -943,29 +946,29 @@ void Dashboard::updateOverlay() {
   uint32_t accent = C_CAUTION;
   int stage = 0;
 
-  switch (m_bleState) {
-    case BleLink::State::Idle:
+  switch (m_link) {
+    case LinkState::Idle:
       title = "BLE IDLE";
       sub = "STACK NOT STARTED";
       hint = "CHECK SERIAL LOG";
       accent = C_FAINT;
       stage = 0;
       break;
-    case BleLink::State::Scanning:
+    case LinkState::Scanning:
       title = "SCANNING";
       sub = "SEARCHING FOR TESLA BROADCAST";
       hint = "MAKE SURE THE CAR IS AWAKE";
       accent = C_CAUTION;
       stage = 0;
       break;
-    case BleLink::State::Connecting:
+    case LinkState::Connecting:
       title = "CONNECTING";
       sub = "OPENING BLE LINK TO VEHICLE";
       hint = "STAY WITHIN A FEW METERS";
       accent = C_CAUTION;
       stage = 1;
       break;
-    case BleLink::State::Ready:
+    case LinkState::Ready:
       // 链路已通但数据/握手未就绪
       title = "SYNCING";
       sub = "WAITING FOR VEHICLE DATA";
@@ -973,10 +976,17 @@ void Dashboard::updateOverlay() {
       accent = C_FG;
       stage = 2;
       break;
-    case BleLink::State::Reconnecting:
+    case LinkState::Reconnecting:
       title = "RECONNECTING";
       sub = "LINK LOST - RETRYING";
       hint = "MOVE CLOSER TO THE CAR";
+      accent = C_ALERT;
+      stage = 1;
+      break;
+    case LinkState::Error:
+      title = "LINK ERROR";
+      sub = "UNRECOVERABLE LINK FAILURE";
+      hint = "CHECK SERIAL LOG";
       accent = C_ALERT;
       stage = 1;
       break;
@@ -1112,7 +1122,7 @@ void Dashboard::printSerial() {
   int written = snprintf(
       output, sizeof(output),
       "[仪表] BLE:%s | 数据:%s | 车速 %s km/h | SOC %s | 续航 %s | 档位 %s\r\n",
-      bleStateText(m_bleState), m_ok ? "就绪" : "----", speed, soc, range,
+      bleStateText(m_link), m_ok ? "就绪" : "----", speed, soc, range,
       gear);
   if (written < 0 || (size_t)written >= sizeof(output)) {
     CFG_LOG("仪表串口状态格式化失败");

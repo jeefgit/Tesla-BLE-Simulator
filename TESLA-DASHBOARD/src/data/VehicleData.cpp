@@ -1,11 +1,13 @@
-#include "data/VehicleData.h"
+#include "core/VehicleState.h"
 
 #include <string.h>
 
-VehicleData g_vehicle;
+#include "tesla/TeslaPayload.h"
+
+VehicleState g_vehicle;
 
 void applyTesla(const TeslaPayload& p) {
-  VehicleData& v = g_vehicle;
+  VehicleState& v = g_vehicle;
   v.speedKmh = p.speed_kmh;
   v.motorPowerKw = p.motor_power_kw;
   v.soc = p.battery_level;

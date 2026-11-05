@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "data/IVehicleSource.h"
 #include "tesla/TeslaPayload.h"
 
 // ---------------------------------------------------------------------------
@@ -15,10 +16,13 @@
 // 输出与真实 BLE 走同一条路径：构造 TeslaPayload -> applyTesla() -> g_vehicle，
 // 因此 UI 代码无法分辨数据来自模拟器还是剧本（切换零成本）。
 // ---------------------------------------------------------------------------
-class MockSource {
+class MockSource : public IVehicleSource {
  public:
-  void begin();
-  void loop();
+  void begin() override;
+  void loop() override;
+
+  const VehicleState& state() const override;
+  SourceStatus status() const override;
 
  private:
   uint32_t m_frame = 0;

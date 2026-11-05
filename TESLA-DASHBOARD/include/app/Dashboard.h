@@ -2,29 +2,26 @@
 
 #include <lvgl.h>
 
-#include "ble/BleLink.h"
-#include "data/VehicleData.h"
-#include "tesla/PairingState.h"
+#include "core/UiModel.h"
+#include "ui/IDashboard.h"
 
 // ---------------------------------------------------------------------------
 // Dashboard：仪表 UI 层（LVGL 9 对象树，布局见 dashboard/DESIGN.md）
 //
-//   hdr     顶部状态条：档位 · 内外温 · 锁/BLE
+//   hdr     顶部状态条：档位 · 内外温 · 锁/链路
 //   banner  告警条（车门 > 胎压 > 低电，1Hz 闪烁）
 //   carcol  左栏：车身俯视 + 6 开口 + 四轮着色 + 胎压数值
 //   hero    中区：车速大字；充电模式扩展全宽换充电面板
 //   batt    右列：SOC + 电量条 + 续航（充电模式隐藏）
 //   overlay 断连遮罩
 //
-// 数据只来自 g_vehicle（applyTesla 写入），BLE 与演示剧本同一路径。
+// 本类只消费 UiModel（VehicleState + SourceStatus），不依赖任何
+// BLE / 协议 / 板级头文件 —— 后端与硬件可独立替换。
 // ---------------------------------------------------------------------------
-class Dashboard {
+class Dashboard : public IDashboard {
  public:
-  void begin();
-  // handshakeOk：加密会话是否已握手成功；false 时一律按无数据渲染
-  // pair：配钥流程提示（Idle = 不显示配钥卡片）
-  void render(const VehicleData& v, BleLink::State bleState, bool dataReady,
-              bool handshakeOk, const PairingHint& pair = PairingHint{});
+  void begin() override;
+  void render(const UiModel& model) override;
 
  private:
   // LVGL 定时器：数值补间(50ms) + 告警 1Hz 闪烁 + 断连三点脉冲
@@ -52,11 +49,11 @@ class Dashboard {
   void printSerial();
 
   // 数据快照副本（定时器动画需要，render 时刷新）
-  VehicleData m_v;
+  VehicleState m_v;
   uint32_t m_lastPrint = 0;
   char m_lastSerialOutput[256] = {};
   bool m_serialPrinted = false;
-  BleLink::State m_bleState = BleLink::State::Idle;
+  LinkState m_link = LinkState::Idle;
   bool m_ok = false;
   bool m_hasRendered = false;
   bool m_chargingLayout = false;

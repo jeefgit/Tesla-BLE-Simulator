@@ -180,6 +180,18 @@ void MockSource::begin() {
           CFG_MOCK_TICK_MS);
 }
 
+const VehicleState& MockSource::state() const { return g_vehicle; }
+
+SourceStatus MockSource::status() const {
+  SourceStatus st;
+  // 演示模式视为「链路已通 + 已就绪」，UI 直接显示仪表页
+  st.link = LinkState::Ready;
+  st.dataReady = true;
+  st.encrypted = true;
+  st.lastPacketMs = g_vehicle.updatedAt;
+  return st;
+}
+
 void MockSource::loop() {
   const uint32_t now = millis();
   if (now - m_lastTick < CFG_MOCK_TICK_MS) return;
