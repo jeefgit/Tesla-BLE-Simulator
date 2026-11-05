@@ -674,6 +674,7 @@ void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
     case 26: reason = "等待中控台确认超时"; break;
     default: break;
   }
+  (void)reason;  // CFG_DEBUG_LOG=0 时日志宏不展开，避免 unused 警告
   CFG_LOG("[PAIR] ❌ 配钥失败 info=%u（%s）", (unsigned)info, reason);
   // 保留 m_notPaired，后续可用长间隔握手探测；需人工处理后重启/重连重试
   m_nextActionAt = millis() + CFG_TESLA_HANDSHAKE_RETRY_LONG_MS;
@@ -712,6 +713,7 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
       // 之后每 CFG_TESLA_MTU_FAULT_LOG_EVERY 次汇总一条。
       ++m_mtuFaults;
       const uint16_t mtu = m_link ? m_link->mtu() : 0;
+      (void)mtu;  // CFG_DEBUG_LOG=0 时日志宏不展开，避免 unused 警告
       if (m_mtuFaults == 1) {
         CFG_LOG("[CRYPTO] 车端拒绝回包：响应超过 BLE MTU（fault=25）；"
                 "当前 MTU=%u，单次可收 %uB，仪表会停在 SYNCING",

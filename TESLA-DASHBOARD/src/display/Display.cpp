@@ -11,8 +11,8 @@
 // 默认的 while(1) 会静默卡死，实车上看不出是内存不够还是代码写错；
 // 这里打一行中文日志再重启，至少串口能留下线索。
 extern "C" void lvglAssertFailed(const char* file, int line) {
-  CFG_LOG("错误: LVGL 断言失败 (%s:%d) —— 内存不足或参数非法，重启",
-          file, line);
+  CFG_LOG_ALWAYS("错误: LVGL 断言失败 (%s:%d) —— 内存不足或参数非法，重启",
+                 file, line);
   Serial.flush();
   delay(100);
   esp_restart();
@@ -24,9 +24,9 @@ extern "C" void lvglAssertFailed(const char* file, int line) {
 extern "C" void* lvglPoolAlloc(size_t size) {
   void* p = heap_caps_aligned_alloc(16, size, MALLOC_CAP_8BIT);
   if (p == nullptr) {
-    CFG_LOG("错误: LVGL 池申请 %u B 失败（ESP 空闲 %u B / 最大块 %u B）",
-            (unsigned)size, (unsigned)ESP.getFreeHeap(),
-            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    CFG_LOG_ALWAYS("错误: LVGL 池申请 %u B 失败（ESP 空闲 %u B / 最大块 %u B）",
+                   (unsigned)size, (unsigned)ESP.getFreeHeap(),
+                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     Serial.flush();
     delay(100);
     esp_restart();  // 没有池，LVGL 后续必然写 NULL：直接重启等下次

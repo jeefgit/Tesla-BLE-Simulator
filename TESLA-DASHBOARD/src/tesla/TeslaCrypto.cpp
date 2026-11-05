@@ -313,6 +313,7 @@ bool parseHexKey(const char* hex, uint8_t out[32]) {
 // 串口打印完整 BLE 报文（每行 32 字节，附「已打印/总长」），
 // 便于直接与模拟器/官方客户端抓包逐字节对照。
 void logHexDump(const char* tag, const uint8_t* data, size_t len) {
+#if CFG_DEBUG_LOG
   constexpr size_t kPerLine = 32;
   char line[kPerLine * 3 + 1];
   for (size_t off = 0; off < len; off += kPerLine) {
@@ -327,6 +328,11 @@ void logHexDump(const char* tag, const uint8_t* data, size_t len) {
     if (p) line[p - 1] = '\0';  // 去掉行尾空格
     CFG_LOG("%s %u/%u: %s", tag, (unsigned)(off + n), (unsigned)len, line);
   }
+#else
+  (void)tag;
+  (void)data;
+  (void)len;
+#endif
 }
 
 // ── RoutableMessage 字段解析辅助 ─────────────────────────────────
@@ -1217,6 +1223,7 @@ bool TeslaCrypto::handleResponse(const uint8_t* ciphertext, size_t len,
     return false;
   }
 
+#if CFG_DEBUG_LOG
   // 打印每次响应的完整报文内容（用于分析真车响应结构）
   // 第一条响应额外标记并尽量多打印内容
   const bool isFirst = !m_firstResponseLogged;
@@ -1293,6 +1300,7 @@ bool TeslaCrypto::handleResponse(const uint8_t* ciphertext, size_t len,
   if (bytesPrinted < len) {
     CFG_LOG("      ... 还有 %u 字节未显示", (unsigned)(len - bytesPrinted));
   }
+#endif  // CFG_DEBUG_LOG
 
   m_lastRespCounter = counter;
   ++m_responsesOk;

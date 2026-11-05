@@ -215,5 +215,20 @@
 // ---------------------------------------------------------------------------
 // 调试日志
 // ---------------------------------------------------------------------------
+// 总开关：0 = 关闭全部 CFG_LOG 调试输出（默认，避免刷屏/拖慢主循环）
+//         1 = 打开，排查 BLE/握手/协议问题时改成 1 重新编译
+// 关闭时 CFG_LOG 会被编译器优化成空语句，参数和 hex dump 也不会再计算。
+#define CFG_DEBUG_LOG 0
+
+#if CFG_DEBUG_LOG
 #define CFG_LOG(fmt, ...) \
+  Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f, ##__VA_ARGS__)
+#else
+#define CFG_LOG(fmt, ...) \
+  do { } while (0)
+#endif
+
+// 关键错误日志（LVGL 断言 / 内存申请失败等）：不受 CFG_DEBUG_LOG 影响，
+// 崩溃重启前始终输出，方便串口定位。
+#define CFG_LOG_ALWAYS(fmt, ...) \
   Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f, ##__VA_ARGS__)
