@@ -159,8 +159,10 @@ class Dispatcher:
         gear = str(data.get("gear", "P"))[:1].upper()
         gear_field = {"P": "P", "R": "R", "N": "N", "D": "D"}.get(gear, "SNA")
         getattr(ds.shift_state, gear_field).SetInParent()
-        ds.speed_float = float(data.get("speed_kmh", 0.0))
-        ds.speed = int(max(0, min(255, round(float(data.get("speed_kmh", 0.0)) * 0.621371))))
+        # 车端字段单位是英里/小时（和真车一致），输入 mock_data 是 km/h
+        speed_kmh = float(data.get("speed_kmh", 0.0))
+        ds.speed_float = speed_kmh * 0.621371
+        ds.speed = int(max(0, min(255, round(speed_kmh * 0.621371))))
         ds.power = int(round(float(data.get("motor_power_kw", 0.0))))
         ds.timestamp.seconds = now
 
@@ -172,9 +174,11 @@ class Dispatcher:
             cs.charging_state.Disconnected.SetInParent()
         cs.battery_level = int(data.get("battery_level", 0))
         cs.usable_battery_level = int(data.get("battery_level", 0))
-        cs.battery_range = float(data.get("battery_range_km", 0.0))
-        cs.ideal_battery_range = float(data.get("battery_range_km", 0.0))
-        cs.est_battery_range = float(data.get("battery_range_km", 0.0))
+        # 车端 battery_range 单位是英里（和真车一致），输入 mock_data 是 km
+        range_mi = float(data.get("battery_range_km", 0.0)) * 0.621371
+        cs.battery_range = range_mi
+        cs.ideal_battery_range = range_mi
+        cs.est_battery_range = range_mi
         cs.charger_power = int(round(float(data.get("charge_power_kw", 0.0))))
         cs.charge_port_door_open = charging
         cs.charge_limit_soc = 80

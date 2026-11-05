@@ -13,6 +13,15 @@
 // 目标车辆
 // ---------------------------------------------------------------------------
 
+// 车端通过 GetVehicleData 返回的距离/速度原始单位是英里（mph / mi），
+// 固件内部统一用公里（km/h / km），解析时换算。
+//   1 = 车端原始值为英里，换算成公里（真车，默认）
+//   0 = 车端已经给公里（tesla_protocol/dispatcher.py 模拟器目前发的是 km）
+#define CFG_TESLA_UNITS_MILES 1
+
+// 英里 → 公里
+#define CFG_MILES_TO_KM 1.609344f
+
 // 车辆识别号：模拟器启动参数 --vin 必须与此一致（默认值已按本车 VIN 配置）
 #define CFG_TESLA_VIN "LRWYGCFJ8RC571213"
 

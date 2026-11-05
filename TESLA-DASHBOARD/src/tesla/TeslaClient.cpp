@@ -11,6 +11,15 @@ namespace {
 // 数值合理性：范围检查同时天然排除了 NaN/Inf（NaN 与任何数比较都为 false）
 inline bool inRange(float v, float lo, float hi) { return v >= lo && v <= hi; }
 
+// 车端 GetVehicleData 的英里值 → 公里（真车 speed_float / battery_range 均为英里）
+inline float teslaMilesToKm(float miles) {
+#if CFG_TESLA_UNITS_MILES
+  return miles * CFG_MILES_TO_KM;
+#else
+  return miles;
+#endif
+}
+
 // 打印前若干字节的 hex，用于诊断入站通知/帧
 void formatHexPrefix(char* out, size_t outSize, const uint8_t* p, size_t n) {
   if (!out || outSize == 0) return;
@@ -60,7 +69,7 @@ bool decodeChargeState(pb::Reader& r) {
     } else if (f == 111 && w == pb::WIRE_FIXED32) {
       float fv = 0;
       if (r.readFloat(&fv)) {
-        v.rangeKm = fv;
+        v.rangeKm = teslaMilesToKm(fv);  // 车端单位：英里
         bits |= VF_RANGE;
       }
     } else if (f == 122 && w == pb::WIRE_VARINT) {
@@ -142,7 +151,7 @@ bool decodeDriveState(pb::Reader& r) {
     } else if (f == 106 && w == pb::WIRE_FIXED32) {
       float fv = 0;
       if (r.readFloat(&fv)) {
-        v.speedKmh = fv;
+        v.speedKmh = teslaMilesToKm(fv);  // 车端单位：mph
         bits |= VF_SPEED;
       }
     } else if (f == 102 && w == pb::WIRE_VARINT) {
@@ -150,7 +159,7 @@ bool decodeDriveState(pb::Reader& r) {
       if (!(bits & VF_SPEED)) {
         uint64_t raw = 0;
         if (r.readVarint(&raw)) {
-          v.speedKmh = (float)(uint32_t)raw * 1.609344f;
+          v.speedKmh = teslaMilesToKm((float)(uint32_t)raw);
           bits |= VF_SPEED;
         }
       } else {
