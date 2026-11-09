@@ -70,8 +70,24 @@ ESP32-S3-ROUND-DISPLAY/
 ## 界面实现
 
 固件已通过 Arduino_GFX 初始化 CO5300 QSPI 面板，并用 LVGL 9 实现设计稿中的
-行驶、充电、断连/扫描和配钥页面。当前 `DashboardApp` 使用演示快照展示行驶页面；
-要显示实时车辆数据，仍需将 `TeslaBleBackend` 接入 `UiModel`。CST9217 触摸输入尚未接入。
+行驶、充电、断连/扫描和配钥页面。实时数据由 `TeslaBleBackend` 提供：
+`src/data/TeslaUiSource.cpp` 把 `VehicleState` / `SourceStatus` 映射成 `UiModel`，
+`DashboardApp` 每轮主循环刷新一次。`include/config.h` 中的 `CFG_DEMO_MODE`
+设为 `1` 可回到静态演示数据。CST9217 触摸输入尚未接入。
+
+BLE 配置在 `include/config.h`：
+
+```cpp
+#define CFG_TESLA_VIN "LRWYGCFJ8RC571213"
+#define CFG_TESLA_NAME ""        // 留空 = 由 VIN 推导广播名
+#define CFG_TESLA_UNITS_MILES 1  // 真车速度/续航原始单位为英里
+#define CFG_TESLA_CRYPTO 1       // 加密握手 + GetVehicleData
+#define CFG_DEBUG_LOG 1          // 联调日志，稳定后可改 0
+```
+
+真实私钥放在 `include/secrets/tesla_client_key.h`（已被 `.gitignore` 忽略），
+缺失时使用后端内置的测试密钥。工程通过 `lib_extra_dirs = ..` 引用仓库根目录的
+`TeslaBleBackend`，无需复制库源码。
 
 ## PlatformIO
 

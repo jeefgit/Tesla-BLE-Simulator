@@ -12,4 +12,7 @@ void setup() {
   dashboard.begin();
 }
 
-void loop() { dashboard.loop(); }
+void loop() {
+  dashboard.loop();
+  delay(2);
+}

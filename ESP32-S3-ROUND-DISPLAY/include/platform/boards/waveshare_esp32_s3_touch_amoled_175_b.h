@@ -8,6 +8,10 @@ inline constexpr BoardProfile kWaveshareEsp32S3TouchAmoled175B = {
     "CST9217 I2C",
     466,
     466,
+    // Waveshare's own example constructs the panel with col_offset1 = 6:
+    // the 466 px glass sits 6 columns into the CO5300's 480 px RAM.
+    6,
+    0,
     4,
     5,
     6,

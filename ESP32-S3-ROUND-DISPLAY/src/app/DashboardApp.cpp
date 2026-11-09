@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "config.h"
 #include "display/RoundDisplay.h"
 #include "ui/LvglDashboard.h"
 
@@ -18,6 +19,9 @@ void DashboardApp::begin() {
     return;
   }
   dashboard.begin();
+#if !CFG_DEMO_MODE
+  m_source.begin();
+#endif
   dashboard.render(m_model);
   m_initialized = true;
 }
@@ -29,6 +33,10 @@ void DashboardApp::loop() {
     delay(1000);
     return;
   }
+#if !CFG_DEMO_MODE
+  m_source.loop();
+  m_model = m_source.model();
+#endif
   const uint32_t now = millis();
   if (now - m_lastRenderMs >= 50) {
     dashboard.render(m_model);

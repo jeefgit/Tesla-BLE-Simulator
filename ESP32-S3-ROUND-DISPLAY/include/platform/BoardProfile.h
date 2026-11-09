@@ -10,6 +10,11 @@ struct BoardProfile {
   uint16_t width;
   uint16_t height;
 
+  // The panel is smaller than the controller RAM and is not at its origin.
+  // These offsets are what the CO5300 CASET/PASET window needs added.
+  uint8_t panelOffsetX;
+  uint8_t panelOffsetY;
+
   // Four data lines plus clock and chip select for the QSPI display bus.
   int8_t pinLcdSio0;
   int8_t pinLcdSio1;

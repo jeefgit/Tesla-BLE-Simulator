@@ -52,9 +52,26 @@ lv_obj_t* makePanel(lv_obj_t* parent, int32_t x, int32_t y, int32_t width,
 }
 
 void setScale(lv_obj_t* object, int32_t scale) {
-  lv_obj_set_style_transform_pivot_x(object, lv_obj_get_width(object) / 2, 0);
-  lv_obj_set_style_transform_pivot_y(object, lv_obj_get_height(object) / 2, 0);
+  // Use percentage pivots: they are resolved at render time from the final
+  // object size. lv_obj_get_width()/height() would still report the pre-layout
+  // size here, which moved scaled labels far to the right/top.
+  lv_obj_set_style_transform_pivot_x(object, lv_pct(50), 0);
+  lv_obj_set_style_transform_pivot_y(object, lv_pct(50), 0);
   lv_obj_set_style_transform_scale(object, scale, 0);
+}
+
+// A scaled label whose box is exactly one line high. The text then fills the
+// box, so scaling around the 50%/50% pivot keeps it centered on both axes.
+lv_obj_t* makeScaledLabel(lv_obj_t* parent, int32_t centerX, int32_t centerY,
+                          const char* text, const lv_font_t* font,
+                          lv_color_t color, int32_t scale) {
+  const int32_t lineHeight = lv_font_get_line_height(font);
+  lv_obj_t* label =
+      makeLabel(parent, centerX - kScreenSize / 2, centerY - lineHeight / 2,
+                kScreenSize, lineHeight, text, font, color,
+                LV_TEXT_ALIGN_CENTER);
+  setScale(label, scale);
+  return label;
 }
 
 const char* linkText(UiLinkState state) {
@@ -200,9 +217,8 @@ void LvglDashboard::buildDriving() {
   lv_obj_set_size(m_speedGroup, 466, 466);
   lv_obj_set_scrollable(m_speedGroup, false);
 
-  m_speedLabel = makeLabel(m_speedGroup, 78, 76, 310, 150, "--",
-                           &lv_font_montserrat_48, kText, LV_TEXT_ALIGN_CENTER);
-  setScale(m_speedLabel, 640);
+  m_speedLabel = makeScaledLabel(m_speedGroup, 233, 163, "--",
+                                 &lv_font_montserrat_48, kText, 640);
   makeLabel(m_speedGroup, 0, 235, 466, 18, "K M / H",
             &lv_font_montserrat_10, kDim, LV_TEXT_ALIGN_CENTER);
 
@@ -260,10 +276,8 @@ void LvglDashboard::buildCharging() {
   lv_obj_set_style_line_width(bolt, 4, 0);
   lv_obj_set_style_line_rounded(bolt, true, 0);
 
-  m_chargePowerLabel =
-      makeLabel(m_chargeGroup, 65, 123, 336, 85, "--.- kW",
-                &lv_font_montserrat_48, kText, LV_TEXT_ALIGN_CENTER);
-  setScale(m_chargePowerLabel, 410);
+  m_chargePowerLabel = makeScaledLabel(m_chargeGroup, 233, 165, "--.- kW",
+                                       &lv_font_montserrat_48, kText, 410);
   m_chargeCaption = makeLabel(m_chargeGroup, 0, 221, 466, 18,
                               "CHARGING", &lv_font_montserrat_10, kGreen,
                               LV_TEXT_ALIGN_CENTER);
@@ -349,8 +363,8 @@ void LvglDashboard::buildCards() {
                                LV_TEXT_ALIGN_LEFT);
 
   m_temperatureLabel =
-      makeLabel(screen, 60, 412, 346, 18, "OUT --°C    IN --°C",
-                &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
+      makeLabel(screen, 60, 406, 346, 26, "OUT --°C    IN --°C",
+                &lv_font_montserrat_16, kFaint, LV_TEXT_ALIGN_CENTER);
 }
 
 void LvglDashboard::buildLinkPage() {
@@ -362,10 +376,8 @@ void LvglDashboard::buildLinkPage() {
 
   makeLabel(m_linkPage, 33, 82, 400, 18, "TESLA BLE LINK",
             &lv_font_montserrat_10, kAmber, LV_TEXT_ALIGN_CENTER);
-  m_linkTitle = makeLabel(m_linkPage, 24, 117, 418, 62, "SCANNING",
-                          &lv_font_montserrat_48, kText,
-                          LV_TEXT_ALIGN_CENTER);
-  setScale(m_linkTitle, 300);
+  m_linkTitle = makeScaledLabel(m_linkPage, 233, 148, "SCANNING",
+                                &lv_font_montserrat_48, kText, 300);
   m_linkSubtitle =
       makeLabel(m_linkPage, 31, 188, 404, 28,
                 "SEARCHING FOR TESLA BROADCAST",
@@ -391,17 +403,13 @@ void LvglDashboard::buildPairingPage() {
 
   makeLabel(m_pairPage, 35, 83, 396, 18, "ADD NEW KEY",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
-  m_pairTitle = makeLabel(m_pairPage, 22, 111, 422, 58, "TAP CARD",
-                          &lv_font_montserrat_48, kAmber,
-                          LV_TEXT_ALIGN_CENTER);
-  setScale(m_pairTitle, 280);
+  m_pairTitle = makeScaledLabel(m_pairPage, 233, 140, "TAP CARD",
+                                &lv_font_montserrat_48, kAmber, 280);
   makeLabel(m_pairPage, 32, 173, 402, 25,
             "ON CONSOLE READER BY ARMREST", &lv_font_montserrat_10, kDim,
             LV_TEXT_ALIGN_CENTER);
-  m_pairCount = makeLabel(m_pairPage, 54, 199, 358, 112, "30",
-                          &lv_font_montserrat_48, kText,
-                          LV_TEXT_ALIGN_CENTER);
-  setScale(m_pairCount, 500);
+  m_pairCount = makeScaledLabel(m_pairPage, 233, 255, "30",
+                                &lv_font_montserrat_48, kText, 500);
 
   lv_obj_t* bar = lv_obj_create(m_pairPage);
   lv_obj_remove_style_all(bar);

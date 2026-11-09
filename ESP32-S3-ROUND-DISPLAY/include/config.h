@@ -1,5 +1,42 @@
 #pragma once
 
-// Keep board-specific values in platform/boards after confirming the exact module.
-#define CFG_DEMO_MODE 1
+#include <Arduino.h>
+
+// ---------------------------------------------------------------------------
+// 演示 / 真实数据
+//   1 = 保留 UiModel 的静态示例值（无车联调 UI）
+//   0 = 启动 TeslaBleBackend，扫描并连接车辆
+// ---------------------------------------------------------------------------
+#define CFG_DEMO_MODE 0
 #define CFG_LOG_ENABLED 1
+
+// ---------------------------------------------------------------------------
+// TeslaBleBackend 配置（tesla_backend_user_config.h 会包含本文件）
+// ---------------------------------------------------------------------------
+#define CFG_TESLA_VIN "LRWYGCFJ8RC571213"
+
+// 留空 = 由 VIN 推导广播名：S + sha1(VIN) 前 16 位 hex + C
+#define CFG_TESLA_NAME ""
+
+// 1 = 车端原始值为英里，解析时换算成公里（真车）
+#define CFG_TESLA_UNITS_MILES 1
+
+// 1 = 先完成加密握手，再用 GetVehicleData 轮询
+// 0 = 只接收 53B 旁路 SimPayload（模拟器调试用）
+#define CFG_TESLA_CRYPTO 1
+
+// 本地真实私钥（被 .gitignore 忽略，不提交）；缺失时用后端内置测试密钥。
+#if defined(__has_include)
+#if __has_include("secrets/tesla_client_key.h")
+#include "secrets/tesla_client_key.h"
+#endif
+#endif
+
+// 后端串口日志：首次联调建议 1，稳定后改 0 减少刷屏。
+#define CFG_DEBUG_LOG 1
+#if CFG_DEBUG_LOG
+#define CFG_LOG(fmt, ...) \
+  Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f, ##__VA_ARGS__)
+#define CFG_LOG_ALWAYS(fmt, ...) \
+  Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f, ##__VA_ARGS__)
+#endif

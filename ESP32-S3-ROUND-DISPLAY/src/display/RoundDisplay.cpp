@@ -19,7 +19,8 @@ bool RoundDisplay::begin() {
       board.pinLcdCs, board.pinLcdPclk, board.pinLcdSio0, board.pinLcdSio1,
       board.pinLcdSio2, board.pinLcdSio3);
   m_gfx = new Arduino_CO5300(bus, board.pinLcdReset, 0, board.width,
-                             board.height);
+                             board.height, board.panelOffsetX,
+                             board.panelOffsetY, 0, 0);
   s_gfx = m_gfx;
 
   if (!m_gfx->begin()) {
