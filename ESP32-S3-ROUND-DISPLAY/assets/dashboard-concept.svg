@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="466" height="466" viewBox="0 0 466 466" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="58" y1="24" x2="412" y2="454" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111820"/>
+      <stop offset="1" stop-color="#05080C"/>
+    </linearGradient>
+    <linearGradient id="arc" x1="114" y1="72" x2="359" y2="239" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4F7FA"/>
+      <stop offset=".48" stop-color="#E82127"/>
+      <stop offset="1" stop-color="#E82127" stop-opacity=".18"/>
+    </linearGradient>
+    <linearGradient id="car" x1="144" y1="214" x2="325" y2="268" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#9AA8B5"/>
+    </linearGradient>
+    <filter id="glow" x="146" y="106" width="174" height="86" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <clipPath id="screen">
+      <circle cx="233" cy="233" r="225"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#screen)">
+    <circle cx="233" cy="233" r="233" fill="#020406"/>
+    <circle cx="233" cy="233" r="225" fill="url(#bg)"/>
+    <circle cx="233" cy="233" r="224" stroke="#29313A" stroke-width="2"/>
+
+    <path d="M73 207a160 160 0 0 1 320 0" stroke="#26303A" stroke-width="7" stroke-linecap="round"/>
+    <path d="M73 207a160 160 0 0 1 320 0" stroke="url(#arc)" stroke-width="7" stroke-linecap="round" stroke-dasharray="344 503"/>
+    <path d="M93 146l-8-4M120 94l-7-7M177 54l-3-9M289 54l3-9M346 94l7-7M373 146l8-4" stroke="#6F7B86" stroke-width="2" stroke-linecap="round"/>
+    <path d="M163 110a82 82 0 0 1 140 0" stroke="#E82127" stroke-opacity=".55" stroke-width="24" filter="url(#glow)"/>
+
+    <text x="233" y="149" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="72" font-weight="300" letter-spacing="-4" text-anchor="middle">0</text>
+    <text x="233" y="171" fill="#AAB5BF" font-family="Arial, sans-serif" font-size="12" font-weight="600" letter-spacing="3" text-anchor="middle">KM/H</text>
+    <text x="233" y="194" fill="#E82127" font-family="Arial, sans-serif" font-size="10" font-weight="700" letter-spacing="2" text-anchor="middle">P  ·  PARK</text>
+
+    <g transform="translate(0 -52)">
+      <rect x="88" y="273" width="290" height="46" rx="13" fill="#111920" stroke="#27323C"/>
+      <path d="M233 282v28" stroke="#29343E"/>
+      <path d="m105 286 5 5-5 5" stroke="#E82127" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="118" y="290" fill="#778591" font-family="Arial, sans-serif" font-size="8" font-weight="600" letter-spacing="1">OUTPUT POWER</text>
+      <text x="118" y="308" fill="#F1F4F6" font-family="Arial, sans-serif" font-size="15" font-weight="600">0.0 <tspan fill="#9DA9B3" font-size="9">kW</tspan></text>
+      <path d="m250 296 5-5 5 5" stroke="#35D49A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="269" y="290" fill="#778591" font-family="Arial, sans-serif" font-size="8" font-weight="600" letter-spacing="1">REGEN POWER</text>
+      <text x="269" y="308" fill="#F1F4F6" font-family="Arial, sans-serif" font-size="15" font-weight="600">0.0 <tspan fill="#9DA9B3" font-size="9">kW</tspan></text>
+    </g>
+
+    <g transform="translate(0 -52)">
+      <rect x="95" y="329" width="276" height="47" rx="13" fill="#111920" stroke="#27323C"/>
+      <path d="M232 338v29" stroke="#29343E"/>
+      <text x="111" y="347" fill="#778591" font-family="Arial, sans-serif" font-size="8" font-weight="600" letter-spacing="1">BATTERY</text>
+      <text x="111" y="367" fill="#35D49A" font-family="Arial, sans-serif" font-size="17" font-weight="600">82%</text>
+      <text x="251" y="347" fill="#778591" font-family="Arial, sans-serif" font-size="8" font-weight="600" letter-spacing="1">EST. RANGE</text>
+      <text x="251" y="367" fill="#F2F5F7" font-family="Arial, sans-serif" font-size="17" font-weight="500">386 <tspan fill="#9DA9B3" font-size="10">KM</tspan></text>
+    </g>
+    <g transform="translate(0 -52)">
+      <rect x="95" y="385" width="126" height="25" rx="9" fill="#111920" stroke="#27323C"/>
+      <text x="106" y="401" fill="#73818D" font-family="Arial, sans-serif" font-size="8" font-weight="600" letter-spacing=".5">CABIN</text>
+      <text x="210" y="402" fill="#F1F4F6" font-family="Arial, sans-serif" font-size="12" font-weight="600" text-anchor="end">22°C</text>
+    </g>
+    <g transform="translate(0 -52)">
+      <rect x="245" y="385" width="126" height="25" rx="9" fill="#111920" stroke="#27323C"/>
+      <text x="256" y="401" fill="#73818D" font-family="Arial, sans-serif" font-size="8" font-weight="600" letter-spacing=".5">OUTSIDE</text>
+      <text x="360" y="402" fill="#F1F4F6" font-family="Arial, sans-serif" font-size="12" font-weight="600" text-anchor="end">18°C</text>
+    </g>
+
+    <text x="184" y="410" fill="#5D6974" font-family="Arial, sans-serif" font-size="8" letter-spacing="1" text-anchor="end">09:41</text>
+    <path d="M194 407h1v6h-1" fill="#34404A"/>
+    <circle cx="207" cy="407" r="3" fill="#35D49A"/>
+    <text x="215" y="410" fill="#9AA7B2" font-family="Arial, sans-serif" font-size="8" letter-spacing="1">BLUETOOTH CONNECTED</text>
+  </g>
+</svg>
