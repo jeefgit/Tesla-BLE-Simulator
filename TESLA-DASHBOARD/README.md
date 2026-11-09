@@ -49,7 +49,7 @@
 - **AppController**（装配层）：`source.loop()` → 组装 `UiModel` → `ui.render()` → `display.loop()`。
 - **Dashboard**（UI 层）：只消费 `core/UiModel.h`，换成别的屏/布局时新增 `IDashboard` 实现即可。
 - **Display / BoardProfile**（平台层）：引脚、面板、旋转、缓冲全部来自板型表，换板不改业务代码。
-- **TeslaBleBackend**（依赖库）：位于 `lib/TeslaBleBackend/`，封装 NimBLE 链路、Tesla 协议和车辆状态接口，不依赖仪表 UI 或显示驱动。
+- **TeslaBleBackend**（依赖库）：位于仓库根目录，与 `TESLA-DASHBOARD/` 并列；封装 NimBLE 链路、Tesla 协议和车辆状态接口，不依赖仪表 UI 或显示驱动。
 
 详见 `docs/ARCHITECTURE.md`。
 
@@ -68,11 +68,6 @@
 ```
 TESLA-DASHBOARD/
 ├── platformio.ini              # PlatformIO 配置（板型/库依赖，obd 已排除编译）
-├── lib/
-│   └── TeslaBleBackend/        # 可独立使用的 PlatformIO 库
-│       ├── library.json
-│       ├── README.md
-│       └── src/                # 公共接口、领域模型、BLE 与 Tesla 协议实现
 ├── include/
 │   ├── config.h                # 本仪表应用配置（VIN、UI、板型等）
 │   ├── tesla_backend_user_config.h # 将仪表配置传给后端库
@@ -94,6 +89,8 @@ TESLA-DASHBOARD/
     ├── data/MockSource.cpp
     └── display/Display.cpp
     （obd/ 保留但不编译）
+
+TeslaBleBackend/                 # 与 TESLA-DASHBOARD 同级的可复用 PlatformIO 库
 ```
 
 ## 快速开始
@@ -128,8 +125,8 @@ pio device monitor      # 打开 115200 串口
 后端库只面向 **ESP32 + Arduino**，BLE 由 NimBLE-Arduino 提供；不依赖 LVGL、
 LovyanGFX 或本项目的屏幕代码。
 
-1. 将 `lib/TeslaBleBackend/` 放入新项目的 `lib/TeslaBleBackend/`，或在 `platformio.ini`
-   中用 `lib_extra_dirs` 指向本仓库的 `TESLA-DASHBOARD/lib`。
+1. 将仓库根目录的 `TeslaBleBackend/` 放入新项目的 `lib/TeslaBleBackend/`，或在
+   `platformio.ini` 中用 `lib_extra_dirs` 指向包含 `TeslaBleBackend/` 的目录。
 2. 在新项目的 `lib_deps` 中加入 `h2zero/NimBLE-Arduino@^2.5.1`。
 3. 建立 `include/tesla_backend_user_config.h`，配置至少 VIN 与客户端私钥，例如：
 

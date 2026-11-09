@@ -7,8 +7,8 @@
 
 | 层 | 目录 | 职责 | 依赖 |
 |---|---|---|---|
-| 领域模型 | `lib/TeslaBleBackend/src/core/` | `VehicleState` / `LinkState` / `PairingHint` / `SourceStatus` | Arduino 基础类型 |
-| 后端依赖库 | `lib/TeslaBleBackend/` | `IVehicleSource`、`TeslaBleSource`、BLE 链路、Tesla 加密与配钥协议 | ESP32 Arduino、NimBLE-Arduino |
+| 领域模型 | `TeslaBleBackend/src/core/` | `VehicleState` / `LinkState` / `PairingHint` / `SourceStatus` | Arduino 基础类型 |
+| 后端依赖库 | `TeslaBleBackend/` | `IVehicleSource`、`TeslaBleSource`、BLE 链路、Tesla 加密与配钥协议 | ESP32 Arduino、NimBLE-Arduino |
 | 应用数据源 | `src/data/` | 仪表演示数据源 `MockSource` | 后端公开模型 |
 | 应用装配 | `include/app/AppController.h` | 组合数据源 + UI + 屏幕，组装 `UiModel` | 全部接口 |
 | 前端 UI | `include/app/Dashboard.h`、`src/app/Dashboard.cpp`、`include/ui/` | `IDashboard` 实现，只读 `UiModel` | core + LVGL |
@@ -111,12 +111,12 @@ build_flags = ${env.build_flags} -DBOARD_ESP32S3_4848S040
 
 ## 6. 后端库使用边界
 
-- PlatformIO 包目录：`TESLA-DASHBOARD/lib/TeslaBleBackend/`。
+- PlatformIO 包目录：仓库根目录下的 `TeslaBleBackend/`，与 `TESLA-DASHBOARD/` 并列。
 - 公共入口：`#include <TeslaBleBackend.h>`；`TeslaBleBackend` 提供 `begin()`、`loop()`、
   `state()`、`status()`。
 - VIN、密钥和可覆盖参数通过项目 `include/tesla_backend_user_config.h` 配置；
   本仪表通过该文件转引自己的 `config.h`。
-- 该子库尚未拆成独立 Git 仓库，其他工程可复制库目录或将其加入 `lib_extra_dirs`；
+- 该库尚未拆成独立 Git 仓库，其他工程可复制库目录或将其父目录加入 `lib_extra_dirs`；
   发布/直接 Git 依赖需后续独立打包。
 
 ## 7. 回归检查清单
