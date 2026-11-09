@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tesla Round Dashboard · UI Concept</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #06080b;
+    --fg: #f5f7fa;
+    --dim: #8a93a6;
+    --faint: #5a6377;
+    --red: #e82127;
+    --green: #21c15e;
+    --amber: #ffb340;
+    --line: #1b2430;
+    --card: #0c1218;
+    --card-line: #1d2733;
+    --font: "Bahnschrift", "DIN Alternate", "Segoe UI", Arial, sans-serif;
+    --mono: "Cascadia Mono", Consolas, monospace;
+  }
+
+  body {
+    min-width: 1200px;
+    padding: 46px 0 90px;
+    color: var(--fg);
+    font-family: var(--font);
+    background:
+      radial-gradient(1100px 560px at 50% -8%, #121a23 0%, #06080b 58%, #040507 100%);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .board { width: 1120px; margin: 0 auto; }
+
+  /* ---------- page header ---------- */
+  .page-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 42px; }
+  .eyebrow {
+    font-size: 10px; font-weight: 600; letter-spacing: 4px; color: var(--red);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before { content: ""; width: 24px; height: 1px; background: var(--red); }
+  h1 { margin-top: 14px; font-size: 32px; font-weight: 300; letter-spacing: .5px; }
+  h1 b { font-weight: 500; }
+  .page-meta { margin-top: 12px; font-size: 11px; letter-spacing: .6px; color: var(--faint); }
+  .page-meta span { color: var(--dim); }
+  .page-meta i { margin: 0 8px; font-style: normal; color: #2c3641; }
+
+  .guide-toggle {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 10px; letter-spacing: 1.6px; color: var(--dim);
+    cursor: pointer; user-select: none; padding-bottom: 6px;
+  }
+  .guide-toggle input { display: none; }
+  .guide-toggle .box {
+    width: 14px; height: 14px; border: 1px solid #33404e; border-radius: 4px;
+    display: grid; place-items: center; transition: .15s;
+  }
+  .guide-toggle .box::after {
+    content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--red);
+    transform: scale(0); transition: .15s;
+  }
+  #guides:checked + .board .guide-toggle .box { border-color: var(--red); }
+  #guides:checked + .board .guide-toggle .box::after { transform: scale(1); }
+  #guides:checked + .board .guides { display: block; }
+
+  /* ---------- screen grid ---------- */
+  .screens {
+    display: grid;
+    grid-template-columns: 466px 466px;
+    gap: 58px 60px;
+    justify-content: center;
+    margin-bottom: 78px;
+  }
+  .item { width: 466px; }
+  .item-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
+  .item-head .idx { font-size: 10px; letter-spacing: 2px; color: var(--red); font-weight: 600; }
+  .item-head .name { font-size: 13px; letter-spacing: 1px; color: #dbe3ec; font-weight: 500; }
+  .item-head .name em { font-style: normal; color: var(--faint); font-size: 10px; letter-spacing: 1.4px; margin-left: 8px; }
+  .item-head .note { font-size: 9px; letter-spacing: 1px; color: #4d5866; }
+
+  /* ---------- round screen ---------- */
+  .screen {
+    position: relative;
+    width: 466px;
+    height: 466px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 35%, #101923 0%, #070b10 56%, #020406 100%);
+    box-shadow:
+      0 0 0 1px #141b23,
+      0 30px 90px rgba(0, 0, 0, .85),
+      inset 0 0 90px rgba(0, 0, 0, .65);
+  }
+  .screen::after {
+    content: ""; position: absolute; inset: 5px; border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, .045); pointer-events: none;
+  }
+  .wash { position: absolute; inset: 0; pointer-events: none; }
+  .driving .wash { background: radial-gradient(ellipse at 50% 30%, rgba(232, 33, 39, .15), transparent 58%); }
+  .charging .wash { background: radial-gradient(ellipse at 50% 32%, rgba(33, 193, 94, .13), transparent 58%); }
+  .offline .wash { background: radial-gradient(ellipse at 50% 34%, rgba(255, 179, 64, .07), transparent 55%); }
+
+  /* ---------- top status bar ---------- */
+  .topbar {
+    position: absolute; top: 44px; left: 113px; right: 113px; height: 18px;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 9px; font-weight: 600; letter-spacing: 1.2px; color: var(--faint);
+  }
+  .topbar .brand { color: #c9d3de; letter-spacing: 2.4px; }
+  .topbar .link { display: flex; align-items: center; gap: 5px; color: #b7c2ce; }
+  .topbar .dot {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 7px rgba(33, 193, 94, .9);
+  }
+  .offline .topbar .link { color: #6a7482; }
+  .offline .topbar .dot { background: #3a4350; box-shadow: none; }
+  .pairing .topbar .link { color: var(--amber); }
+  .pairing .topbar .dot { background: var(--amber); box-shadow: 0 0 7px rgba(255, 179, 64, .8); }
+
+  /* ---------- gauge ---------- */
+  .gauge { position: absolute; inset: 0; width: 466px; height: 466px; }
+  .arc-track { fill: none; stroke: #1c2632; stroke-width: 6; stroke-linecap: round; }
+  .offline .arc-track { stroke: #141c25; }
+  .arc-progress { fill: none; stroke-width: 6; stroke-linecap: round; }
+  .tick { stroke: #2b3744; stroke-width: 1.5; stroke-linecap: round; }
+  .tick.major { stroke: #445365; stroke-width: 2; }
+  .offline .tick { stroke: #1a232d; }
+  .offline .tick.major { stroke: #232e3a; }
+  .arc-label {
+    fill: #5a6377; font-size: 9px; font-weight: 600; letter-spacing: 1px;
+    text-anchor: middle; font-family: var(--font);
+  }
+  .offline .arc-label { fill: #333d49; }
+
+  /* ---------- hero ---------- */
+  .speed {
+    position: absolute; top: 88px; left: 0; right: 0; text-align: center;
+    font-size: 142px; line-height: 150px; font-weight: 300;
+    letter-spacing: -5px; font-variant-numeric: tabular-nums; color: #fafbfc;
+    text-shadow: 0 0 34px rgba(255, 255, 255, .08);
+  }
+  .unit {
+    position: absolute; top: 236px; left: 0; right: 0; text-align: center;
+    font-size: 9px; font-weight: 600; letter-spacing: 7px; color: var(--dim);
+    padding-left: 7px;
+  }
+
+  .gears { position: absolute; top: 260px; left: 0; right: 0; display: flex; justify-content: center; gap: 26px; }
+  .gear { position: relative; font-size: 12px; font-weight: 600; letter-spacing: .5px; line-height: 16px; color: #39434f; }
+  .gear.on { color: #fff; }
+  .gear.on::after {
+    content: ""; position: absolute; left: 50%; bottom: -5px; width: 4px; height: 4px;
+    border-radius: 50%; background: var(--red); transform: translateX(-50%);
+    box-shadow: 0 0 6px rgba(232, 33, 39, .8);
+  }
+
+  /* ---------- power ---------- */
+  .power { position: absolute; top: 292px; left: 83px; width: 300px; height: 44px; text-align: center; }
+  .power .cap { font-size: 8px; font-weight: 600; letter-spacing: 2px; color: var(--faint); }
+  .power .val { margin-top: 1px; font-size: 24px; font-weight: 500; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
+  .power .val small { margin-left: 5px; font-size: 9px; font-weight: 600; letter-spacing: 1px; color: var(--dim); }
+  .pbar { position: relative; width: 300px; height: 4px; margin: 7px auto 0; border-radius: 2px; background: #141c25; }
+  .pbar .zero { position: absolute; left: 50%; top: -3px; width: 1px; height: 10px; background: #2c3846; }
+  .pbar .fill {
+    position: absolute; top: 0; left: 50%; height: 4px; border-radius: 2px;
+    background: linear-gradient(90deg, #f5f7fa, #e82127);
+    box-shadow: 0 0 8px rgba(232, 33, 39, .45);
+  }
+
+  /* ---------- cards ---------- */
+  .cards { position: absolute; top: 344px; left: 0; right: 0; display: flex; justify-content: center; gap: 12px; }
+  .card {
+    position: relative; width: 132px; height: 56px; padding: 9px 12px; border-radius: 14px;
+    background: linear-gradient(180deg, rgba(19, 27, 36, .92), rgba(10, 15, 21, .92));
+    border: 1px solid var(--card-line);
+  }
+  .card .cap { font-size: 7.5px; font-weight: 600; letter-spacing: 1.6px; color: var(--faint); }
+  .card .val { margin-top: 3px; font-size: 23px; font-weight: 500; line-height: 1.05; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
+  .card .val span { margin-left: 3px; font-size: 9px; font-weight: 600; letter-spacing: .5px; color: var(--dim); }
+  .card .meter { height: 3px; margin-top: 5px; border-radius: 2px; background: #18212c; }
+  .card .meter i { display: block; height: 3px; border-radius: 2px; background: #f5f7fa; }
+  .card .sub { margin-top: 4px; font-size: 8px; letter-spacing: .4px; color: var(--dim); }
+  .card .sub b { color: var(--green); font-weight: 600; }
+
+  /* ---------- bottom temps ---------- */
+  .temps {
+    position: absolute; top: 414px; left: 0; right: 0;
+    display: flex; justify-content: center; gap: 18px;
+    font-size: 8px; font-weight: 600; letter-spacing: 1.4px; color: var(--faint);
+  }
+  .temps b { color: #aebac6; font-weight: 600; }
+
+  /* ---------- charging ---------- */
+  .charge { position: absolute; top: 94px; left: 0; right: 0; text-align: center; }
+  .bolt { display: block; width: 24px; height: 34px; margin: 0 auto 2px; filter: drop-shadow(0 0 11px rgba(33, 193, 94, .55)); }
+  .kw { font-size: 84px; line-height: 1; font-weight: 300; letter-spacing: -2px; font-variant-numeric: tabular-nums; }
+  .kw span { margin-left: 6px; font-size: 14px; font-weight: 600; letter-spacing: 2px; color: var(--dim); }
+  .chg-cap { margin-top: 8px; font-size: 9px; font-weight: 600; letter-spacing: 3px; color: var(--green); }
+  .socbar {
+    width: 280px; height: 6px; margin: 17px auto 0; border-radius: 3px; overflow: hidden;
+    background: #141c25; border: 1px solid #1d2733;
+  }
+  .socbar i {
+    display: block; height: 100%; width: 78%; border-radius: 3px;
+    background: linear-gradient(90deg, #21c15e, #8af0b4);
+    box-shadow: 0 0 10px rgba(33, 193, 94, .45);
+  }
+  .socmeta {
+    display: flex; justify-content: space-between; width: 280px; margin: 7px auto 0;
+    font-size: 8px; font-weight: 600; letter-spacing: 1px; color: var(--faint);
+  }
+  .socmeta b { color: #c9d3de; font-weight: 600; }
+  .cards.charge-cards { top: 322px; }
+  .charge-cards .meter i { background: var(--green); }
+
+  /* ---------- offline / link state ---------- */
+  .linkstate { position: absolute; top: 84px; left: 0; right: 0; text-align: center; }
+  .linkstate .cap { font-size: 8.5px; font-weight: 600; letter-spacing: 3px; color: var(--amber); }
+  .linkstate h2 { margin-top: 15px; font-size: 46px; font-weight: 300; letter-spacing: 2px; color: #f5f7fa; }
+  .linkstate .sub { margin-top: 9px; font-size: 9px; font-weight: 600; letter-spacing: 2px; color: var(--dim); }
+  .dots { display: flex; justify-content: center; gap: 12px; margin-top: 23px; }
+  .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
+  .dots i:nth-child(1) { opacity: 1; }
+  .dots i:nth-child(2) { opacity: .42; }
+  .dots i:nth-child(3) { opacity: .16; }
+  .steps {
+    display: flex; justify-content: center; align-items: center; gap: 9px;
+    margin-top: 27px; font-size: 8px; font-weight: 600; letter-spacing: 1.5px; color: #39434f;
+  }
+  .steps .on { color: var(--amber); }
+  .steps .sep { color: #2a3542; }
+  .linkmeta { margin-top: 27px; font-size: 8px; letter-spacing: 1.4px; line-height: 18px; color: var(--faint); }
+  .linkmeta b { color: #aebac6; font-weight: 600; }
+  .lhint {
+    position: absolute; top: 344px; left: 0; right: 0; text-align: center;
+    font-size: 8px; font-weight: 600; letter-spacing: 1.6px; color: #4b5665;
+  }
+
+  /* ---------- pairing ---------- */
+  .pair { position: absolute; top: 86px; left: 0; right: 0; text-align: center; }
+  .pair .cap { font-size: 8.5px; font-weight: 600; letter-spacing: 3px; color: var(--faint); }
+  .pair h2 { margin-top: 13px; font-size: 42px; font-weight: 300; letter-spacing: 3px; color: var(--amber); }
+  .pair .sub { margin-top: 11px; font-size: 9px; font-weight: 600; letter-spacing: 2px; color: var(--dim); }
+  .pair .count {
+    margin-top: 10px; font-size: 96px; line-height: 120px; font-weight: 300;
+    letter-spacing: -2px; font-variant-numeric: tabular-nums; color: #f5f7fa;
+  }
+  .pairbar {
+    position: relative; width: 280px; height: 7px; margin: 0 auto; border-radius: 4px;
+    background: #141c25; border: 1px solid #1d2733;
+  }
+  .pairbar i {
+    position: absolute; inset: 0 auto 0 0; width: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, #ffb340, #ffd89b);
+  }
+  .pair .try { margin-top: 12px; font-size: 8px; font-weight: 600; letter-spacing: 1.6px; color: var(--faint); }
+  .pair .status { margin-top: 10px; font-size: 10px; font-weight: 600; letter-spacing: 2px; color: var(--amber); }
+  .pair .hint {
+    position: absolute; top: 300px; left: 0; right: 0; text-align: center;
+    font-size: 8px; font-weight: 600; letter-spacing: 1.4px; color: #4b5665;
+  }
+
+  /* ---------- guides ---------- */
+  .guides { display: none; position: absolute; inset: 0; z-index: 50; pointer-events: none; }
+  .guides .safe { position: absolute; inset: 17px; border: 1px dashed rgba(255, 255, 255, .22); border-radius: 50%; }
+  .guides .cross-h { position: absolute; top: 232px; left: 0; right: 0; height: 1px; background: rgba(232, 33, 39, .35); }
+  .guides .cross-v { position: absolute; left: 232px; top: 0; bottom: 0; width: 1px; background: rgba(232, 33, 39, .35); }
+  .guides .gl {
+    position: absolute; font-size: 7px; letter-spacing: 1px; color: #7f8b9a;
+    background: #0a0f15; padding: 2px 4px; border: 1px solid #24303d; border-radius: 3px;
+  }
+  .guides .g1 { top: 24px; left: 50%; transform: translateX(-50%); }
+  .guides .g2 { top: 214px; left: 26px; }
+  .guides .g3 { top: 214px; right: 26px; }
+
+  /* ---------- spec section ---------- */
+  .spec-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 24px; padding-top: 10px; border-top: 1px solid #121a24; }
+  .spec-head h2 { font-size: 15px; font-weight: 500; letter-spacing: 2px; }
+  .spec-head span { font-size: 9px; letter-spacing: 1.6px; color: var(--faint); }
+  .spec-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 18px; }
+  .panel {
+    padding: 20px; border-radius: 16px; border: 1px solid #141d27;
+    background: linear-gradient(180deg, rgba(15, 22, 30, .75), rgba(8, 12, 17, .75));
+  }
+  .panel h3 { font-size: 9px; font-weight: 600; letter-spacing: 2px; color: var(--faint); margin-bottom: 15px; }
+  .swatches { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
+  .sw { display: flex; align-items: center; gap: 8px; font-size: 8px; letter-spacing: .5px; color: var(--dim); }
+  .sw i { width: 18px; height: 18px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, .08); flex: none; }
+  .sw b { display: block; color: #c9d3de; font-weight: 600; font-size: 8.5px; }
+  .type-row { display: flex; align-items: baseline; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #121a23; }
+  .type-row:last-child { border-bottom: 0; }
+  .type-row .t { color: #c9d3de; }
+  .type-row .s { font-size: 8px; letter-spacing: .8px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .t-hero { font-size: 22px; font-weight: 300; letter-spacing: -1px; }
+  .t-kw { font-size: 17px; font-weight: 300; }
+  .t-title { font-size: 13px; font-weight: 300; letter-spacing: 1px; }
+  .t-val { font-size: 12px; font-weight: 500; }
+  .t-cap { font-size: 7px; font-weight: 600; letter-spacing: 1.4px; color: var(--faint); }
+  .geo { list-style: none; font-size: 9px; line-height: 1.9; color: var(--dim); }
+  .geo li { display: flex; justify-content: space-between; border-bottom: 1px solid #121a23; padding: 4px 0; }
+  .geo li:last-child { border-bottom: 0; }
+  .geo b { color: #c9d3de; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  .map-wrap { padding: 20px 22px; border-radius: 16px; border: 1px solid #141d27; background: rgba(10, 15, 21, .7); }
+  .map-wrap h3 { font-size: 9px; font-weight: 600; letter-spacing: 2px; color: var(--faint); margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 9px; }
+  th {
+    text-align: left; font-weight: 600; letter-spacing: 1.2px; color: #6c7787;
+    padding: 7px 10px; border-bottom: 1px solid #1a232e;
+  }
+  td { padding: 8px 10px; color: #a9b5c2; border-bottom: 1px solid #111923; vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td code { font-family: var(--mono); font-size: 8.5px; color: #e2e8ef; background: #121a24; padding: 1px 5px; border-radius: 4px; }
+  td em { font-style: normal; color: var(--faint); }
+  .accent-red { color: #ff5b60; }
+  .accent-green { color: #4ddb88; }
+  .accent-amber { color: #ffc164; }
+
+  .foot { margin-top: 22px; display: flex; justify-content: space-between; font-size: 8px; letter-spacing: 1.4px; color: #3d4854; }
+</style>
+</head>
+<body>
+<input type="checkbox" id="guides" hidden>
+<div class="board">
+
+  <header class="page-head">
+    <div>
+      <div class="eyebrow">TESLA BLE · ROUND INSTRUMENT</div>
+      <h1>1.75″ 圆形 AMOLED 仪表 <b>界面设计稿</b></h1>
+      <div class="page-meta">
+        Waveshare ESP32-S3-Touch-AMOLED-1.75-B <i>/</i>
+        466 × 466 <span>CO5300 QSPI</span> <i>/</i>
+        实机 1:1 <span>安全圆 R216</span>
+      </div>
+    </div>
+    <label class="guide-toggle" for="guides">
+      <span class="box"></span> 显示安全区 / 中心线
+    </label>
+  </header>
+
+  <div class="screens">
+
+    <!-- ================= 01 DRIVING ================= -->
+    <section class="item">
+      <div class="item-head">
+        <div class="name">行驶 <em>DRIVING</em></div>
+        <div class="note">速度环 · 档位 · 功率 · 电量/续航 · 温度</div>
+      </div>
+      <div class="screen driving" role="img" aria-label="行驶仪表设计稿">
+        <div class="wash"></div>
+
+        <svg class="gauge" viewBox="0 0 466 466" aria-hidden="true">
+          <defs>
+            <linearGradient id="grad-drive" x1="80" y1="150" x2="390" y2="150" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#f4f7fa"/>
+              <stop offset=".55" stop-color="#e82127"/>
+              <stop offset="1" stop-color="#e82127" stop-opacity=".35"/>
+            </linearGradient>
+          </defs>
+          <circle class="arc-track" cx="233" cy="233" r="170" transform="rotate(204 233 233)" stroke-dasharray="391.6 1200"/>
+          <circle class="arc-progress" cx="233" cy="233" r="170" transform="rotate(204 233 233)" stroke="url(#grad-drive)" stroke-dasharray="208.7 1200"/>
+          <g class="ticks"></g>
+          <text class="arc-label" x="58" y="158">0</text>
+          <text class="arc-label" x="408" y="158">240</text>
+        </svg>
+
+        <div class="topbar">
+          <span class="brand">TESLA</span>
+          <span class="link"><i class="dot"></i>LINK</span>
+          <span class="lock">LOCK</span>
+        </div>
+
+        <div class="speed">128</div>
+        <div class="unit">KM/H</div>
+
+        <div class="gears">
+          <span class="gear">P</span>
+          <span class="gear">R</span>
+          <span class="gear">N</span>
+          <span class="gear on">D</span>
+        </div>
+
+        <div class="power">
+          <div class="cap">OUTPUT POWER</div>
+          <div class="val">44.0<small>kW</small></div>
+          <div class="pbar">
+            <span class="zero"></span>
+            <i class="fill" style="width:27px"></i>
+          </div>
+        </div>
+
+        <div class="cards">
+          <div class="card">
+            <div class="cap">BATTERY</div>
+            <div class="val">78<span>%</span></div>
+            <div class="meter"><i style="width:78%"></i></div>
+          </div>
+          <div class="card">
+            <div class="cap">RANGE</div>
+            <div class="val">312<span>km</span></div>
+            <div class="sub">DISTANCE TO EMPTY</div>
+          </div>
+        </div>
+
+        <div class="temps"><span>OUT <b>18°C</b></span><span>IN <b>22°C</b></span></div>
+
+        <div class="guides">
+          <div class="safe"></div><div class="cross-h"></div><div class="cross-v"></div>
+          <span class="gl g1">SAFE R216</span>
+          <span class="gl g2">R170 速度环</span>
+          <span class="gl g3">R170 速度环</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 02 CHARGING ================= -->
+    <section class="item">
+      <div class="item-head">
+        <div class="name">充电 <em>CHARGING</em></div>
+        <div class="note">SOC 环 · 充电功率 · 补能进度 · ETA</div>
+      </div>
+      <div class="screen charging" role="img" aria-label="充电仪表设计稿">
+        <div class="wash"></div>
+
+        <svg class="gauge" viewBox="0 0 466 466" aria-hidden="true">
+          <defs>
+            <linearGradient id="grad-charge" x1="80" y1="150" x2="390" y2="150" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#8af0b4"/>
+              <stop offset=".6" stop-color="#21c15e"/>
+              <stop offset="1" stop-color="#21c15e" stop-opacity=".35"/>
+            </linearGradient>
+          </defs>
+          <circle class="arc-track" cx="233" cy="233" r="170" transform="rotate(204 233 233)" stroke-dasharray="391.6 1200"/>
+          <circle class="arc-progress" cx="233" cy="233" r="170" transform="rotate(204 233 233)" stroke="url(#grad-charge)" stroke-dasharray="305.4 1200"/>
+          <g class="ticks"></g>
+          <text class="arc-label" x="58" y="158">0</text>
+          <text class="arc-label" x="408" y="158">100</text>
+        </svg>
+
+        <div class="topbar">
+          <span class="brand">TESLA</span>
+          <span class="link"><i class="dot"></i>LINK</span>
+          <span class="lock">LOCK</span>
+        </div>
+
+        <div class="charge">
+          <svg class="bolt" viewBox="0 0 24 34" aria-hidden="true">
+            <path d="M14.4 1 3 19.2h7.5L8.9 33 21 13.6h-7.4L14.4 1Z" fill="#21c15e"/>
+          </svg>
+          <div class="kw">11.2<span>kW</span></div>
+          <div class="chg-cap">CHARGING · 78%</div>
+          <div class="socbar"><i></i></div>
+          <div class="socmeta"><span><b>78%</b> SOC</span><span>TO 80% <b>25 MIN</b></span></div>
+        </div>
+
+        <div class="cards charge-cards">
+          <div class="card">
+            <div class="cap">TO 80%</div>
+            <div class="val">25<span>min</span></div>
+            <div class="sub">AT 11.2 kW</div>
+          </div>
+          <div class="card">
+            <div class="cap">RANGE</div>
+            <div class="val">312<span>km</span></div>
+            <div class="sub">AT 78% SOC</div>
+          </div>
+        </div>
+
+        <div class="temps"><span>OUT <b>18°C</b></span><span>IN <b>22°C</b></span></div>
+
+        <div class="guides">
+          <div class="safe"></div><div class="cross-h"></div><div class="cross-v"></div>
+          <span class="gl g1">SAFE R216</span>
+          <span class="gl g2">SOC 环 0–100</span>
+          <span class="gl g3">SOC 环 0–100</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 03 OFFLINE ================= -->
+    <section class="item">
+      <div class="item-head">
+        <div class="name">断连 / 扫描 <em>LINK STATE</em></div>
+        <div class="note">取代数据页的整屏状态提示</div>
+      </div>
+      <div class="screen offline" role="img" aria-label="断连扫描设计稿">
+        <div class="wash"></div>
+
+        <svg class="gauge" viewBox="0 0 466 466" aria-hidden="true">
+          <circle class="arc-track" cx="233" cy="233" r="170" transform="rotate(204 233 233)" stroke-dasharray="391.6 1200"/>
+          <g class="ticks"></g>
+          <text class="arc-label" x="58" y="158">0</text>
+          <text class="arc-label" x="408" y="158">240</text>
+        </svg>
+
+        <div class="topbar">
+          <span class="brand">TESLA</span>
+          <span class="link"><i class="dot"></i>OFFLINE</span>
+          <span class="lock">UNLOCK</span>
+        </div>
+
+        <div class="linkstate">
+          <div class="cap">TESLA BLE LINK</div>
+          <h2>SCANNING</h2>
+          <div class="sub">SEARCHING FOR TESLA BROADCAST</div>
+          <div class="dots"><i></i><i></i><i></i></div>
+          <div class="steps">
+            <span class="on">SCAN</span><span class="sep">›</span>
+            <span>CONNECT</span><span class="sep">›</span>
+            <span>SYNC</span>
+          </div>
+          <div class="linkmeta">
+            VIN <b>LRWYGCFJ8RC571213</b><br>
+            ELAPSED <b>12s</b>
+          </div>
+        </div>
+
+        <div class="lhint">MAKE SURE THE CAR IS AWAKE</div>
+
+        <div class="guides">
+          <div class="safe"></div><div class="cross-h"></div><div class="cross-v"></div>
+          <span class="gl g1">SAFE R216</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 04 PAIRING ================= -->
+    <section class="item">
+      <div class="item-head">
+        <div class="name">配钥 <em>PAIRING</em></div>
+        <div class="note">优先于断连遮罩显示</div>
+      </div>
+      <div class="screen pairing" role="img" aria-label="配钥引导设计稿">
+        <div class="wash"></div>
+
+        <svg class="gauge" viewBox="0 0 466 466" aria-hidden="true">
+          <circle class="arc-track" cx="233" cy="233" r="170" transform="rotate(204 233 233)" stroke-dasharray="391.6 1200"/>
+          <circle class="arc-progress" cx="233" cy="233" r="170" transform="rotate(204 233 233)" stroke="#ffb340" stroke-opacity=".5" stroke-dasharray="391.6 1200"/>
+          <g class="ticks"></g>
+        </svg>
+
+        <div class="topbar">
+          <span class="brand">TESLA</span>
+          <span class="link"><i class="dot"></i>PAIRING</span>
+          <span class="lock">KEY</span>
+        </div>
+
+        <div class="pair">
+          <div class="cap">ADD NEW KEY</div>
+          <h2>TAP CARD</h2>
+          <div class="sub">ON CONSOLE READER BY ARMREST</div>
+          <div class="count">30</div>
+          <div class="pairbar"><i style="width:100%"></i></div>
+          <div class="try">TRY 1 / 3</div>
+          <div class="status">WAITING FOR KEY CARD</div>
+        </div>
+
+        <div class="pair">
+          <div class="hint">THE VEHICLE WINDOW CLOSES AUTOMATICALLY</div>
+        </div>
+
+        <div class="guides">
+          <div class="safe"></div><div class="cross-h"></div><div class="cross-v"></div>
+          <span class="gl g1">SAFE R216</span>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ================= SPEC ================= -->
+  <div class="spec-head">
+    <h2>设计规格</h2>
+    <span>DESIGN TOKENS · LAYOUT · DATA MAPPING</span>
+  </div>
+
+  <div class="spec-grid">
+    <div class="panel">
+      <h3>COLOR</h3>
+      <div class="swatches">
+        <div class="sw"><i style="background:#020406"></i><span><b>SCREEN</b>#020406</span></div>
+        <div class="sw"><i style="background:#f5f7fa"></i><span><b>TEXT</b>#F5F7FA</span></div>
+        <div class="sw"><i style="background:#8a93a6"></i><span><b>DIM</b>#8A93A6</span></div>
+        <div class="sw"><i style="background:#5a6377"></i><span><b>FAINT</b>#5A6377</span></div>
+        <div class="sw"><i style="background:#e82127"></i><span><b>TESLA RED</b>#E82127</span></div>
+        <div class="sw"><i style="background:#21c15e"></i><span><b>REGEN / CHG</b>#21C15E</span></div>
+        <div class="sw"><i style="background:#ffb340"></i><span><b>CAUTION</b>#FFB340</span></div>
+        <div class="sw"><i style="background:#1d2733"></i><span><b>TRACK</b>#1D2733</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>TYPE SCALE</h3>
+      <div class="type-row"><span class="t t-hero">128</span><span class="s">142 / Light · SPEED</span></div>
+      <div class="type-row"><span class="t t-kw">11.2 kW</span><span class="s">84 / Light · CHARGE</span></div>
+      <div class="type-row"><span class="t t-title">SCANNING</span><span class="s">46 / Light · STATE</span></div>
+      <div class="type-row"><span class="t t-val">312 km · 78%</span><span class="s">23 / Medium · VALUE</span></div>
+      <div class="type-row"><span class="t t-cap">OUTPUT POWER</span><span class="s">8 / Semibold · CAPTION</span></div>
+    </div>
+
+    <div class="panel">
+      <h3>GEOMETRY</h3>
+      <ul class="geo">
+        <li><span>逻辑画布</span><b>466 × 466</b></li>
+        <li><span>可见圆半径</span><b>R233</b></li>
+        <li><span>安全内容圆</span><b>R216</b></li>
+        <li><span>速度环半径 / 线宽</span><b>R170 / 6</b></li>
+        <li><span>速度环角度</span><b>204° – 336°</b></li>
+        <li><span>顶部状态带</span><b>x113 – 353</b></li>
+        <li><span>底部信息最低点</span><b>y426</b></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="map-wrap">
+    <h3>DATA MAPPING · 复用 TeslaBleBackend / VehicleState</h3>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:15%">区域</th>
+          <th style="width:24%">显示内容</th>
+          <th style="width:28%">数据字段</th>
+          <th>降级 / 规则</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>速度环</td>
+          <td><code>128</code> + <code>KM/H</code></td>
+          <td><code>speedKmh</code> <em>/ VF_SPEED</em></td>
+          <td>0–240 映射 132°；超量程截断；无数据显示 <code>--</code>，环归零</td>
+        </tr>
+        <tr>
+          <td>档位</td>
+          <td><code>P R N D</code></td>
+          <td><code>gear</code> <em>/ VF_GEAR</em></td>
+          <td>当前档白色 + 红点；其余 #39434F；未知档全暗</td>
+        </tr>
+        <tr>
+          <td>功率</td>
+          <td><code>44.0 kW</code> + 中置条</td>
+          <td><code>motorPowerKw</code> <em>/ VF_MOTOR_POWER</em></td>
+          <td>正值白→红向右；负值（回收）绿色向左；量程 ±250 kW</td>
+        </tr>
+        <tr>
+          <td>电量 / 续航</td>
+          <td><code>78%</code> · <code>312 km</code></td>
+          <td><code>soc</code> / <code>rangeKm</code></td>
+          <td>≤15% 数值与进度条转 <span class="accent-red">TESLA RED</span> 并闪烁</td>
+        </tr>
+        <tr>
+          <td>充电</td>
+          <td>速度环 → SOC 环，中心显示功率</td>
+          <td><code>charging</code> / <code>chargePowerKw</code> <em>/ VF_CHARGING</em></td>
+          <td>环 0–100% 绿色；功率 0–250 kW；ETA 按 (80%−SOC) × 75 kWh ÷ 功率估算</td>
+        </tr>
+        <tr>
+          <td>温度</td>
+          <td><code>OUT 18°C</code> · <code>IN 22°C</code></td>
+          <td><code>outsideTempC</code> / <code>insideTempC</code> <em>/ VF_TEMPS</em></td>
+          <td>保留 1 位小数时改为 10px；缺数据显示 <code>--</code></td>
+        </tr>
+        <tr>
+          <td>锁车 / 链路</td>
+          <td>顶部 <code>LOCK</code> · <code>● LINK</code></td>
+          <td><code>locked</code> / <code>SourceStatus.link</code></td>
+          <td>LINK 绿=Ready、琥珀=扫描/连接、灰=Idle、红=Error；配钥时显示 <code>KEY</code></td>
+        </tr>
+        <tr>
+          <td>断连 / 配钥</td>
+          <td>整屏状态页</td>
+          <td><code>LinkState</code> / <code>PairingHint</code></td>
+          <td>未 Ready 显示状态页；配钥阶段优先于断连页；文案保持 ASCII</td>
+        </tr>
+        <tr>
+          <td>告警（待定）</td>
+          <td>底部 16px 告警条或环色闪烁</td>
+          <td><code>doors[6]</code> / <code>tpms[4]</code></td>
+          <td>圆屏空间有限：建议用圆周边框呼吸 + 一行短文案（见下一版）</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="foot">
+    <span>TESLA-BLE-SIMULATOR · ESP32-S3-ROUND-DISPLAY · DESIGN v0.1</span>
+    <span>466 × 466 · 1:1 MOCKUP · 2026-11-09</span>
+  </div>
+
+</div>
+
+<script>
+  (function () {
+    var TOTAL = 391.6; /* 132° of r=170 circle */
+
+    document.querySelectorAll('.screen').forEach(function (screen) {
+      var svg = screen.querySelector('svg.gauge');
+      if (!svg) return;
+      var g = svg.querySelector('.ticks');
+      if (g) {
+        for (var i = 0; i <= 12; i++) {
+          var deg = 204 + i * 11;
+          var rad = (deg * Math.PI) / 180;
+          var major = i % 3 === 0;
+          var r1 = major ? 178 : 181;
+          var r2 = major ? 189 : 186;
+          var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          line.setAttribute('x1', (233 + r1 * Math.cos(rad)).toFixed(2));
+          line.setAttribute('y1', (233 + r1 * Math.sin(rad)).toFixed(2));
+          line.setAttribute('x2', (233 + r2 * Math.cos(rad)).toFixed(2));
+          line.setAttribute('y2', (233 + r2 * Math.sin(rad)).toFixed(2));
+          line.setAttribute('class', major ? 'tick major' : 'tick');
+          g.appendChild(line);
+        }
+      }
+    });
+  })();
+</script>
+</body>
+</html>

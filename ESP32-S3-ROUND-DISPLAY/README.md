@@ -25,6 +25,10 @@ AMOLED 亮度由 CO5300 面板命令控制，没有独立背光 PWM 引脚。
 ```text
 ESP32-S3-ROUND-DISPLAY/
 ├── platformio.ini
+├── design/
+│   ├── UI-DESIGN.md            # 圆屏界面设计说明（坐标/配色/状态/数据映射）
+│   ├── dashboard-ui.html       # 1:1 可交互设计稿（浏览器打开）
+│   └── preview-*.png           # 四个状态的预览图
 ├── include/
 │   ├── config.h
 │   ├── app/
@@ -44,6 +48,16 @@ ESP32-S3-ROUND-DISPLAY/
 └── src/
     └── main.cpp
 ```
+
+## 界面设计
+
+- `design/UI-DESIGN.md`：466×466 圆屏布局、安全区、配色/字号 token、状态机与数据映射
+- `design/dashboard-ui.html`：浏览器打开的 1:1 设计稿（可勾选安全圆/中心线）
+- `design/preview-*.png`：行驶、充电、断连扫描、配钥四个状态预览
+
+设计稿沿用 `TESLA-DASHBOARD` 的黑底 / Tesla 红 / 绿色能量回收语言，但按圆屏重排：
+速度环（R170，204°–336°）包围车速大字，顶部收窄状态带，底部只保留两张信息卡。
+驾驶 / 充电共用同一套骨架（速度环 ↔ SOC 环），未连接和配钥使用整屏状态页。
 
 ## 后续开发
 
