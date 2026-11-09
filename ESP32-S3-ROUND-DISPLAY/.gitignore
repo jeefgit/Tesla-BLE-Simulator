@@ -1,0 +1,7 @@
+.pio/
+.vscode/
+.idea/
+include/secrets/
+*.log
+*.elf
+*.bin
