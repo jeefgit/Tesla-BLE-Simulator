@@ -1,8 +1,8 @@
 # ESP32 BLE Tesla Dashboard
 
 基于 ESP32 的车载仪表盘：ESP32 作为 **BLE 中心设备（Central/Client）** 扫描并连接
-**特斯拉 BLE**（模拟器 `sim_server.py` 或真车），订阅 Notify 通道接收 53 字节
-`SimPayload` 遥测帧，解析成统一的数据快照后由仪表层渲染（当前用串口模拟，后续接屏）。
+**特斯拉 BLE**（模拟器 `sim_server.py` 或真车），解析加密车辆数据或 53 字节
+`SimPayload` 遥测帧，再由仪表层渲染。
 
 > **数据源只有特斯拉 BLE**，OBD/ELM327 路径不再使用（`src/obd` 已通过
 > `platformio.ini` 的 `build_src_filter` 排除编译）。
@@ -14,8 +14,8 @@
 | 框架 | PlatformIO + Arduino | 生态成熟，库管理方便 |
 | 蓝牙库 | NimBLE-Arduino | 比 Bluedroid 省 200KB+ 内存 |
 | BLE 角色 | Client（连车端） | 扫描（精确广播名） → 连接 → 订阅通知 |
-| 协议 | 53B 定长二进制帧 | 车端 800ms 节拍主动推送，无需请求 |
-| 显示 | 暂无，串口模拟表盘 | 屏幕驱动后加，只改 Dashboard 模块 |
+| 协议 | 加密 GetVehicleData / 53B 定长二进制帧 | 支持真车加密轮询与模拟器旁路数据 |
+| 显示 | 仪表应用使用 LVGL 9 + LovyanGFX | 后端库不依赖 UI 或显示驱动 |
 
 ## 架构
 
@@ -49,6 +49,7 @@
 - **AppController**（装配层）：`source.loop()` → 组装 `UiModel` → `ui.render()` → `display.loop()`。
 - **Dashboard**（UI 层）：只消费 `core/UiModel.h`，换成别的屏/布局时新增 `IDashboard` 实现即可。
 - **Display / BoardProfile**（平台层）：引脚、面板、旋转、缓冲全部来自板型表，换板不改业务代码。
+- **TeslaBleBackend**（依赖库）：位于 `lib/TeslaBleBackend/`，封装 NimBLE 链路、Tesla 协议和车辆状态接口，不依赖仪表 UI 或显示驱动。
 
 详见 `docs/ARCHITECTURE.md`。
 
@@ -60,28 +61,23 @@
 | Service | `00000211-b2d1-43f0-9b88-960cebf8b91e` |
 | Write | `00000212-b2d1-43f0-9b88-960cebf8b91e`（ESP32 → 车，当前未使用） |
 | Notify | `00000213-b2d1-43f0-9b88-960cebf8b91e`（车 → ESP32，数据主通道） |
-| 帧格式 | 53 字节，`struct.pack("<ffifc6BBfff4f")`，见根目录 README 协议表 |
+| 帧格式 | 加密帧为长度前缀 + protobuf；旁路帧为 53 字节 `SimPayload` |
 
 ## 目录结构
 
 ```
 TESLA-DASHBOARD/
 ├── platformio.ini              # PlatformIO 配置（板型/库依赖，obd 已排除编译）
+├── lib/
+│   └── TeslaBleBackend/        # 可独立使用的 PlatformIO 库
+│       ├── library.json
+│       ├── README.md
+│       └── src/                # 公共接口、领域模型、BLE 与 Tesla 协议实现
 ├── include/
-│   ├── config.h                # 应用可调参数：VIN、UUID、超时、UI 分辨率…
-│   ├── core/                   # 领域模型（无 UI / 无传输依赖）
-│   │   ├── VehicleState.h      # 车辆数据快照
-│   │   ├── LinkState.h         # 抽象链路状态
-│   │   ├── SourceStatus.h      # 数据源状态
-│   │   ├── PairingHint.h       # 配钥提示
-│   │   └── UiModel.h           # 前后端唯一契约
-│   ├── data/                   # 后端数据源
-│   │   ├── IVehicleSource.h    # 数据源接口
-│   │   ├── TeslaBleSource.h    # BLE 数据源（组合 BleLink + TeslaClient）
-│   │   ├── MockSource.h        # 演示剧本
-│   │   └── VehicleData.h       # 兼容旧 include（转发到 core/VehicleState.h）
-│   ├── ble/BleLink.h
-│   ├── tesla/                  # 协议实现（仅被 TeslaBleSource 调用）
+│   ├── config.h                # 本仪表应用配置（VIN、UI、板型等）
+│   ├── tesla_backend_user_config.h # 将仪表配置传给后端库
+│   ├── core/UiModel.h          # 前后端之间的 UI 快照
+│   ├── data/MockSource.h       # 仪表演示数据源
 │   ├── app/
 │   │   ├── AppController.h     # 装配 + 主循环
 │   │   └── Dashboard.h         # LVGL UI 实现（IDashboard）
@@ -95,9 +91,7 @@ TESLA-DASHBOARD/
     ├── main.cpp                # 组合根：只做装配
     ├── app/AppController.cpp
     ├── app/Dashboard.cpp
-    ├── data/{TeslaBleSource,MockSource,VehicleData}.cpp
-    ├── ble/BleLink.cpp
-    ├── tesla/TeslaClient.cpp
+    ├── data/MockSource.cpp
     └── display/Display.cpp
     （obd/ 保留但不编译）
 ```
@@ -115,18 +109,59 @@ pio device monitor      # 打开 115200 串口
 2. 上电后日志流程应为：
 
 ```
+
 [0.20s] 目标 VIN=LRWYGCFJ8RC571213  广播名=S<16位hex>C
 [0.21s] BLE 协议栈就绪（特斯拉 Central）…
 [0.22s] 扫描 BLE 设备 (10 s)...
 [1.35s] 找到目标(精确名): S<16位hex>C (aa:bb:…)
 [1.60s] BLE 已连接: S…，链路就绪
-[1.61s] 特斯拉协议层就绪，等待 53 字节 SimPayload 帧
+[1.61s] 特斯拉协议层就绪，等待握手/车辆数据响应
 [2.41s] [仪表] BLE:已连接 | 数据:就绪 | 车速 128 km/h | SOC 78% | 续航 312 km | 档位 D | 功率 +44.0 kW
 ```
 
 > 已验证环境：PlatformIO Core 6.2.0 + espressif32 8.0.0 + Arduino core 3.3.12 + **NimBLE-Arduino 2.5.x**，
 > 默认板型 `esp32dev`。⚠️ NimBLE 必须 2.x：1.x 与 core 3.x/IDF5 不兼容，会在
 > `NimBLEDevice::init` 处报 `ESP_ERR_INVALID_STATE` 进入重启循环。
+
+## 在其他 ESP32 Arduino 项目中使用后端库
+
+后端库只面向 **ESP32 + Arduino**，BLE 由 NimBLE-Arduino 提供；不依赖 LVGL、
+LovyanGFX 或本项目的屏幕代码。
+
+1. 将 `lib/TeslaBleBackend/` 放入新项目的 `lib/TeslaBleBackend/`，或在 `platformio.ini`
+   中用 `lib_extra_dirs` 指向本仓库的 `TESLA-DASHBOARD/lib`。
+2. 在新项目的 `lib_deps` 中加入 `h2zero/NimBLE-Arduino@^2.5.1`。
+3. 建立 `include/tesla_backend_user_config.h`，配置至少 VIN 与客户端私钥，例如：
+
+   ```cpp
+   #pragma once
+   #define CFG_TESLA_VIN "YOUR_VIN"
+   #define CFG_TESLA_CLIENT_KEY_HEX "YOUR_64_HEX_CHAR_PRIVATE_KEY"
+   ```
+
+   私钥不要提交到公开仓库。其余 BLE UUID、轮询间隔等参数可在此文件中覆盖。
+4. 在程序中创建 `TeslaBleBackend`，在 `setup()` 调用 `begin()`，并在每次 `loop()`
+   调用 `loop()`；车辆快照和连接状态通过 `state()`、`status()` 读取。
+
+   ```cpp
+   #include <TeslaBleBackend.h>
+
+   TeslaBleBackend vehicle;
+
+   void setup() {
+     Serial.begin(115200);
+     vehicle.begin();
+   }
+
+   void loop() {
+     vehicle.loop();
+     const VehicleState& car = vehicle.state();
+     // 按需将 car.speedKmh、car.soc 等字段显示在目标开发板上
+   }
+   ```
+
+此目录目前是本仓库内的 PlatformIO 子库；若要通过 PlatformIO Registry 或独立 Git
+URL 安装，需要将该目录发布为独立仓库/包。
 
 ## 常见调整
 

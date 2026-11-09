@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-#include "config.h"
+#include "tesla/BackendConfig.h"
 
 #include <functional>
 #include <stddef.h>

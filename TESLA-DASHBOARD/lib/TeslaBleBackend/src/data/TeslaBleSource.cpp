@@ -1,6 +1,6 @@
 #include "data/TeslaBleSource.h"
 
-#include "config.h"
+#include "tesla/BackendConfig.h"
 
 // BleLink::State -> 抽象 LinkState（UI 只认识后者）
 static LinkState toLinkState(BleLink::State s) {

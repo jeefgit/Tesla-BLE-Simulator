@@ -4,7 +4,7 @@
 #include "app/Dashboard.h"
 #include "config.h"
 #include "data/MockSource.h"
-#include "data/TeslaBleSource.h"
+#include <TeslaBleBackend.h>
 #include "display/Display.h"
 #include "platform/BoardSelect.h"
 
@@ -21,7 +21,7 @@
 #if CFG_DEMO_MODE
 MockSource vehicleSource;
 #else
-TeslaBleSource vehicleSource;
+TeslaBleBackend vehicleSource;
 #endif
 
 Dashboard dashboard;

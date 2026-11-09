@@ -1,6 +1,6 @@
 #include "ble/BleLink.h"
 
-#include "config.h"
+#include "tesla/BackendConfig.h"
 
 namespace {
 const char* const kTargetNames[] = CFG_TARGET_NAMES;

@@ -3,7 +3,7 @@
 #include <mbedtls/sha1.h>
 #include <string.h>
 
-#include "config.h"
+#include "tesla/BackendConfig.h"
 #include "tesla/PbCodec.h"
 
 namespace {

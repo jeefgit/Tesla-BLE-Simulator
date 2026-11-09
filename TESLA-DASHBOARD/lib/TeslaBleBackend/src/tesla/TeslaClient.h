@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 #include "ble/BleLink.h"
-#include "config.h"
+#include "tesla/BackendConfig.h"
 #include "data/VehicleData.h"
 #include "tesla/PairingState.h"
 #include "tesla/TeslaCrypto.h"
