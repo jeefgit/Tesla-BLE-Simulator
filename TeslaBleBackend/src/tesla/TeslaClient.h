@@ -88,6 +88,12 @@ class TeslaClient {
   uint32_t m_nextAuxiliaryPollAt = 0;
   TeslaCrypto::VehicleDataRequest m_nextAuxiliaryRequest =
       TeslaCrypto::VehicleDataRequest::Charge;
+  // 最近一条已发出的命令 + 本次连接内已成功解析过的状态类别（诊断日志用）
+  TeslaCrypto::VehicleDataRequest m_lastRequest =
+      TeslaCrypto::VehicleDataRequest::Drive;
+  uint32_t m_catLogged = 0;
+  uint32_t m_reqLogged = 0;
+  uint32_t m_emptyLogged = 0;
 
   // 握手成功后的第一轮取数：4 类辅助状态（充电/空调/车门/胎压）连续拉一遍，
   // 不受 CFG_TESLA_AUX_POLL_INTERVAL_MS 限制；拉完后恢复按周期轮询。

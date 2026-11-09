@@ -32,8 +32,8 @@
 #endif
 #endif
 
-// 后端串口日志：首次联调建议 1，稳定后改 0 减少刷屏。
-#define CFG_DEBUG_LOG 1
+// 后端串口日志：联调时设为 1，稳定后保持关闭以避免刷屏。
+#define CFG_DEBUG_LOG 0
 #if CFG_DEBUG_LOG
 #define CFG_LOG(fmt, ...) \
   Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f, ##__VA_ARGS__)

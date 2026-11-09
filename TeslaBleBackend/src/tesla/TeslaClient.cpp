@@ -31,11 +31,30 @@ void formatHexPrefix(char* out, size_t outSize, const uint8_t* p, size_t n) {
   }
 }
 
+// 诊断日志用的请求名（与 GetVehicleData 子消息一一对应）
+const char* requestName(TeslaCrypto::VehicleDataRequest r) {
+  switch (r) {
+    case TeslaCrypto::VehicleDataRequest::Drive: return "Drive";
+    case TeslaCrypto::VehicleDataRequest::Charge: return "Charge";
+    case TeslaCrypto::VehicleDataRequest::Climate: return "Climate";
+    case TeslaCrypto::VehicleDataRequest::Closures: return "Closures";
+    case TeslaCrypto::VehicleDataRequest::TirePressure: return "TirePressure";
+  }
+  return "?";
+}
+
 // ── CarServer.ChargeState ─────────────────────────────────────────
 // 字段号见 tesla_protocol/protobuf/vehicle.proto
 bool decodeChargeState(pb::Reader& r) {
   VehicleData& v = g_vehicle;
   uint32_t bits = 0;
+  bool hasSoc = false;
+  bool hasUsableSoc = false;
+  bool hasRange = false;
+  bool hasEstRange = false;
+  bool hasIdealRange = false;
+  int32_t soc = 0;
+  float rangeKm = 0;
   while (!r.atEnd()) {
     uint32_t f = 0, w = 0;
     if (!r.next(&f, &w)) break;
@@ -63,14 +82,33 @@ bool decodeChargeState(pb::Reader& r) {
     } else if (f == 114 && w == pb::WIRE_VARINT) {
       uint64_t raw = 0;
       if (r.readVarint(&raw)) {
-        v.soc = (int32_t)(uint32_t)raw;
-        bits |= VF_SOC;
+        soc = (int32_t)(uint32_t)raw;
+        hasSoc = true;
+      }
+    } else if (f == 115 && w == pb::WIRE_VARINT) {
+      // usable_battery_level：部分车型/固件只给可用电量
+      uint64_t raw = 0;
+      if (r.readVarint(&raw)) {
+        if (!hasSoc) soc = (int32_t)(uint32_t)raw;
+        hasUsableSoc = true;
       }
     } else if (f == 111 && w == pb::WIRE_FIXED32) {
       float fv = 0;
       if (r.readFloat(&fv)) {
-        v.rangeKm = teslaMilesToKm(fv);  // 车端单位：英里
-        bits |= VF_RANGE;
+        rangeKm = teslaMilesToKm(fv);  // 车端单位：英里
+        hasRange = true;
+      }
+    } else if (f == 112 && w == pb::WIRE_FIXED32) {
+      float fv = 0;
+      if (r.readFloat(&fv)) {
+        if (!hasRange) rangeKm = teslaMilesToKm(fv);
+        hasEstRange = true;
+      }
+    } else if (f == 113 && w == pb::WIRE_FIXED32) {
+      float fv = 0;
+      if (r.readFloat(&fv)) {
+        if (!hasRange && !hasEstRange) rangeKm = teslaMilesToKm(fv);
+        hasIdealRange = true;
       }
     } else if (f == 122 && w == pb::WIRE_VARINT) {
       uint64_t raw = 0;
@@ -81,6 +119,14 @@ bool decodeChargeState(pb::Reader& r) {
     } else {
       r.skip(w);
     }
+  }
+  if (hasSoc || hasUsableSoc) {
+    v.soc = soc;
+    bits |= VF_SOC;
+  }
+  if (hasRange || hasEstRange || hasIdealRange) {
+    v.rangeKm = rangeKm;
+    bits |= VF_RANGE;
   }
   if (bits) v.mark(bits);
   return bits != 0;
@@ -396,6 +442,10 @@ void TeslaClient::onConnected() {
   m_firstAuxBurst = false;
   m_nextDrivePollAt = 0;
   m_nextAuxiliaryPollAt = 0;
+  m_lastRequest = TeslaCrypto::VehicleDataRequest::Drive;
+  m_catLogged = 0;
+  m_reqLogged = 0;
+  m_emptyLogged = 0;
   m_hint = PairingHint{};
   m_rxNotifies = 0;
   m_rxBytes = 0;
@@ -418,6 +468,9 @@ void TeslaClient::onDisconnected() {
   m_pollTimeoutLogged = false;
   m_respTotal = 0;
   m_respOk = 0;
+  m_catLogged = 0;
+  m_reqLogged = 0;
+  m_emptyLogged = 0;
   m_notPaired = false;
   m_pairDone = false;
   m_pairWaitLogged = false;
@@ -473,11 +526,23 @@ void TeslaClient::sendPoll() {
 
   size_t n = 0;
   // 单次只请求一种车辆状态，减少响应体积，降低车端返回 fault=25 的概率。
-  // 两个周期独立计时；同时到期时优先驾驶数据。
+  // 两个周期独立计时；同时到期时按“谁等得更久”决定，避免 300ms 的
+  // Drive 轮询把辅助状态（SOC/续航/温度）永久饿死。
   const bool driveDue = due(m_nextDrivePollAt);
   const bool auxiliaryDue = due(m_nextAuxiliaryPollAt);
-  const auto request = driveDue ? TeslaCrypto::VehicleDataRequest::Drive
-                                : m_nextAuxiliaryRequest;
+  TeslaCrypto::VehicleDataRequest request;
+  if (m_firstAuxBurst && auxiliaryDue) {
+    // 握手后的首轮取数：4 类辅助状态连续拉完，不被 300ms 的 Drive 插队。
+    request = m_nextAuxiliaryRequest;
+  } else if (driveDue && auxiliaryDue) {
+    request = (int32_t)(m_nextAuxiliaryPollAt - m_nextDrivePollAt) <= 0
+                  ? m_nextAuxiliaryRequest
+                  : TeslaCrypto::VehicleDataRequest::Drive;
+  } else if (driveDue) {
+    request = TeslaCrypto::VehicleDataRequest::Drive;
+  } else {
+    request = m_nextAuxiliaryRequest;
+  }
   if (!driveDue && !auxiliaryDue) {
     const uint32_t now = millis();
     const uint32_t driveWait = m_nextDrivePollAt - now;
@@ -498,6 +563,14 @@ void TeslaClient::sendPoll() {
     m_nextActionAt = millis() + CFG_TESLA_POLL_RETRY_MS;
   } else {
     const uint32_t now = millis();
+    m_lastRequest = request;
+    const uint32_t reqBit = 1u << static_cast<uint8_t>(request);
+    if (!(m_reqLogged & reqBit)) {
+      m_reqLogged |= reqBit;
+      CFG_LOG("[CRYPTO] 首次请求 %s 状态（%uB，MTU=%u）",
+              requestName(request), (unsigned)n,
+              (unsigned)(m_link ? m_link->mtu() : 0));
+    }
     // 标记在途：回包/故障（onCryptoResponse）或超时前不再发下一条
     m_pollPending = true;
     m_pollPendingUntil = now + CFG_TESLA_POLL_RESPONSE_TIMEOUT_MS;
@@ -515,7 +588,12 @@ void TeslaClient::sendPoll() {
           m_nextAuxiliaryPollAt = now;  // 紧接着请求下一类
         }
       } else {
-        m_nextAuxiliaryPollAt = now + CFG_TESLA_AUX_POLL_INTERVAL_MS;
+        // 还没拿到过这类数据就短间隔重试，拿到后回到正常长周期。
+        const bool known =
+            (m_catLogged & (1u << static_cast<uint8_t>(request))) != 0;
+        m_nextAuxiliaryPollAt =
+            now + (known ? CFG_TESLA_AUX_POLL_INTERVAL_MS
+                         : CFG_TESLA_AUX_RETRY_INTERVAL_MS);
       }
       switch (request) {
         case TeslaCrypto::VehicleDataRequest::Charge:
@@ -758,6 +836,17 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
 
   bool decoded = decodeVehicleData(plaintext, len);
   if (decoded) {
+    // 每类状态首次成功解析时打一条，现场可直接看出车端到底回了哪几类数据。
+    const uint32_t catBit = 1u << static_cast<uint8_t>(m_lastRequest);
+    if (!(m_catLogged & catBit)) {
+      m_catLogged |= catBit;
+      CFG_LOG("[CRYPTO] 首次解析 %s（%uB）: SOC=%ld%% 续航=%.0fkm "
+              "车内=%.1fC 车外=%.1fC 充电=%.1fkW valid=0x%x",
+              requestName(m_lastRequest), (unsigned)len,
+              (long)g_vehicle.soc, g_vehicle.rangeKm, g_vehicle.insideTempC,
+              g_vehicle.outsideTempC, g_vehicle.chargePowerKw,
+              (unsigned)g_vehicle.valid);
+    }
     ++m_packets;
     m_lastPacketAt = millis();
     m_timeoutLogged = false;
@@ -808,6 +897,7 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
 bool TeslaClient::decodeVehicleData(const uint8_t* data, size_t len) {
   if (!data || len == 0) return false;
 
+  const uint32_t validBefore = g_vehicle.valid;
   bool ok = false;
   pb::Reader r(data, len);
   while (!r.atEnd()) {
@@ -839,18 +929,43 @@ bool TeslaClient::decodeVehicleData(const uint8_t* data, size_t len) {
         uint32_t vf = 0, vw = 0;
         if (!vd.next(&vf, &vw)) break;
         pb::Reader sub;
+        uint32_t catBit = 0;
+        const char* catName = nullptr;
+        bool subOk = false;
         if (vf == 3 && vw == pb::WIRE_LEN) {
-          if (vd.readMessage(&sub)) ok |= decodeChargeState(sub);
+          catBit = 1u << static_cast<uint8_t>(
+                       TeslaCrypto::VehicleDataRequest::Charge);
+          catName = "Charge";
+          if (vd.readMessage(&sub)) subOk = decodeChargeState(sub);
         } else if (vf == 4 && vw == pb::WIRE_LEN) {
-          if (vd.readMessage(&sub)) ok |= decodeClimateState(sub);
+          catBit = 1u << static_cast<uint8_t>(
+                       TeslaCrypto::VehicleDataRequest::Climate);
+          catName = "Climate";
+          if (vd.readMessage(&sub)) subOk = decodeClimateState(sub);
         } else if (vf == 5 && vw == pb::WIRE_LEN) {
-          if (vd.readMessage(&sub)) ok |= decodeDriveState(sub);
+          catBit = 1u << static_cast<uint8_t>(
+                       TeslaCrypto::VehicleDataRequest::Drive);
+          catName = "Drive";
+          if (vd.readMessage(&sub)) subOk = decodeDriveState(sub);
         } else if (vf == 9 && vw == pb::WIRE_LEN) {
-          if (vd.readMessage(&sub)) ok |= decodeClosuresState(sub);
+          catBit = 1u << static_cast<uint8_t>(
+                       TeslaCrypto::VehicleDataRequest::Closures);
+          catName = "Closures";
+          if (vd.readMessage(&sub)) subOk = decodeClosuresState(sub);
         } else if (vf == 19 && vw == pb::WIRE_LEN) {
-          if (vd.readMessage(&sub)) ok |= decodeTirePressureState(sub);
+          catBit = 1u << static_cast<uint8_t>(
+                       TeslaCrypto::VehicleDataRequest::TirePressure);
+          catName = "TirePressure";
+          if (vd.readMessage(&sub)) subOk = decodeTirePressureState(sub);
         } else {
           vd.skip(vw);
+        }
+        if (subOk) ok = true;
+        if (catName && !subOk && !(m_emptyLogged & catBit)) {
+          m_emptyLogged |= catBit;
+          CFG_LOG("[CRYPTO] %s 状态响应存在但没有可用字段"
+                  "（车端返回空/精简状态）",
+                  catName);
         }
       }
     } else {
@@ -858,7 +973,17 @@ bool TeslaClient::decodeVehicleData(const uint8_t* data, size_t len) {
     }
   }
 
-  if (ok) g_vehicle.updatedAt = millis();
+  if (ok) {
+    g_vehicle.updatedAt = millis();
+    const uint32_t added = g_vehicle.valid & ~validBefore;
+    if (added) {
+      CFG_LOG("[CRYPTO] 新字段 valid+0x%x -> 0x%x（SOC=%ld%% 续航=%.0fkm "
+              "车内=%.1fC 车外=%.1fC 充电=%.1fkW）",
+              (unsigned)added, (unsigned)g_vehicle.valid, (long)g_vehicle.soc,
+              g_vehicle.rangeKm, g_vehicle.insideTempC,
+              g_vehicle.outsideTempC, g_vehicle.chargePowerKw);
+    }
+  }
   return ok;
 }
 
