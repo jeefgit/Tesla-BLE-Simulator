@@ -30,10 +30,7 @@ echo Current branch detected.
 echo Current changes:
 git status --short
 echo.
-set "stage_confirm="
-set /p "stage_confirm=Stage all changes for commit? [y/N] "
-if /i not "%stage_confirm%"=="y" goto cancelled
-
+echo Staging all changes...
 git add -A
 if errorlevel 1 goto failed
 
@@ -53,10 +50,6 @@ echo.
 echo Staged changes:
 git diff --cached --stat
 echo.
-set "commit_confirm="
-set /p "commit_confirm=Commit these changes and push the current branch to origin? [y/N] "
-if /i not "%commit_confirm%"=="y" goto cancelled
-
 set "commit_message="
 set /p "commit_message=Commit message: "
 if not defined commit_message (
@@ -77,10 +70,6 @@ if errorlevel 1 (
 
 echo.
 echo Commit and push completed successfully.
-goto finished
-
-:cancelled
-echo Cancelled. Any changes already staged remain staged.
 goto finished
 
 :failed

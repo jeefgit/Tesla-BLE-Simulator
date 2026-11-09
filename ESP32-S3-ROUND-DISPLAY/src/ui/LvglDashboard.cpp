@@ -266,8 +266,8 @@ void LvglDashboard::buildCharging() {
   lv_obj_set_size(m_chargeGroup, 466, 466);
   lv_obj_set_scrollable(m_chargeGroup, false);
 
-  m_chargePowerLabel = makeLabel(m_chargeGroup, 0, 149, 466, 36,
-                                 "--.- kW", &lv_font_montserrat_24, kText,
+  m_chargePowerLabel = makeLabel(m_chargeGroup, 0, 137, 466, 60,
+                                 "--.- kW", &lv_font_montserrat_48, kText,
                                  LV_TEXT_ALIGN_CENTER);
   m_chargeCaption = makeLabel(m_chargeGroup, 0, 221, 466, 18,
                               "CHARGING", &lv_font_montserrat_10, kGreen,
