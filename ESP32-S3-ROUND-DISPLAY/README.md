@@ -38,14 +38,22 @@ ESP32-S3-ROUND-DISPLAY/
 │   ├── data/
 │   │   └── IVehicleSource.h
 │   ├── display/
-│   │   └── IDisplay.h
+│   │   ├── IDisplay.h
+│   │   └── RoundDisplay.h
 │   ├── platform/
 │   │   ├── BoardProfile.h
 │   │   └── boards/
 │   │       └── waveshare_esp32_s3_touch_amoled_175_b.h
 │   └── ui/
-│       └── IDashboard.h
+│       ├── IDashboard.h
+│       └── LvglDashboard.h
 └── src/
+    ├── app/
+    │   └── DashboardApp.cpp
+    ├── display/
+    │   └── RoundDisplay.cpp
+    ├── ui/
+    │   └── LvglDashboard.cpp
     └── main.cpp
 ```
 
@@ -59,16 +67,14 @@ ESP32-S3-ROUND-DISPLAY/
 速度环（R170，204°–336°）包围车速大字，顶部收窄状态带，底部只保留两张信息卡。
 驾驶 / 充电共用同一套骨架（速度环 ↔ SOC 环），未连接和配钥使用整屏状态页。
 
-## 后续开发
+## 界面实现
 
-1. 实现 CO5300 QSPI 显示初始化与 LVGL flush。
-2. 接入 CST9217 触摸输入及圆形屏的触控坐标映射。
-3. 实现 `display/` 与 `ui/`，再连接 `TeslaBleBackend` 数据源。
-4. 接实板验证 PlatformIO Flash、PSRAM 与分区设置。
+固件已通过 Arduino_GFX 初始化 CO5300 QSPI 面板，并用 LVGL 9 实现设计稿中的
+行驶、充电、断连/扫描和配钥页面。当前 `DashboardApp` 使用演示快照展示行驶页面；
+要显示实时车辆数据，仍需将 `TeslaBleBackend` 接入 `UiModel`。CST9217 触摸输入尚未接入。
 
 ## PlatformIO
 
 工程环境登记为 `waveshare_esp32_s3`，使用 ESP32-S3 Dev Module 定义，设置 16 MB Flash、
-OPI PSRAM 与 USB CDC。依赖为 LVGL 9、Arduino_GFX（CO5300 QSPI）和 NimBLE-Arduino。
-微雪示例文档使用 LVGL 8.4；本工程保留现有项目的 LVGL 9 版本，接入显示驱动时需验证
-LVGL 9 集成接口。本次仅补齐板级参数与工程配置，尚未实现驱动、触摸或构建验证。
+OPI PSRAM 与 USB CDC。依赖为 LVGL 9、Arduino_GFX（CO5300 QSPI）和 NimBLE-Arduino。微雪示例文档使用
+LVGL 8.4；本工程使用 LVGL 9，并配置仅用于仪表盘的 Montserrat 字号。
