@@ -20,4 +20,11 @@ class DashboardApp {
   UiModel m_model;
   bool m_initialized = false;
   uint32_t m_lastRenderMs = 0;
+  UiModel m_lastRenderedModel;
+  bool m_hasRenderedModel = false;
+  bool m_speedInitialized = false;
+  float m_speedInputKmh = 0;
+  float m_displaySpeedKmh = 0;
+  float m_speedFromKmh = 0;
+  uint32_t m_speedTransitionAt = 0;
 };

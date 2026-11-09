@@ -35,7 +35,7 @@ bool RoundDisplay::begin() {
     return false;
   }
 
-  constexpr uint32_t kBufferLines = 48;
+  constexpr uint32_t kBufferLines = 96;
   const uint32_t bufferBytes =
       static_cast<uint32_t>(board.width) * kBufferLines * sizeof(uint16_t);
   m_drawBuffer =

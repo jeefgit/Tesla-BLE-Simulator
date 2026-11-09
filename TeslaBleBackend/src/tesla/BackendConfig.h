@@ -73,11 +73,6 @@
 #ifndef CFG_TESLA_AUX_POLL_INTERVAL_MS
 #define CFG_TESLA_AUX_POLL_INTERVAL_MS 31000
 #endif
-// 某类辅助数据（充电/空调/车门/胎压）还没成功解析过时，用更短的间隔重试，
-// 避免握手后首轮请求被车端丢弃/超时后要等 31s 才补上 SOC/续航/温度。
-#ifndef CFG_TESLA_AUX_RETRY_INTERVAL_MS
-#define CFG_TESLA_AUX_RETRY_INTERVAL_MS 10000
-#endif
 #ifndef CFG_TESLA_POLL_RETRY_MS
 #define CFG_TESLA_POLL_RETRY_MS 500
 #endif

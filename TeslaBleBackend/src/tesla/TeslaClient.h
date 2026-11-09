@@ -95,9 +95,9 @@ class TeslaClient {
   uint32_t m_reqLogged = 0;
   uint32_t m_emptyLogged = 0;
 
-  // 握手成功后的第一轮取数：4 类辅助状态（充电/空调/车门/胎压）连续拉一遍，
-  // 不受 CFG_TESLA_AUX_POLL_INTERVAL_MS 限制；拉完后恢复按周期轮询。
-  bool m_firstAuxBurst = false;
+  // 每个辅助轮询周期连续请求 4 类状态；整轮完成后等待
+  // CFG_TESLA_AUX_POLL_INTERVAL_MS 再开始下一轮。
+  bool m_auxBurstActive = false;
 
   // 配钥（add-key-request）状态
   bool m_notPaired = false;       // 车辆回 KEY_NOT_ON_WHITELIST

@@ -439,7 +439,7 @@ void TeslaClient::onConnected() {
   m_pairWaitAt = 0;
   m_pairFallbackTried = false;
   m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
-  m_firstAuxBurst = false;
+  m_auxBurstActive = false;
   m_nextDrivePollAt = 0;
   m_nextAuxiliaryPollAt = 0;
   m_lastRequest = TeslaCrypto::VehicleDataRequest::Drive;
@@ -531,8 +531,8 @@ void TeslaClient::sendPoll() {
   const bool driveDue = due(m_nextDrivePollAt);
   const bool auxiliaryDue = due(m_nextAuxiliaryPollAt);
   TeslaCrypto::VehicleDataRequest request;
-  if (m_firstAuxBurst && auxiliaryDue) {
-    // 握手后的首轮取数：4 类辅助状态连续拉完，不被 300ms 的 Drive 插队。
+  if (m_auxBurstActive && auxiliaryDue) {
+    // 一轮内连续拉完 4 类辅助状态，不被 300ms 的 Drive 插队。
     request = m_nextAuxiliaryRequest;
   } else if (driveDue && auxiliaryDue) {
     request = (int32_t)(m_nextAuxiliaryPollAt - m_nextDrivePollAt) <= 0
@@ -578,22 +578,16 @@ void TeslaClient::sendPoll() {
       // 驾驶状态（车速、档位等）按 CFG_TESLA_DRIVE_POLL_INTERVAL_MS 刷新。
       m_nextDrivePollAt = now + CFG_TESLA_DRIVE_POLL_INTERVAL_MS;
     } else {
-      // 首轮取数：4 类辅助状态连续拉一遍，尽快把仪表填满；
-      // 之后每 CFG_TESLA_AUX_POLL_INTERVAL_MS 轮询一类。
-      if (m_firstAuxBurst) {
+      // 每轮连续请求 4 类辅助状态；完整一轮结束后再等待 AUX 周期。
+      if (m_auxBurstActive) {
         if (request == TeslaCrypto::VehicleDataRequest::TirePressure) {
-          m_firstAuxBurst = false;  // 第 4 类（胎压）已发，结束首轮
+          // 胎压是每轮最后一类，从此刻开始计算下一轮的等待时间。
           m_nextAuxiliaryPollAt = now + CFG_TESLA_AUX_POLL_INTERVAL_MS;
         } else {
           m_nextAuxiliaryPollAt = now;  // 紧接着请求下一类
         }
       } else {
-        // 还没拿到过这类数据就短间隔重试，拿到后回到正常长周期。
-        const bool known =
-            (m_catLogged & (1u << static_cast<uint8_t>(request))) != 0;
-        m_nextAuxiliaryPollAt =
-            now + (known ? CFG_TESLA_AUX_POLL_INTERVAL_MS
-                         : CFG_TESLA_AUX_RETRY_INTERVAL_MS);
+        m_nextAuxiliaryPollAt = now + CFG_TESLA_AUX_POLL_INTERVAL_MS;
       }
       switch (request) {
         case TeslaCrypto::VehicleDataRequest::Charge:
@@ -636,11 +630,11 @@ void TeslaClient::onCryptoSession(bool ok) {
     m_pairFallbackTried = false;
     m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
     m_hint = PairingHint{};
-    // 先立即请求驾驶数据；辅助状态进入首轮连续取数，握手后一次拉全。
+    // 握手成功后立即开始辅助数据首轮连续取数。
     const uint32_t now = millis();
     m_nextDrivePollAt = now;
     m_nextAuxiliaryPollAt = now;
-    m_firstAuxBurst = true;
+    m_auxBurstActive = true;
     m_nextActionAt = now;
     m_diagAt = now;
     m_pollPending = false;

@@ -9,6 +9,7 @@ class LvglDashboard : public IDashboard {
  public:
   void begin() override;
   void render(const UiModel& model) override;
+  void updateSpeedLabel(float speedKmh, bool valid);
 
  private:
   void buildGauge();

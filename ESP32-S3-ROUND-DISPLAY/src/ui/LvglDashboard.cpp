@@ -218,9 +218,9 @@ void LvglDashboard::buildDriving() {
   lv_obj_set_scrollable(m_speedGroup, false);
 
   m_speedLabel = makeScaledLabel(m_speedGroup, 233, 163, "--",
-                                 &lv_font_montserrat_48, kText, 640);
+                                 &lv_font_montserrat_48, kText, 560);
   makeLabel(m_speedGroup, 0, 235, 466, 18, "K M / H",
-            &lv_font_montserrat_10, kDim, LV_TEXT_ALIGN_CENTER);
+            &lv_font_montserrat_14, kDim, LV_TEXT_ALIGN_CENTER);
 
   const char* gears[] = {"P", "R", "N", "D"};
   const int32_t gearX[] = {179, 205, 231, 257};
@@ -266,18 +266,9 @@ void LvglDashboard::buildCharging() {
   lv_obj_set_size(m_chargeGroup, 466, 466);
   lv_obj_set_scrollable(m_chargeGroup, false);
 
-  const lv_point_precise_t boltPoints[] = {
-      {13, 0}, {3, 19}, {11, 19}, {8, 34}, {23, 12}, {15, 12}};
-  lv_obj_t* bolt = lv_line_create(m_chargeGroup);
-  lv_obj_set_pos(bolt, 221, 90);
-  lv_line_set_points(bolt, boltPoints,
-                     sizeof(boltPoints) / sizeof(boltPoints[0]));
-  lv_obj_set_style_line_color(bolt, kGreen, 0);
-  lv_obj_set_style_line_width(bolt, 4, 0);
-  lv_obj_set_style_line_rounded(bolt, true, 0);
-
-  m_chargePowerLabel = makeScaledLabel(m_chargeGroup, 233, 165, "--.- kW",
-                                       &lv_font_montserrat_48, kText, 410);
+  m_chargePowerLabel = makeLabel(m_chargeGroup, 0, 149, 466, 36,
+                                 "--.- kW", &lv_font_montserrat_24, kText,
+                                 LV_TEXT_ALIGN_CENTER);
   m_chargeCaption = makeLabel(m_chargeGroup, 0, 221, 466, 18,
                               "CHARGING", &lv_font_montserrat_10, kGreen,
                               LV_TEXT_ALIGN_CENTER);
@@ -341,7 +332,7 @@ void LvglDashboard::buildCards() {
   lv_obj_remove_style_all(m_chargeCardsGroup);
   lv_obj_set_size(m_chargeCardsGroup, 466, 466);
   lv_obj_set_scrollable(m_chargeCardsGroup, false);
-  lv_obj_t* etaCard = makePanel(m_chargeCardsGroup, 101, 322, 132, 56);
+  lv_obj_t* etaCard = makePanel(m_chargeCardsGroup, 95, 322, 132, 56);
   makeLabel(etaCard, 12, 8, 108, 12, "TO 80%",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_LEFT);
   m_chargeEtaValue = makeLabel(etaCard, 12, 19, 108, 27, "-- min",
@@ -352,7 +343,7 @@ void LvglDashboard::buildCards() {
                              LV_TEXT_ALIGN_LEFT);
 
   lv_obj_t* chargeRange =
-      makePanel(m_chargeCardsGroup, 245, 322, 132, 56);
+      makePanel(m_chargeCardsGroup, 239, 322, 132, 56);
   makeLabel(chargeRange, 12, 8, 108, 12, "RANGE",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_LEFT);
   m_chargeRangeValue = makeLabel(chargeRange, 12, 19, 108, 27, "-- km",
@@ -364,7 +355,7 @@ void LvglDashboard::buildCards() {
 
   m_temperatureLabel =
       makeLabel(screen, 60, 406, 346, 26, "OUT --°C    IN --°C",
-                &lv_font_montserrat_16, kFaint, LV_TEXT_ALIGN_CENTER);
+                &lv_font_montserrat_16, kDim, LV_TEXT_ALIGN_CENTER);
 }
 
 void LvglDashboard::buildLinkPage() {
@@ -452,6 +443,17 @@ void LvglDashboard::updateLabel(lv_obj_t* label, const char* text) {
   }
 }
 
+void LvglDashboard::updateSpeedLabel(float speedKmh, bool valid) {
+  if (!valid) {
+    updateLabel(m_speedLabel, "--");
+    return;
+  }
+
+  char speed[12];
+  snprintf(speed, sizeof(speed), "%.0f", speedKmh);
+  updateLabel(m_speedLabel, speed);
+}
+
 void LvglDashboard::render(const UiModel& model) {
   const bool pairing =
       model.link == UiLinkState::Ready &&
@@ -486,12 +488,7 @@ void LvglDashboard::render(const UiModel& model) {
     lv_obj_set_style_arc_color(m_arc, kGreen, LV_PART_INDICATOR);
     lv_arc_set_value(m_arc, model.socValid ? model.soc * 10 : 0);
   } else if (ready) {
-    lv_obj_set_style_arc_color(m_arc, kRed, LV_PART_INDICATOR);
-    const int32_t speedValue =
-        model.speedValid && model.speedKmh > 0
-            ? static_cast<int32_t>(model.speedKmh * (1000.0f / 240.0f))
-            : 0;
-    lv_arc_set_value(m_arc, speedValue);
+    lv_arc_set_value(m_arc, 0);
   } else {
     lv_arc_set_value(m_arc, 0);
   }
@@ -499,13 +496,7 @@ void LvglDashboard::render(const UiModel& model) {
                              ready ? kTrack : lv_color_hex(0x141C25),
                              LV_PART_MAIN);
 
-  if (model.speedValid) {
-    char speed[12];
-    snprintf(speed, sizeof(speed), "%.0f", model.speedKmh);
-    updateLabel(m_speedLabel, speed);
-  } else {
-    updateLabel(m_speedLabel, "--");
-  }
+  updateSpeedLabel(model.speedKmh, model.speedValid);
 
   const char gears[] = {'P', 'R', 'N', 'D'};
   for (uint8_t i = 0; i < 4; ++i) {
