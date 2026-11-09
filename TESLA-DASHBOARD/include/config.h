@@ -3,9 +3,6 @@
 // ESP32 BLE Tesla Dashboard —— 全局配置
 // 所有可调参数集中在这里，业务代码里不写魔法数字。
 //
-// 数据源：只走特斯拉 BLE（模拟器/真车），OBD 路径不再使用
-// （src/obd 已通过 platformio.ini 的 build_src_filter 排除编译）。
-//
 
 #include <Arduino.h>
 

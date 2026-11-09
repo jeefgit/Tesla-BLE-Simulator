@@ -6,7 +6,7 @@ namespace {
 const char* const kTargetNames[] = CFG_TARGET_NAMES;
 constexpr size_t kTargetNameCount = sizeof(kTargetNames) / sizeof(kTargetNames[0]);
 
-// 大小写不敏感的名称前缀匹配（盒子名常带后缀，如 OBDII-A1B2）
+// 大小写不敏感的名称前缀匹配
 bool namePrefixMatch(const String& name, const char* prefix) {
   const size_t n = strlen(prefix);
   if (name.length() < n) return false;

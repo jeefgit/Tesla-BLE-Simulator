@@ -4,8 +4,7 @@
 **特斯拉 BLE**（模拟器 `sim_server.py` 或真车），解析加密车辆数据或 53 字节
 `SimPayload` 遥测帧，再由仪表层渲染。
 
-> **数据源只有特斯拉 BLE**，OBD/ELM327 路径不再使用（`src/obd` 已通过
-> `platformio.ini` 的 `build_src_filter` 排除编译）。
+> **数据源为特斯拉 BLE**，支持真车加密数据和模拟器旁路数据。
 
 ## 技术选型
 
@@ -67,7 +66,7 @@
 
 ```
 TESLA-DASHBOARD/
-├── platformio.ini              # PlatformIO 配置（板型/库依赖，obd 已排除编译）
+├── platformio.ini              # PlatformIO 配置（板型与库依赖）
 ├── include/
 │   ├── config.h                # 本仪表应用配置（VIN、UI、板型等）
 │   ├── tesla_backend_user_config.h # 将仪表配置传给后端库
@@ -88,7 +87,6 @@ TESLA-DASHBOARD/
     ├── app/Dashboard.cpp
     ├── data/MockSource.cpp
     └── display/Display.cpp
-    （obd/ 保留但不编译）
 
 TeslaBleBackend/                 # 与 TESLA-DASHBOARD 同级的可复用 PlatformIO 库
 ```
