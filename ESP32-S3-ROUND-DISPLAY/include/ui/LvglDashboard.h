@@ -22,8 +22,10 @@ class LvglDashboard : public IDashboard {
 
   void setHidden(lv_obj_t* object, bool hidden);
   void updateLabel(lv_obj_t* label, const char* text);
+  void updateGaugeArc(float speedKmh, bool valid);
 
   lv_obj_t* m_arc = nullptr;
+  bool m_showSpeedArc = false;
   lv_obj_t* m_gaugeMinLabel = nullptr;
   lv_obj_t* m_gaugeMaxLabel = nullptr;
   lv_obj_t* m_linkLabel = nullptr;

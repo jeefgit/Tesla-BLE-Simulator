@@ -22,12 +22,23 @@
  */
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB
 
-/* 仪表用到的字体。 */
+/* 仪表用到的字体。
+ *
+ * 这里一次性启用一批常用字号，避免以后每换一个字号都要改本文件、
+ * 触发 549 个 LVGL 目标重编。日常调字体只需在 UI 代码里换
+ * &lv_font_montserrat_XX 引用，只重编 1 个文件。
+ * 新增字号会增加固件体积，但 Flash 余量充足。
+ */
 #define LV_FONT_MONTSERRAT_10 1
+#define LV_FONT_MONTSERRAT_12 1
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_16 1
+#define LV_FONT_MONTSERRAT_18 1
 #define LV_FONT_MONTSERRAT_20 1
+#define LV_FONT_MONTSERRAT_22 1
 #define LV_FONT_MONTSERRAT_24 1
+#define LV_FONT_MONTSERRAT_28 1
+#define LV_FONT_MONTSERRAT_32 1
 #define LV_FONT_MONTSERRAT_48 1
 
 #endif /* LV_CONF_H */

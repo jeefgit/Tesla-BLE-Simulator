@@ -8,6 +8,8 @@ namespace {
 
 constexpr int32_t kScreenSize = 466;
 constexpr uint32_t kPairingWindowMs = 30000;
+constexpr int32_t kArcMaxValue = 1000;
+constexpr float kGaugeMaxSpeedKmh = 240.0f;
 const lv_color_t kScreen = lv_color_hex(0x020406);
 const lv_color_t kText = lv_color_hex(0xF5F7FA);
 const lv_color_t kDim = lv_color_hex(0x8A93A6);
@@ -141,8 +143,8 @@ void LvglDashboard::buildGauge() {
   lv_obj_set_size(m_arc, 340, 340);
   lv_arc_set_rotation(m_arc, 204);
   lv_arc_set_bg_angles(m_arc, 0, 132);
-  lv_arc_set_range(m_arc, 0, 1000);
-  lv_arc_set_value(m_arc, 533);
+  lv_arc_set_range(m_arc, 0, kArcMaxValue);
+  lv_arc_set_value(m_arc, 0);
   lv_arc_set_mode(m_arc, LV_ARC_MODE_NORMAL);
   lv_obj_set_style_bg_opa(m_arc, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(m_arc, 0, LV_PART_MAIN);
@@ -200,7 +202,7 @@ void LvglDashboard::buildTopBar() {
   lv_obj_set_pos(m_topGroup, 113, 43);
   lv_obj_set_scrollable(m_topGroup, false);
 
-  makeLabel(m_topGroup, 0, 0, 60, 18, "TESLA", &lv_font_montserrat_10,
+  makeLabel(m_topGroup, 0, 0, 60, 18, "TESLA", &lv_font_montserrat_14,
             lv_color_hex(0xC9D3DE), LV_TEXT_ALIGN_LEFT);
   m_linkDot = lv_obj_create(m_topGroup);
   lv_obj_remove_style_all(m_linkDot);
@@ -209,10 +211,10 @@ void LvglDashboard::buildTopBar() {
   lv_obj_set_style_radius(m_linkDot, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(m_linkDot, kGreen, 0);
   lv_obj_set_style_bg_opa(m_linkDot, LV_OPA_COVER, 0);
-  m_linkLabel = makeLabel(m_topGroup, 109, 0, 52, 18, "LINK",
-                          &lv_font_montserrat_10, kText, LV_TEXT_ALIGN_LEFT);
-  m_lockLabel = makeLabel(m_topGroup, 180, 0, 60, 18, "LOCK",
-                          &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_RIGHT);
+  m_linkLabel = makeLabel(m_topGroup, 109, 0, 60, 18, "LINK",
+                          &lv_font_montserrat_14, kText, LV_TEXT_ALIGN_LEFT);
+  m_lockLabel = makeLabel(m_topGroup, 176, 0, 64, 18, "LOCK",
+                          &lv_font_montserrat_14, kFaint, LV_TEXT_ALIGN_RIGHT);
 }
 
 void LvglDashboard::buildDriving() {
@@ -451,12 +453,30 @@ void LvglDashboard::updateLabel(lv_obj_t* label, const char* text) {
 void LvglDashboard::updateSpeedLabel(float speedKmh, bool valid) {
   if (!valid) {
     updateLabel(m_speedLabel, "--");
-    return;
+  } else {
+    char speed[12];
+    snprintf(speed, sizeof(speed), "%.0f", speedKmh);
+    updateLabel(m_speedLabel, speed);
   }
 
-  char speed[12];
-  snprintf(speed, sizeof(speed), "%.0f", speedKmh);
-  updateLabel(m_speedLabel, speed);
+  // The arc lives outside render(): DashboardApp calls updateSpeedLabel every
+  // loop with the smoothed speed, so drive the gauge from here to keep it in
+  // sync with the numeric readout.
+  if (m_showSpeedArc) {
+    updateGaugeArc(speedKmh, valid);
+  }
+}
+
+void LvglDashboard::updateGaugeArc(float speedKmh, bool valid) {
+  int32_t value = 0;
+  if (valid) {
+    const float clamped =
+        fminf(fmaxf(speedKmh, 0.0f), kGaugeMaxSpeedKmh);
+    value = static_cast<int32_t>(
+        lroundf(clamped * static_cast<float>(kArcMaxValue) /
+                kGaugeMaxSpeedKmh));
+  }
+  lv_arc_set_value(m_arc, value);
 }
 
 void LvglDashboard::render(const UiModel& model) {
@@ -486,14 +506,16 @@ void LvglDashboard::render(const UiModel& model) {
   updateLabel(m_lockLabel,
               pairing ? "KEY" : (model.locked ? "LOCK" : "UNLOCK"));
 
+  m_showSpeedArc = ready && !pairing && !showCharging;
   if (pairing) {
     lv_obj_set_style_arc_color(m_arc, kAmber, LV_PART_INDICATOR);
-    lv_arc_set_value(m_arc, 1000);
+    lv_arc_set_value(m_arc, kArcMaxValue);
   } else if (showCharging) {
     lv_obj_set_style_arc_color(m_arc, kGreen, LV_PART_INDICATOR);
     lv_arc_set_value(m_arc, model.socValid ? model.soc * 10 : 0);
-  } else if (ready) {
-    lv_arc_set_value(m_arc, 0);
+  } else if (m_showSpeedArc) {
+    lv_obj_set_style_arc_color(m_arc, kRed, LV_PART_INDICATOR);
+    updateGaugeArc(model.speedKmh, model.speedValid);
   } else {
     lv_arc_set_value(m_arc, 0);
   }
