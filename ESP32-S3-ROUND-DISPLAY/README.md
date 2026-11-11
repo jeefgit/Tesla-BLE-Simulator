@@ -82,8 +82,12 @@ BLE 配置在 `include/config.h`：
 #define CFG_TESLA_NAME ""        // 留空 = 由 VIN 推导广播名
 #define CFG_TESLA_UNITS_MILES 1  // 真车速度/续航原始单位为英里
 #define CFG_TESLA_CRYPTO 1       // 加密握手 + GetVehicleData
+#define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 100  // 驾驶状态轮询间隔
 #define CFG_DEBUG_LOG 1          // 联调日志，稳定后可改 0
 ```
+
+串口日志会输出前 10 次 Drive 请求从发送到收到响应的耗时（毫秒）及故障码；
+请求仍保持串行，因此实际刷新间隔还受车端响应速度影响。
 
 真实私钥放在 `include/secrets/tesla_client_key.h`（已被 `.gitignore` 忽略），
 缺失时使用后端内置的测试密钥。工程通过 `lib_extra_dirs = ..` 引用仓库根目录的

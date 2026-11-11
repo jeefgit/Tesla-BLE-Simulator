@@ -483,6 +483,8 @@ void TeslaClient::onConnected() {
   m_mtuFaults = 0;
   m_pollPending = false;
   m_pollTimeoutLogged = false;
+  m_pollSentAt = 0;
+  m_driveTimingLogs = 0;
   m_crypto.reset();
 #if CFG_TESLA_CRYPTO
   m_nextActionAt = millis();
@@ -603,6 +605,7 @@ void TeslaClient::sendPoll() {
     }
     // 标记在途：回包/故障（onCryptoResponse）或超时前不再发下一条
     m_pollPending = true;
+    m_pollSentAt = now;
     m_pollPendingUntil = now + CFG_TESLA_POLL_RESPONSE_TIMEOUT_MS;
     if (request == TeslaCrypto::VehicleDataRequest::Drive) {
       // 驾驶状态（车速、档位等）按 CFG_TESLA_DRIVE_POLL_INTERVAL_MS 刷新。
@@ -795,10 +798,18 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
                                    uint32_t fault) {
   // 收到任何响应（含故障）都说明上一条加密命令已结束：解除在途标记，
   // 并把下一次调度提前到"现在"，由 sendPoll 按各自周期决定发不发。
-  if (m_pollPending) {
+  const bool matchedPendingPoll = m_pollPending;
+  const uint32_t responseMs = millis() - m_pollSentAt;
+  if (matchedPendingPoll) {
     m_pollPending = false;
     m_pollTimeoutLogged = false;
     if (m_crypto.hasSession()) m_nextActionAt = millis();
+    if (m_lastRequest == TeslaCrypto::VehicleDataRequest::Drive &&
+        m_driveTimingLogs < 10) {
+      CFG_LOG("[CRYPTO] Drive 响应耗时 %u ms（fault=%u）",
+              (unsigned)responseMs, (unsigned)fault);
+      ++m_driveTimingLogs;
+    }
   }
 
   // 连接内响应统计
@@ -865,11 +876,11 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
               (unsigned)m_mtuFaults);
       m_mtuFaults = 0;
     }
-    if (!m_decodeLogged) {
-      m_decodeLogged = true;
-      CFG_LOG("[CRYPTO] 首帧 VehicleData 解密成功（%uB，MTU=%u）",
-              (unsigned)len, (unsigned)(m_link ? m_link->mtu() : 0));
-    }
+    // if (!m_decodeLogged) {
+    //   m_decodeLogged = true;
+    //   CFG_LOG("[CRYPTO] 首帧 VehicleData 解密成功（%uB，MTU=%u）",
+    //           (unsigned)len, (unsigned)(m_link ? m_link->mtu() : 0));
+    // }
   } else if (m_packets == 0 && (m_crypto.commandsSent() > 0) && m_crypto.responsesOk() > 0) {
     // 解密成功但无法解析：打印更多原始数据帮助分析
     CFG_LOG("[CRYPTO] 警告：解密 %uB 成功但无法解析 VehicleData", (unsigned)len);

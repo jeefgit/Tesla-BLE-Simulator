@@ -126,6 +126,8 @@ class TeslaClient {
   bool m_pollPending = false;
   bool m_pollTimeoutLogged = false;
   uint32_t m_pollPendingUntil = 0;
+  uint32_t m_pollSentAt = 0;
+  uint8_t m_driveTimingLogs = 0;
 
   // "握手成功但一直没数据"的周期诊断（每 10s 一条，现场不用盯日志刷屏）
   uint32_t m_diagAt = 0;

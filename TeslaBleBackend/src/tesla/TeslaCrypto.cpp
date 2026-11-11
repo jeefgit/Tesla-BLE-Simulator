@@ -1223,7 +1223,7 @@ bool TeslaCrypto::handleResponse(const uint8_t* ciphertext, size_t len,
     return false;
   }
 
-#if CFG_DEBUG_LOG
+#if false
   // 打印每次响应的完整报文内容（用于分析真车响应结构）
   // 第一条响应额外标记并尽量多打印内容
   const bool isFirst = !m_firstResponseLogged;
@@ -1232,13 +1232,14 @@ bool TeslaCrypto::handleResponse(const uint8_t* ciphertext, size_t len,
     CFG_LOG("[CRYPTO] ⭐ 第一条响应解密成功，原始 %uB（完整分析）", (unsigned)len);
     if (len >= 4) {
       // 关键：打印前4字节以判断CarServer.Response结构
-      CFG_LOG("[CRYPTO]   Protobuf头: %02x %02x %02x %02x", 
+      CFG_LOG("[CRYPTO]   Protobuf头: %02x %02x %02x %02x",
               m_plain[0], m_plain[1], m_plain[2], m_plain[3]);
     }
-  } else {
-    CFG_LOG("[CRYPTO] 响应 #%u/%u 解密成功，原始 %uB", 
-            m_responsesOk + 1, m_commandsSent + 1, (unsigned)len);
   }
+  // else {
+  //   CFG_LOG("[CRYPTO] 响应 #%u/%u 解密成功，原始 %uB",
+  //           m_responsesOk + 1, m_commandsSent + 1, (unsigned)len);
+  // }
   
   // 打印完整的hex dump（分多行，每行16字节）
   const size_t totalLines = (len + 15) / 16;

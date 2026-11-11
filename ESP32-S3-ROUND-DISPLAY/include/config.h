@@ -21,6 +21,9 @@
 // 1 = 车端原始值为英里，解析时换算成公里（真车）
 #define CFG_TESLA_UNITS_MILES 1
 
+// 驾驶状态轮询间隔；单条请求仍需等车端响应后才会发送下一条。
+#define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 100
+
 // 1 = 先完成加密握手，再用 GetVehicleData 轮询
 // 0 = 只接收 53B 旁路 SimPayload（模拟器调试用）
 #define CFG_TESLA_CRYPTO 1
@@ -40,8 +43,8 @@
 #endif
 #endif
 
-// 后端串口日志：联调时设为 1，稳定后保持关闭以避免刷屏。
-#define CFG_DEBUG_LOG 0
+// 后端诊断日志；Drive 请求耗时最多记录前 10 次响应。
+#define CFG_DEBUG_LOG 1
 #if CFG_DEBUG_LOG
 #define CFG_LOG(fmt, ...) \
   Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f, ##__VA_ARGS__)
