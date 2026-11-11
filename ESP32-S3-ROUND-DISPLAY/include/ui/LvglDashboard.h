@@ -69,4 +69,5 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_topGroup = nullptr;
   lv_obj_t* m_bootLayer = nullptr;
   lv_obj_t* m_bootRing = nullptr;
+  lv_obj_t* m_bootLabel = nullptr;
 };

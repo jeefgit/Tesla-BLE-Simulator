@@ -140,7 +140,10 @@ constexpr int32_t kBootRingStepPercent = 1;
 // kBootRingDurationMs: 100 / step = number of ticks.
 constexpr uint32_t kBootRingTickMs =
     kBootRingDurationMs / (100 / kBootRingStepPercent);
-constexpr uint32_t kBootRingHoldMs = 100;
+constexpr uint32_t kBootLogoHoldMs = 1000;
+constexpr uint32_t kBootLogoAnimMs = 750;
+constexpr int32_t kBootLogoStartScale = 128;
+constexpr int32_t kBootLogoEndScale = 256;
 constexpr int32_t kBootRingSize = 460;
 constexpr int32_t kBootRingWidth = 12;
 // Start at 12 o'clock: LVGL's 0 degree is 3 o'clock and angles grow clockwise,
@@ -151,6 +154,26 @@ int32_t s_bootPercent = 0;
 uint32_t s_bootStartMs = 0;
 uint32_t s_bootNextLogMs = 0;
 bool s_bootRunning = false;
+lv_obj_t* s_bootLabel = nullptr;
+
+void bootLogoAnimate(void* object, int32_t scale) {
+  auto* label = static_cast<lv_obj_t*>(object);
+  setScale(label, scale);
+  const int32_t opacity =
+      (scale - kBootLogoStartScale) * LV_OPA_COVER /
+      (kBootLogoEndScale - kBootLogoStartScale);
+  lv_obj_set_style_opa(label, opacity, 0);
+}
+
+void bootLogoFinished(lv_timer_t* timer) {
+  auto* layer = static_cast<lv_obj_t*>(lv_timer_get_user_data(timer));
+  lv_timer_delete(timer);
+  if (layer != nullptr) {
+    lv_obj_delete(layer);
+  }
+  s_bootLabel = nullptr;
+  s_bootRunning = false;
+}
 
 void bootRingTick(lv_timer_t* timer) {
   auto* ring = static_cast<lv_obj_t*>(lv_timer_get_user_data(timer));
@@ -182,15 +205,22 @@ void bootRingTick(lv_timer_t* timer) {
   }
 
   if (s_bootPercent >= 100) {
-    s_bootRunning = false;
     lv_timer_delete(timer);
     CFG_LOG("[UI] boot ring animation finished");
     lv_obj_t* layer = lv_obj_get_parent(ring);
-    if (layer != nullptr) {
-      // Keep the fully filled ring on screen briefly so the end state is
-      // visible even if the fill itself was missed.
-      lv_obj_delete_delayed(layer, kBootRingHoldMs);
+    if (s_bootLabel != nullptr) {
+      lv_anim_t animation;
+      lv_anim_init(&animation);
+      lv_anim_set_var(&animation, s_bootLabel);
+      lv_anim_set_values(&animation, kBootLogoStartScale,
+                         kBootLogoEndScale);
+      lv_anim_set_duration(&animation, kBootLogoAnimMs);
+      lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
+      lv_anim_set_exec_cb(&animation, bootLogoAnimate);
+      lv_anim_start(&animation);
     }
+    CFG_LOG("[UI] boot logo shown");
+    lv_timer_create(bootLogoFinished, kBootLogoHoldMs, layer);
   }
 }
 
@@ -216,8 +246,8 @@ void LvglDashboard::begin() {
 void LvglDashboard::buildBootAnimation() {
   lv_obj_t* screen = lv_screen_active();
 
-  // Full-screen opaque layer on top of the dashboard. It hides the pages while
-  // the ring expands and is deleted when the animation completes.
+  // Full-screen opaque layer on top of the dashboard. It hides the pages until
+  // the ring and logo sequence finishes.
   m_bootLayer = lv_obj_create(screen);
   lv_obj_remove_style_all(m_bootLayer);
   lv_obj_set_pos(m_bootLayer, 0, 0);
@@ -260,6 +290,13 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_set_style_bg_opa(m_bootRing, LV_OPA_TRANSP, LV_PART_KNOB);
   lv_obj_set_style_border_width(m_bootRing, 0, LV_PART_KNOB);
   lv_obj_set_style_pad_all(m_bootRing, 0, LV_PART_KNOB);
+
+  m_bootLabel = makeScaledLabel(m_bootLayer, kScreenSize / 2,
+                                kScreenSize / 2, "TESLA",
+                                &lv_font_montserrat_48, kRed,
+                                kBootLogoStartScale);
+  lv_obj_set_style_opa(m_bootLabel, LV_OPA_TRANSP, 0);
+  s_bootLabel = m_bootLabel;
 
   // 1 % per tick, starting on the first lv_timer_handler() run. 100 steps at
   // kBootRingTickMs each = kBootRingDurationMs.
