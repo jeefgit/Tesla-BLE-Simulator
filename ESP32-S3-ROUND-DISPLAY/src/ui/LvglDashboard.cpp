@@ -124,12 +124,12 @@ lv_color_t linkColor(UiLinkState state) {
 
 // ---- boot animation -------------------------------------------------------
 // Circular progress fill on the outermost circle of the round panel: the full
-// circle is drawn as a dim track, then a purple ring fills it clockwise from
+// circle is drawn as a dim track, then a silver ring fills it clockwise from
 // 12 o'clock. The filled share grows in 1 % steps until the circle is 100 %
 // full, then the overlay is removed so the dashboard becomes visible.
 //
 // The fill advances one step per timer tick: 1 % per step, so every frame
-// draws a visibly larger purple segment (1 %, 2 %, 3 %, ... 100 %). The tick
+// draws a visibly larger silver segment (1 %, 2 %, 3 %, ... 100 %). The tick
 // period is derived from the duration, so 100 steps always take
 // kBootRingDurationMs. Driving it by step count instead of wall time means a
 // stall in lv_timer_handler() pauses the fill rather than silently skipping
@@ -522,24 +522,17 @@ void LvglDashboard::buildLinkPage() {
   lv_obj_set_size(m_linkPage, 466, 466);
   lv_obj_set_scrollable(m_linkPage, false);
 
-  makeLabel(m_linkPage, 33, 82, 400, 18, "TESLA BLE LINK",
-            &lv_font_montserrat_10, kAmber, LV_TEXT_ALIGN_CENTER);
-  m_linkTitle = makeScaledLabel(m_linkPage, 233, 148, "SCANNING",
+  makeLabel(m_linkPage, 33, 104, 400, 18, "TESLA BLE",
+            &lv_font_montserrat_10, kBootRingColor, LV_TEXT_ALIGN_CENTER);
+  m_linkTitle = makeScaledLabel(m_linkPage, 233, 174, "SCANNING",
                                 &lv_font_montserrat_48, kText, 300);
   m_linkSubtitle =
-      makeLabel(m_linkPage, 31, 188, 404, 28,
-                "SEARCHING FOR TESLA BROADCAST",
+      makeLabel(m_linkPage, 31, 214, 404, 20,
+                "KEEP VEHICLE AWAKE",
                 &lv_font_montserrat_10, kDim, LV_TEXT_ALIGN_CENTER);
-  makeLabel(m_linkPage, 39, 226, 388, 24, ".   .   .",
-            &lv_font_montserrat_20, kAmber, LV_TEXT_ALIGN_CENTER);
-  makeLabel(m_linkPage, 30, 267, 406, 18, "SCAN   >   CONNECT   >   SYNC",
-            &lv_font_montserrat_10, kAmber, LV_TEXT_ALIGN_CENTER);
-  m_linkMeta = makeLabel(m_linkPage, 40, 310, 386, 42,
-                         "VIN --\nELAPSED 0s", &lv_font_montserrat_10,
-                         kFaint, LV_TEXT_ALIGN_CENTER);
-  makeLabel(m_linkPage, 36, 342, 394, 20,
-            "MAKE SURE THE CAR IS AWAKE", &lv_font_montserrat_10, kFaint,
-            LV_TEXT_ALIGN_CENTER);
+  m_linkMeta = makeLabel(m_linkPage, 40, 258, 386, 18, "ELAPSED 0s",
+                         &lv_font_montserrat_10, kFaint,
+                         LV_TEXT_ALIGN_CENTER);
 }
 
 void LvglDashboard::buildPairingPage() {
@@ -818,7 +811,7 @@ void LvglDashboard::render(const UiModel& model) {
 
   if (showLinkPage) {
     const char* title = "SCANNING";
-    const char* subtitle = "SEARCHING FOR TESLA BROADCAST";
+    const char* subtitle = "KEEP VEHICLE AWAKE";
     switch (model.link) {
       case UiLinkState::Idle:
         title = "BLE IDLE";
@@ -838,7 +831,7 @@ void LvglDashboard::render(const UiModel& model) {
         break;
       case UiLinkState::Error:
         title = "LINK ERROR";
-        subtitle = "UNRECOVERABLE LINK FAILURE";
+        subtitle = "CHECK VEHICLE AND RETRY";
         break;
       case UiLinkState::Ready:
       case UiLinkState::Scanning:
@@ -846,9 +839,11 @@ void LvglDashboard::render(const UiModel& model) {
     }
     updateLabel(m_linkTitle, title);
     updateLabel(m_linkSubtitle, subtitle);
-    lv_obj_set_style_text_color(m_linkTitle, linkColor(model.link), 0);
-    char meta[48];
-    snprintf(meta, sizeof(meta), "VIN %s\nELAPSED %lus", model.vin,
+    const lv_color_t statusColor =
+        model.link == UiLinkState::Error ? kRed : kBootRingColor;
+    lv_obj_set_style_text_color(m_linkTitle, statusColor, 0);
+    char meta[24];
+    snprintf(meta, sizeof(meta), "ELAPSED %lus",
              static_cast<unsigned long>(model.elapsedSeconds));
     updateLabel(m_linkMeta, meta);
   }
