@@ -4,12 +4,16 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "config.h"
+
 namespace {
 
 constexpr int32_t kScreenSize = 466;
 constexpr uint32_t kPairingWindowMs = 30000;
 constexpr int32_t kArcMaxValue = 1000;
 constexpr float kGaugeMaxSpeedKmh = 240.0f;
+constexpr uint32_t kBootRingDurationMs = 2000;
+constexpr int32_t kBootRingMaxSize = 460;
 const lv_color_t kScreen = lv_color_hex(0x020406);
 const lv_color_t kText = lv_color_hex(0xF5F7FA);
 const lv_color_t kDim = lv_color_hex(0x8A93A6);
@@ -19,6 +23,7 @@ const lv_color_t kGreen = lv_color_hex(0x21C15E);
 const lv_color_t kAmber = lv_color_hex(0xFFB340);
 const lv_color_t kTrack = lv_color_hex(0x1D2733);
 const lv_color_t kCard = lv_color_hex(0x0C1218);
+const lv_color_t kPurple = lv_color_hex(0x9B5CFF);
 
 lv_obj_t* makeLabel(lv_obj_t* parent, int32_t x, int32_t y, int32_t width,
                     int32_t height, const char* text, const lv_font_t* font,
@@ -118,6 +123,79 @@ lv_color_t linkColor(UiLinkState state) {
   return kFaint;
 }
 
+// ---- boot animation -------------------------------------------------------
+// A purple ring grows from the exact center of the round panel out to the
+// outermost edge, then the overlay is removed so the dashboard becomes visible.
+//
+// The progress is driven by a plain repeating lv_timer instead of lv_anim.
+// lv_anim only advances inside lv_timer_handler(), so any long stall (BLE init,
+// a slow full-screen flush) silently eats animation time. Recomputing the size
+// from millis() on every tick keeps the 2 s duration exact and lets the state
+// be logged. The position is also set explicitly instead of via lv_obj_center()
+// so the ring stays centered no matter when LVGL recalculates alignment.
+
+constexpr uint32_t kBootRingTickMs = 16;
+constexpr uint32_t kBootRingHoldMs = 400;
+constexpr int32_t kBootRingStartSize = 24;
+
+uint32_t s_bootStartMs = 0;
+uint32_t s_bootNextLogMs = 0;
+bool s_bootStarted = false;
+bool s_bootRunning = false;
+
+void bootRingPlace(lv_obj_t* ring, int32_t size) {
+  const int32_t offset = (kScreenSize - size) / 2;
+  lv_obj_set_size(ring, size, size);
+  lv_obj_set_pos(ring, offset, offset);
+}
+
+void bootRingTick(lv_timer_t* timer) {
+  auto* ring = static_cast<lv_obj_t*>(lv_timer_get_user_data(timer));
+  if (ring == nullptr) {
+    lv_timer_delete(timer);
+    return;
+  }
+
+  if (!s_bootStarted) {
+    s_bootStarted = true;
+    s_bootStartMs = millis();
+    s_bootNextLogMs = 0;
+    CFG_LOG("[UI] boot ring animation start");
+  }
+
+  const uint32_t elapsed = millis() - s_bootStartMs;
+  const bool finished = elapsed >= kBootRingDurationMs;
+  int32_t size = kBootRingMaxSize;
+  if (!finished) {
+    size = kBootRingStartSize +
+           static_cast<int32_t>(
+               (static_cast<int64_t>(kBootRingMaxSize - kBootRingStartSize) *
+                elapsed) /
+               kBootRingDurationMs);
+  }
+  bootRingPlace(ring, size);
+
+  if (elapsed >= s_bootNextLogMs) {
+    CFG_LOG("[UI] boot ring %lums size=%ld at (%ld,%ld)",
+            static_cast<unsigned long>(elapsed), static_cast<long>(size),
+            static_cast<long>(lv_obj_get_x(ring)),
+            static_cast<long>(lv_obj_get_y(ring)));
+    s_bootNextLogMs = elapsed + 250;
+  }
+
+  if (finished) {
+    s_bootRunning = false;
+    lv_timer_delete(timer);
+    CFG_LOG("[UI] boot ring animation finished");
+    lv_obj_t* layer = lv_obj_get_parent(ring);
+    if (layer != nullptr) {
+      // Keep the completed outer ring on screen briefly so the end state is
+      // visible even if the expansion itself was missed.
+      lv_obj_delete_delayed(layer, kBootRingHoldMs);
+    }
+  }
+}
+
 }  // namespace
 
 void LvglDashboard::begin() {
@@ -134,7 +212,47 @@ void LvglDashboard::begin() {
   buildCards();
   buildLinkPage();
   buildPairingPage();
+  buildBootAnimation();
 }
+
+void LvglDashboard::buildBootAnimation() {
+  lv_obj_t* screen = lv_screen_active();
+
+  // Full-screen opaque layer on top of the dashboard. It hides the pages while
+  // the ring expands and is deleted when the animation completes.
+  m_bootLayer = lv_obj_create(screen);
+  lv_obj_remove_style_all(m_bootLayer);
+  lv_obj_set_pos(m_bootLayer, 0, 0);
+  lv_obj_set_size(m_bootLayer, kScreenSize, kScreenSize);
+  lv_obj_set_style_bg_color(m_bootLayer, kScreen, 0);
+  lv_obj_set_style_bg_opa(m_bootLayer, LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_all(m_bootLayer, 0, 0);
+  lv_obj_set_scrollable(m_bootLayer, false);
+  lv_obj_clear_flag(m_bootLayer, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_move_foreground(m_bootLayer);
+
+  m_bootRing = lv_obj_create(m_bootLayer);
+  lv_obj_remove_style_all(m_bootRing);
+  bootRingPlace(m_bootRing, kBootRingStartSize);
+  lv_obj_set_style_radius(m_bootRing, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(m_bootRing, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(m_bootRing, 8, 0);
+  lv_obj_set_style_border_color(m_bootRing, kPurple, 0);
+  lv_obj_set_style_border_opa(m_bootRing, LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_all(m_bootRing, 0, 0);
+  lv_obj_clear_flag(m_bootRing, LV_OBJ_FLAG_CLICKABLE);
+
+  // The timer measures elapsed time itself, so the animation starts on the
+  // first lv_timer_handler() run (after BLE init) and always lasts 2 s of real
+  // time even if the handler is occasionally delayed.
+  s_bootStarted = false;
+  s_bootStartMs = 0;
+  s_bootNextLogMs = 0;
+  s_bootRunning = true;
+  lv_timer_create(bootRingTick, kBootRingTickMs, m_bootRing);
+}
+
+bool LvglDashboard::bootAnimationRunning() const { return s_bootRunning; }
 
 void LvglDashboard::buildGauge() {
   lv_obj_t* screen = lv_screen_active();

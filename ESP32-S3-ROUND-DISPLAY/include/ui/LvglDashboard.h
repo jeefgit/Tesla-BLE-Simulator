@@ -10,6 +10,10 @@ class LvglDashboard : public IDashboard {
   void begin() override;
   void render(const UiModel& model) override;
   void updateSpeedLabel(float speedKmh, bool valid);
+  // True while the boot overlay covers the dashboard. The app uses this to
+  // skip redrawing widgets nobody can see, which keeps the boot animation
+  // smooth and leaves the CPU/BLE stack alone during startup.
+  bool bootAnimationRunning() const;
 
  private:
   void buildGauge();
@@ -19,6 +23,7 @@ class LvglDashboard : public IDashboard {
   void buildCards();
   void buildLinkPage();
   void buildPairingPage();
+  void buildBootAnimation();
 
   void setHidden(lv_obj_t* object, bool hidden);
   void updateLabel(lv_obj_t* label, const char* text);
@@ -62,4 +67,6 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_pairTry = nullptr;
   lv_obj_t* m_pairBarFill = nullptr;
   lv_obj_t* m_topGroup = nullptr;
+  lv_obj_t* m_bootLayer = nullptr;
+  lv_obj_t* m_bootRing = nullptr;
 };

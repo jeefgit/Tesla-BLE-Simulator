@@ -64,7 +64,9 @@ void DashboardApp::loop() {
   m_model = m_source.model();
 #endif
   const uint32_t now = millis();
-  if (now - m_lastRenderMs >= 50) {
+  // The boot overlay hides everything, so redrawing the dashboard for its
+  // duration would only compete with the ring animation and the BLE stack.
+  if (!dashboard.bootAnimationRunning() && now - m_lastRenderMs >= 50) {
     const float speedInputKmh =
         m_model.speedValid ? m_model.speedKmh : 0.0f;
     if (!m_speedInitialized) {
