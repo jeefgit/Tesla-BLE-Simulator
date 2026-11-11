@@ -375,19 +375,27 @@ void LvglDashboard::buildDriving() {
   lv_obj_set_scrollable(m_speedGroup, false);
 
   m_speedLabel = makeScaledLabel(m_speedGroup, 233, 163, "--",
-                                 &lv_font_montserrat_48, kText, 560);
-  makeLabel(m_speedGroup, 0, 235, 466, 18, "K M / H",
+                                 &lv_font_montserrat_48, kText, 600);
+  makeLabel(m_speedGroup, 0, 235, 466, 18, "km/h",
             &lv_font_montserrat_14, kDim, LV_TEXT_ALIGN_CENTER);
 
   const char* gears[] = {"P", "R", "N", "D"};
   const int32_t gearX[] = {179, 205, 231, 257};
+  m_gearHighlight = lv_obj_create(m_speedGroup);
+  lv_obj_remove_style_all(m_gearHighlight);
+  lv_obj_set_size(m_gearHighlight, 24, 24);
+  lv_obj_set_style_radius(m_gearHighlight, 7, 0);
+  lv_obj_set_style_bg_color(m_gearHighlight, lv_color_hex(0x35191D), 0);
+  lv_obj_set_style_bg_opa(m_gearHighlight, LV_OPA_COVER, 0);
+  lv_obj_set_hidden(m_gearHighlight, true);
+
   for (int32_t i = 0; i < 4; ++i) {
     m_gearLabels[i] = makeLabel(m_speedGroup, gearX[i], 259, 18, 18,
                                 gears[i], &lv_font_montserrat_14, kFaint,
                                 LV_TEXT_ALIGN_CENTER);
   }
 
-  makeLabel(m_speedGroup, 83, 291, 300, 14, "OUTPUT POWER",
+  makeLabel(m_speedGroup, 83, 291, 300, 14, "MOTOR POWER",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
   m_powerLabel = makeLabel(m_speedGroup, 83, 305, 300, 29, "--.- kW",
                            &lv_font_montserrat_24, kText, LV_TEXT_ALIGN_CENTER);
@@ -673,10 +681,19 @@ void LvglDashboard::render(const UiModel& model) {
   updateSpeedLabel(model.speedKmh, model.speedValid);
 
   const char gears[] = {'P', 'R', 'N', 'D'};
+  bool selectedGearVisible = false;
   for (uint8_t i = 0; i < 4; ++i) {
     const bool selected = model.gear == gears[i];
+    if (selected) {
+      lv_obj_set_pos(m_gearHighlight, 176 + i * 26, 256);
+      lv_obj_set_hidden(m_gearHighlight, false);
+      selectedGearVisible = true;
+    }
     lv_obj_set_style_text_color(m_gearLabels[i],
-                                selected ? kText : lv_color_hex(0x39434F), 0);
+                                selected ? kText : lv_color_hex(0x5A6370), 0);
+  }
+  if (!selectedGearVisible) {
+    lv_obj_set_hidden(m_gearHighlight, true);
   }
 
   if (model.powerValid) {
