@@ -25,6 +25,14 @@
 // 0 = 只接收 53B 旁路 SimPayload（模拟器调试用）
 #define CFG_TESLA_CRYPTO 1
 
+// 1 = 辅助状态轮询包含四轮胎压
+// 0 = 暂不查询胎压（少发一条 GetVehicleData，仪表胎压显示为断连/占位）
+#define CFG_TESLA_QUERY_TIRE_PRESSURE 0
+
+// 1 = 辅助状态轮询包含车门/中控锁状态
+// 0 = 暂不查询车门（仪表车门/锁车状态保持断连/占位）
+#define CFG_TESLA_QUERY_CLOSURES 0
+
 // 本地真实私钥（被 .gitignore 忽略，不提交）；缺失时用后端内置测试密钥。
 #if defined(__has_include)
 #if __has_include("secrets/tesla_client_key.h")

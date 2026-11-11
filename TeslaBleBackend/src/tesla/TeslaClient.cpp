@@ -43,6 +43,36 @@ const char* requestName(TeslaCrypto::VehicleDataRequest r) {
   return "?";
 }
 
+// 辅助状态轮询的下一类；返回 Charge 表示本轮结束。
+// 可分别用 CFG_TESLA_QUERY_CLOSURES / CFG_TESLA_QUERY_TIRE_PRESSURE 关闭。
+TeslaCrypto::VehicleDataRequest nextAuxiliaryRequest(
+    TeslaCrypto::VehicleDataRequest r) {
+  switch (r) {
+    case TeslaCrypto::VehicleDataRequest::Charge:
+      return TeslaCrypto::VehicleDataRequest::Climate;
+    case TeslaCrypto::VehicleDataRequest::Climate:
+#if CFG_TESLA_QUERY_CLOSURES
+      return TeslaCrypto::VehicleDataRequest::Closures;
+#else
+      return TeslaCrypto::VehicleDataRequest::Charge;
+#endif
+    case TeslaCrypto::VehicleDataRequest::Closures:
+#if CFG_TESLA_QUERY_TIRE_PRESSURE
+      return TeslaCrypto::VehicleDataRequest::TirePressure;
+#else
+      return TeslaCrypto::VehicleDataRequest::Charge;
+#endif
+    case TeslaCrypto::VehicleDataRequest::TirePressure:
+    case TeslaCrypto::VehicleDataRequest::Drive:
+      break;
+  }
+  return TeslaCrypto::VehicleDataRequest::Charge;
+}
+
+bool isLastAuxiliaryRequest(TeslaCrypto::VehicleDataRequest r) {
+  return nextAuxiliaryRequest(r) == TeslaCrypto::VehicleDataRequest::Charge;
+}
+
 // ── CarServer.ChargeState ─────────────────────────────────────────
 // 字段号见 tesla_protocol/protobuf/vehicle.proto
 bool decodeChargeState(pb::Reader& r) {
@@ -578,10 +608,12 @@ void TeslaClient::sendPoll() {
       // 驾驶状态（车速、档位等）按 CFG_TESLA_DRIVE_POLL_INTERVAL_MS 刷新。
       m_nextDrivePollAt = now + CFG_TESLA_DRIVE_POLL_INTERVAL_MS;
     } else {
-      // 每轮连续请求 4 类辅助状态；完整一轮结束后再等待 AUX 周期。
+      // 每轮连续请求辅助状态（胎压/车门可单独关闭）；完整一轮结束后
+      // 再等待 AUX 周期。
+      const bool lastAuxiliary = isLastAuxiliaryRequest(request);
       if (m_auxBurstActive) {
-        if (request == TeslaCrypto::VehicleDataRequest::TirePressure) {
-          // 胎压是每轮最后一类，从此刻开始计算下一轮的等待时间。
+        if (lastAuxiliary) {
+          // 本轮最后一类，从此刻开始计算下一轮的等待时间。
           m_nextAuxiliaryPollAt = now + CFG_TESLA_AUX_POLL_INTERVAL_MS;
         } else {
           m_nextAuxiliaryPollAt = now;  // 紧接着请求下一类
@@ -589,23 +621,7 @@ void TeslaClient::sendPoll() {
       } else {
         m_nextAuxiliaryPollAt = now + CFG_TESLA_AUX_POLL_INTERVAL_MS;
       }
-      switch (request) {
-        case TeslaCrypto::VehicleDataRequest::Charge:
-          m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Climate;
-          break;
-        case TeslaCrypto::VehicleDataRequest::Climate:
-          m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Closures;
-          break;
-        case TeslaCrypto::VehicleDataRequest::Closures:
-          m_nextAuxiliaryRequest =
-              TeslaCrypto::VehicleDataRequest::TirePressure;
-          break;
-        case TeslaCrypto::VehicleDataRequest::TirePressure:
-          m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
-          break;
-        case TeslaCrypto::VehicleDataRequest::Drive:
-          break;
-      }
+      m_nextAuxiliaryRequest = nextAuxiliaryRequest(request);
     }
 
     // 下一次动作取两个独立周期中更早到期的那一个。

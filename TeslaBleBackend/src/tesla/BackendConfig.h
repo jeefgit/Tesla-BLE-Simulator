@@ -73,6 +73,18 @@
 #ifndef CFG_TESLA_AUX_POLL_INTERVAL_MS
 #define CFG_TESLA_AUX_POLL_INTERVAL_MS 31000
 #endif
+// 是否在辅助状态轮询中查询四轮胎压（GetVehicleData: TirePressure）。
+//   1 = 每轮辅助状态都请求胎压
+//   0 = 跳过胎压请求（后台不再发胎压命令，仪表胎压保持断连/占位显示）
+#ifndef CFG_TESLA_QUERY_TIRE_PRESSURE
+#define CFG_TESLA_QUERY_TIRE_PRESSURE 1
+#endif
+// 是否在辅助状态轮询中查询车门/中控锁状态（GetVehicleData: Closures）。
+//   1 = 每轮辅助状态都请求车门状态
+//   0 = 跳过车门状态请求（仪表车门/锁车显示保持断连/占位）
+#ifndef CFG_TESLA_QUERY_CLOSURES
+#define CFG_TESLA_QUERY_CLOSURES 1
+#endif
 #ifndef CFG_TESLA_POLL_RETRY_MS
 #define CFG_TESLA_POLL_RETRY_MS 500
 #endif

@@ -11,6 +11,19 @@ Arduino_CO5300* s_gfx = nullptr;
 
 uint32_t getLvglTick() { return millis(); }
 
+// CO5300 的 CASET/PASET 窗口按 2 像素对齐更稳（Waveshare BSP 也这样做）：
+// 起点向下取偶、终点向上取奇，避免奇数列/行触发面板窗口异常。
+void roundInvalidArea(lv_event_t* event) {
+  auto* area = static_cast<lv_area_t*>(lv_event_get_param(event));
+  if (area == nullptr) {
+    return;
+  }
+  area->x1 &= ~1;
+  area->y1 &= ~1;
+  area->x2 |= 1;
+  area->y2 |= 1;
+}
+
 }  // namespace
 
 bool RoundDisplay::begin() {
@@ -35,14 +48,16 @@ bool RoundDisplay::begin() {
     return false;
   }
 
-  constexpr uint32_t kBufferLines = 96;
+  // 50 行与 Waveshare BSP 默认一致；优先放内部 SRAM（LVGL 软件渲染写
+  // PSRAM 会明显变慢），空间不足再退回 PSRAM。
+  constexpr uint32_t kBufferLines = 50;
   const uint32_t bufferBytes =
       static_cast<uint32_t>(board.width) * kBufferLines * sizeof(uint16_t);
   m_drawBuffer =
-      heap_caps_malloc(bufferBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      heap_caps_malloc(bufferBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   if (m_drawBuffer == nullptr) {
     m_drawBuffer =
-        heap_caps_malloc(bufferBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        heap_caps_malloc(bufferBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   }
   if (m_drawBuffer == nullptr) {
     return false;
@@ -52,6 +67,8 @@ bool RoundDisplay::begin() {
   lv_display_set_flush_cb(m_display, RoundDisplay::flush);
   lv_display_set_buffers(m_display, m_drawBuffer, nullptr, bufferBytes,
                          LV_DISPLAY_RENDER_MODE_PARTIAL);
+  lv_display_add_event_cb(m_display, roundInvalidArea,
+                          LV_EVENT_INVALIDATE_AREA, nullptr);
   lv_display_set_default(m_display);
   return true;
 }

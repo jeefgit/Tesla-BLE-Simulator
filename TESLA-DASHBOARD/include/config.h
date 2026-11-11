@@ -85,6 +85,16 @@
 // ---------------------------------------------------------------------------
 #define CFG_TESLA_CRYPTO 1
 
+// 是否请求四轮胎压（GetVehicleData: TirePressure）：
+//   1 = 每轮辅助状态包含胎压
+//   0 = 暂不查询胎压（少发一条命令，仪表胎压保持断连/占位显示）
+#define CFG_TESLA_QUERY_TIRE_PRESSURE 0
+
+// 是否请求车门/中控锁状态（GetVehicleData: Closures）：
+//   1 = 每轮辅助状态包含车门
+//   0 = 暂不查询车门（仪表车门/锁车状态保持断连/占位）
+#define CFG_TESLA_QUERY_CLOSURES 0
+
 // 客户端私钥（64 位 hex，32 字节）。
 // 本地真实密钥放在 include/secrets/tesla_client_key.h（已被 .gitignore 忽略），
 // 存在时自动覆盖下面的默认值；默认值取自 Tesla 官方 vehicle-command
@@ -108,6 +118,8 @@
 // GetVehicleData 刷新周期（毫秒）：
 //   驾驶状态（车速/档位/功率）按 DRIVE 周期请求；
 //   辅助状态（充电/空调/车门/胎压）每轮连续请求一遍，整轮之间等待 AUX 周期。
+//   车门、胎压可分别用 CFG_TESLA_QUERY_CLOSURES / CFG_TESLA_QUERY_TIRE_PRESSURE
+//   单独关闭（关闭后每轮少发一条）。
 // 握手成功后立即开始第一轮辅助数据请求。
 #define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 300
 #define CFG_TESLA_AUX_POLL_INTERVAL_MS 31000

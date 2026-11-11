@@ -66,10 +66,15 @@ lv_obj_t* makeScaledLabel(lv_obj_t* parent, int32_t centerX, int32_t centerY,
                           const char* text, const lv_font_t* font,
                           lv_color_t color, int32_t scale) {
   const int32_t lineHeight = lv_font_get_line_height(font);
+  // 宽度用内容宽度，而不是整屏 466。
+  // LVGL 给带 transform 的对象分配 ARGB8888 图层时按对象框大小分配；
+  // 整屏宽 466x56 约 120KB，会把 LVGL 堆撑爆（曾导致 StoreProhibited）。
+  // 按内容宽度后图层一般只有几十 KB，同时每帧要变换的像素也少很多。
   lv_obj_t* label =
-      makeLabel(parent, centerX - kScreenSize / 2, centerY - lineHeight / 2,
-                kScreenSize, lineHeight, text, font, color,
+      makeLabel(parent, 0, 0, LV_SIZE_CONTENT, lineHeight, text, font, color,
                 LV_TEXT_ALIGN_CENTER);
+  lv_obj_align(label, LV_ALIGN_TOP_MID, centerX - kScreenSize / 2,
+               centerY - lineHeight / 2);
   setScale(label, scale);
   return label;
 }

@@ -14,5 +14,6 @@ void setup() {
 
 void loop() {
   dashboard.loop();
-  delay(2);
+  // 5ms 足够满足 LVGL 33ms 刷新与 20Hz 仪表更新，空转开销比 2ms 更低。
+  delay(5);
 }

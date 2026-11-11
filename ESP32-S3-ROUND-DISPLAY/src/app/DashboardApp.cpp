@@ -39,11 +39,14 @@ void DashboardApp::begin() {
     Serial.println("Display initialization failed.");
     return;
   }
+  Serial.printf("Display ready, free heap: %u bytes\n", ESP.getFreeHeap());
   dashboard.begin();
+  Serial.printf("UI built, free heap: %u bytes\n", ESP.getFreeHeap());
 #if !CFG_DEMO_MODE
   m_source.begin();
 #endif
   dashboard.render(m_model);
+  Serial.printf("First frame, free heap: %u bytes\n", ESP.getFreeHeap());
   m_lastRenderedModel = m_model;
   m_hasRenderedModel = true;
   m_initialized = true;
