@@ -123,20 +123,22 @@ lv_color_t linkColor(UiLinkState state) {
 }
 
 // ---- boot animation -------------------------------------------------------
-// A purple arc sweeps clockwise around the outermost circle of the round
-// panel: at 0 ms nothing is drawn, at 2000 ms the full 360 degree ring is on
-// screen. The overlay is then removed so the dashboard becomes visible.
+// Circular progress fill on the outermost circle of the round panel: the full
+// circle is drawn as a dim track, then a purple ring fills it clockwise from
+// 12 o'clock. The filled share is driven by time: 0 % at 0 ms, 50 % at half
+// the duration, 100 % at kBootRingDurationMs. The overlay is removed shortly
+// after the circle is full so the dashboard becomes visible.
 //
 // The progress is driven by a plain repeating lv_timer instead of lv_anim.
 // lv_anim only advances inside lv_timer_handler(), so any long stall (BLE init,
-// a slow full-screen flush) silently eats animation time. Recomputing the sweep
-// angle from millis() on every tick keeps the 2 s duration exact and lets the
+// a slow full-screen flush) silently eats animation time. Recomputing the
+// percentage from millis() on every tick keeps the duration exact and lets the
 // state be logged.
 
 constexpr uint32_t kBootRingTickMs = 16;
 constexpr uint32_t kBootRingHoldMs = 400;
 constexpr int32_t kBootRingSize = 460;
-constexpr int32_t kBootRingWidth = 8;
+constexpr int32_t kBootRingWidth = 14;
 // Start at 12 o'clock: LVGL's 0 degree is 3 o'clock and angles grow clockwise,
 // so a 270 degree rotation moves the arc's start to the top of the circle.
 constexpr int32_t kBootRingRotation = 270;
@@ -162,18 +164,18 @@ void bootRingTick(lv_timer_t* timer) {
 
   const uint32_t elapsed = millis() - s_bootStartMs;
   const bool finished = elapsed >= kBootRingDurationMs;
-  const int32_t angle =
-      finished ? 360
+  const int32_t percent =
+      finished ? 100
                : static_cast<int32_t>(
-                     (static_cast<int64_t>(360) * elapsed) /
+                     (static_cast<int64_t>(100) * elapsed) /
                      kBootRingDurationMs);
-  // Indicator from 0 to `angle`, with the track (background) keeping the full
-  // circle faintly visible.
-  lv_arc_set_angles(ring, 0, angle);
+  // Range is 0..100, so the value is literally "how much of the circle is
+  // filled". LVGL maps it onto the 0..360 background arc.
+  lv_arc_set_value(ring, percent);
 
   if (elapsed >= s_bootNextLogMs) {
-    CFG_LOG("[UI] boot ring %lums angle=%ld", static_cast<unsigned long>(elapsed),
-            static_cast<long>(angle));
+    CFG_LOG("[UI] boot ring %lums fill=%ld%%",
+            static_cast<unsigned long>(elapsed), static_cast<long>(percent));
     s_bootNextLogMs = elapsed + 250;
   }
 
@@ -183,8 +185,8 @@ void bootRingTick(lv_timer_t* timer) {
     CFG_LOG("[UI] boot ring animation finished");
     lv_obj_t* layer = lv_obj_get_parent(ring);
     if (layer != nullptr) {
-      // Keep the completed outer ring on screen briefly so the end state is
-      // visible even if the sweep itself was missed.
+      // Keep the fully filled ring on screen briefly so the end state is
+      // visible even if the fill itself was missed.
       lv_obj_delete_delayed(layer, kBootRingHoldMs);
     }
   }
@@ -225,9 +227,9 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_clear_flag(m_bootLayer, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_move_foreground(m_bootLayer);
 
-  // Sweeping arc at the outermost edge of the round panel. Only the indicator
-  // is purple; the background arc is a faint track so the target circle is
-  // hinted while the sweep runs.
+  // Circular progress ring at the outermost edge of the round panel: the full
+  // circle is a dim track, the purple indicator fills it clockwise from 12
+  // o'clock as the percentage grows.
   constexpr int32_t ringOffset = (kScreenSize - kBootRingSize) / 2;
   m_bootRing = lv_arc_create(m_bootLayer);
   lv_obj_remove_style_all(m_bootRing);
@@ -235,9 +237,8 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_set_pos(m_bootRing, ringOffset, ringOffset);
   lv_arc_set_rotation(m_bootRing, kBootRingRotation);
   lv_arc_set_bg_angles(m_bootRing, 0, 360);
-  lv_arc_set_range(m_bootRing, 0, 360);
+  lv_arc_set_range(m_bootRing, 0, 100);
   lv_arc_set_value(m_bootRing, 0);
-  lv_arc_set_angles(m_bootRing, 0, 0);
   lv_arc_set_mode(m_bootRing, LV_ARC_MODE_NORMAL);
   lv_obj_clear_flag(m_bootRing, LV_OBJ_FLAG_CLICKABLE);
 
@@ -246,7 +247,7 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_set_style_pad_all(m_bootRing, 0, LV_PART_MAIN);
   lv_obj_set_style_arc_width(m_bootRing, kBootRingWidth, LV_PART_MAIN);
   lv_obj_set_style_arc_rounded(m_bootRing, true, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(m_bootRing, lv_color_hex(0x1A1226),
+  lv_obj_set_style_arc_color(m_bootRing, lv_color_hex(0x2A2140),
                              LV_PART_MAIN);
 
   lv_obj_set_style_arc_width(m_bootRing, kBootRingWidth, LV_PART_INDICATOR);

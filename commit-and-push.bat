@@ -27,6 +27,8 @@ if errorlevel 1 (
 
 echo.
 echo Current branch detected.
+
+:commit_loop
 echo Current changes:
 git status --short
 echo.
@@ -37,7 +39,7 @@ if errorlevel 1 goto failed
 git diff --cached --quiet
 if not errorlevel 1 (
   echo Nothing staged to commit.
-  goto finished
+  goto ask_next
 )
 
 git diff --cached --check
@@ -70,7 +72,14 @@ if errorlevel 1 (
 
 echo.
 echo Commit and push completed successfully.
-goto finished
+goto ask_next
+
+:ask_next
+echo.
+choice /C YN /M "Continue with the next commit"
+if errorlevel 2 goto finished
+if errorlevel 1 goto commit_loop
+goto failed
 
 :failed
 echo.
@@ -81,6 +90,6 @@ exit /b 1
 
 :finished
 echo.
-pause
+echo Exiting.
 endlocal
 exit /b 0
