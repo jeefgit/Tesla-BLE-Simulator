@@ -22,7 +22,6 @@ const lv_color_t kGreen = lv_color_hex(0x21C15E);
 const lv_color_t kAmber = lv_color_hex(0xFFB340);
 const lv_color_t kTrack = lv_color_hex(0x1D2733);
 const lv_color_t kCard = lv_color_hex(0x0C1218);
-const lv_color_t kPurple = lv_color_hex(0x9B5CFF);
 
 lv_obj_t* makeLabel(lv_obj_t* parent, int32_t x, int32_t y, int32_t width,
                     int32_t height, const char* text, const lv_font_t* font,
@@ -143,7 +142,7 @@ constexpr uint32_t kBootRingTickMs =
 constexpr uint32_t kBootLogoHoldMs = 1000;
 constexpr uint32_t kBootLogoAnimMs = 750;
 constexpr int32_t kBootLogoStartScale = 128;
-constexpr int32_t kBootLogoEndScale = 256;
+constexpr int32_t kBootLogoEndScale = 320;
 constexpr int32_t kBootRingSize = 460;
 constexpr int32_t kBootRingWidth = 12;
 // Start at 12 o'clock: LVGL's 0 degree is 3 o'clock and angles grow clockwise,
@@ -163,6 +162,20 @@ void bootLogoAnimate(void* object, int32_t scale) {
       (scale - kBootLogoStartScale) * LV_OPA_COVER /
       (kBootLogoEndScale - kBootLogoStartScale);
   lv_obj_set_style_opa(label, opacity, 0);
+}
+
+void startBootLogoAnimation() {
+  if (s_bootLabel == nullptr) return;
+
+  lv_anim_t animation;
+  lv_anim_init(&animation);
+  lv_anim_set_var(&animation, s_bootLabel);
+  lv_anim_set_values(&animation, kBootLogoStartScale, kBootLogoEndScale);
+  lv_anim_set_duration(&animation, kBootLogoAnimMs);
+  lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
+  lv_anim_set_exec_cb(&animation, bootLogoAnimate);
+  lv_anim_start(&animation);
+  CFG_LOG("[UI] boot logo animation start");
 }
 
 void bootLogoFinished(lv_timer_t* timer) {
@@ -186,6 +199,7 @@ void bootRingTick(lv_timer_t* timer) {
     s_bootStartMs = millis();
     s_bootNextLogMs = 0;
     CFG_LOG("[UI] boot ring animation start");
+    startBootLogoAnimation();
   }
 
   s_bootPercent += kBootRingStepPercent;
@@ -208,18 +222,6 @@ void bootRingTick(lv_timer_t* timer) {
     lv_timer_delete(timer);
     CFG_LOG("[UI] boot ring animation finished");
     lv_obj_t* layer = lv_obj_get_parent(ring);
-    if (s_bootLabel != nullptr) {
-      lv_anim_t animation;
-      lv_anim_init(&animation);
-      lv_anim_set_var(&animation, s_bootLabel);
-      lv_anim_set_values(&animation, kBootLogoStartScale,
-                         kBootLogoEndScale);
-      lv_anim_set_duration(&animation, kBootLogoAnimMs);
-      lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
-      lv_anim_set_exec_cb(&animation, bootLogoAnimate);
-      lv_anim_start(&animation);
-    }
-    CFG_LOG("[UI] boot logo shown");
     lv_timer_create(bootLogoFinished, kBootLogoHoldMs, layer);
   }
 }
@@ -279,12 +281,11 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_set_style_pad_all(m_bootRing, 0, LV_PART_MAIN);
   lv_obj_set_style_arc_width(m_bootRing, kBootRingWidth, LV_PART_MAIN);
   lv_obj_set_style_arc_rounded(m_bootRing, true, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(m_bootRing, lv_color_hex(0x2A2140),
-                             LV_PART_MAIN);
+  lv_obj_set_style_arc_color(m_bootRing, kTrack, LV_PART_MAIN);
 
   lv_obj_set_style_arc_width(m_bootRing, kBootRingWidth, LV_PART_INDICATOR);
   lv_obj_set_style_arc_rounded(m_bootRing, true, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(m_bootRing, kPurple, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(m_bootRing, kRed, LV_PART_INDICATOR);
 
   // No knob: the arc is display-only.
   lv_obj_set_style_bg_opa(m_bootRing, LV_OPA_TRANSP, LV_PART_KNOB);
@@ -293,7 +294,7 @@ void LvglDashboard::buildBootAnimation() {
 
   m_bootLabel = makeScaledLabel(m_bootLayer, kScreenSize / 2,
                                 kScreenSize / 2, "TESLA",
-                                &lv_font_montserrat_48, kRed,
+                                &lv_font_montserrat_48, kText,
                                 kBootLogoStartScale);
   lv_obj_set_style_opa(m_bootLabel, LV_OPA_TRANSP, 0);
   s_bootLabel = m_bootLabel;
