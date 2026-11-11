@@ -13,7 +13,6 @@ constexpr uint32_t kPairingWindowMs = 30000;
 constexpr int32_t kArcMaxValue = 1000;
 constexpr float kGaugeMaxSpeedKmh = 240.0f;
 constexpr uint32_t kBootRingDurationMs = 2000;
-constexpr int32_t kBootRingMaxSize = 460;
 const lv_color_t kScreen = lv_color_hex(0x020406);
 const lv_color_t kText = lv_color_hex(0xF5F7FA);
 const lv_color_t kDim = lv_color_hex(0x8A93A6);
@@ -124,30 +123,28 @@ lv_color_t linkColor(UiLinkState state) {
 }
 
 // ---- boot animation -------------------------------------------------------
-// A purple ring grows from the exact center of the round panel out to the
-// outermost edge, then the overlay is removed so the dashboard becomes visible.
+// A purple arc sweeps clockwise around the outermost circle of the round
+// panel: at 0 ms nothing is drawn, at 2000 ms the full 360 degree ring is on
+// screen. The overlay is then removed so the dashboard becomes visible.
 //
 // The progress is driven by a plain repeating lv_timer instead of lv_anim.
 // lv_anim only advances inside lv_timer_handler(), so any long stall (BLE init,
-// a slow full-screen flush) silently eats animation time. Recomputing the size
-// from millis() on every tick keeps the 2 s duration exact and lets the state
-// be logged. The position is also set explicitly instead of via lv_obj_center()
-// so the ring stays centered no matter when LVGL recalculates alignment.
+// a slow full-screen flush) silently eats animation time. Recomputing the sweep
+// angle from millis() on every tick keeps the 2 s duration exact and lets the
+// state be logged.
 
 constexpr uint32_t kBootRingTickMs = 16;
 constexpr uint32_t kBootRingHoldMs = 400;
-constexpr int32_t kBootRingStartSize = 24;
+constexpr int32_t kBootRingSize = 460;
+constexpr int32_t kBootRingWidth = 8;
+// Start at 12 o'clock: LVGL's 0 degree is 3 o'clock and angles grow clockwise,
+// so a 270 degree rotation moves the arc's start to the top of the circle.
+constexpr int32_t kBootRingRotation = 270;
 
 uint32_t s_bootStartMs = 0;
 uint32_t s_bootNextLogMs = 0;
 bool s_bootStarted = false;
 bool s_bootRunning = false;
-
-void bootRingPlace(lv_obj_t* ring, int32_t size) {
-  const int32_t offset = (kScreenSize - size) / 2;
-  lv_obj_set_size(ring, size, size);
-  lv_obj_set_pos(ring, offset, offset);
-}
 
 void bootRingTick(lv_timer_t* timer) {
   auto* ring = static_cast<lv_obj_t*>(lv_timer_get_user_data(timer));
@@ -165,21 +162,18 @@ void bootRingTick(lv_timer_t* timer) {
 
   const uint32_t elapsed = millis() - s_bootStartMs;
   const bool finished = elapsed >= kBootRingDurationMs;
-  int32_t size = kBootRingMaxSize;
-  if (!finished) {
-    size = kBootRingStartSize +
-           static_cast<int32_t>(
-               (static_cast<int64_t>(kBootRingMaxSize - kBootRingStartSize) *
-                elapsed) /
-               kBootRingDurationMs);
-  }
-  bootRingPlace(ring, size);
+  const int32_t angle =
+      finished ? 360
+               : static_cast<int32_t>(
+                     (static_cast<int64_t>(360) * elapsed) /
+                     kBootRingDurationMs);
+  // Indicator from 0 to `angle`, with the track (background) keeping the full
+  // circle faintly visible.
+  lv_arc_set_angles(ring, 0, angle);
 
   if (elapsed >= s_bootNextLogMs) {
-    CFG_LOG("[UI] boot ring %lums size=%ld at (%ld,%ld)",
-            static_cast<unsigned long>(elapsed), static_cast<long>(size),
-            static_cast<long>(lv_obj_get_x(ring)),
-            static_cast<long>(lv_obj_get_y(ring)));
+    CFG_LOG("[UI] boot ring %lums angle=%ld", static_cast<unsigned long>(elapsed),
+            static_cast<long>(angle));
     s_bootNextLogMs = elapsed + 250;
   }
 
@@ -190,7 +184,7 @@ void bootRingTick(lv_timer_t* timer) {
     lv_obj_t* layer = lv_obj_get_parent(ring);
     if (layer != nullptr) {
       // Keep the completed outer ring on screen briefly so the end state is
-      // visible even if the expansion itself was missed.
+      // visible even if the sweep itself was missed.
       lv_obj_delete_delayed(layer, kBootRingHoldMs);
     }
   }
@@ -231,16 +225,38 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_clear_flag(m_bootLayer, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_move_foreground(m_bootLayer);
 
-  m_bootRing = lv_obj_create(m_bootLayer);
+  // Sweeping arc at the outermost edge of the round panel. Only the indicator
+  // is purple; the background arc is a faint track so the target circle is
+  // hinted while the sweep runs.
+  constexpr int32_t ringOffset = (kScreenSize - kBootRingSize) / 2;
+  m_bootRing = lv_arc_create(m_bootLayer);
   lv_obj_remove_style_all(m_bootRing);
-  bootRingPlace(m_bootRing, kBootRingStartSize);
-  lv_obj_set_style_radius(m_bootRing, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_opa(m_bootRing, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(m_bootRing, 8, 0);
-  lv_obj_set_style_border_color(m_bootRing, kPurple, 0);
-  lv_obj_set_style_border_opa(m_bootRing, LV_OPA_COVER, 0);
-  lv_obj_set_style_pad_all(m_bootRing, 0, 0);
+  lv_obj_set_size(m_bootRing, kBootRingSize, kBootRingSize);
+  lv_obj_set_pos(m_bootRing, ringOffset, ringOffset);
+  lv_arc_set_rotation(m_bootRing, kBootRingRotation);
+  lv_arc_set_bg_angles(m_bootRing, 0, 360);
+  lv_arc_set_range(m_bootRing, 0, 360);
+  lv_arc_set_value(m_bootRing, 0);
+  lv_arc_set_angles(m_bootRing, 0, 0);
+  lv_arc_set_mode(m_bootRing, LV_ARC_MODE_NORMAL);
   lv_obj_clear_flag(m_bootRing, LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_set_style_bg_opa(m_bootRing, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_width(m_bootRing, 0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(m_bootRing, 0, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(m_bootRing, kBootRingWidth, LV_PART_MAIN);
+  lv_obj_set_style_arc_rounded(m_bootRing, true, LV_PART_MAIN);
+  lv_obj_set_style_arc_color(m_bootRing, lv_color_hex(0x1A1226),
+                             LV_PART_MAIN);
+
+  lv_obj_set_style_arc_width(m_bootRing, kBootRingWidth, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_rounded(m_bootRing, true, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(m_bootRing, kPurple, LV_PART_INDICATOR);
+
+  // No knob: the arc is display-only.
+  lv_obj_set_style_bg_opa(m_bootRing, LV_OPA_TRANSP, LV_PART_KNOB);
+  lv_obj_set_style_border_width(m_bootRing, 0, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(m_bootRing, 0, LV_PART_KNOB);
 
   // The timer measures elapsed time itself, so the animation starts on the
   // first lv_timer_handler() run (after BLE init) and always lasts 2 s of real
