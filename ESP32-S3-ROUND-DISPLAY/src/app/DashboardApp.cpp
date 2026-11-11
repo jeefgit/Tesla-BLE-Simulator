@@ -44,6 +44,7 @@ void DashboardApp::begin() {
   Serial.printf("UI built, free heap: %u bytes\n", ESP.getFreeHeap());
 #if !CFG_DEMO_MODE
   m_sourceStarted = false;
+  m_model.link = UiLinkState::Scanning;
 #endif
   dashboard.render(m_model);
   Serial.printf("First frame, free heap: %u bytes\n", ESP.getFreeHeap());

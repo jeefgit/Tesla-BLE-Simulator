@@ -333,32 +333,6 @@ void LvglDashboard::buildGauge() {
   lv_obj_set_style_border_width(m_arc, 0, LV_PART_KNOB);
   lv_obj_set_clickable(m_arc, false);
 
-  lv_obj_t* tickLayer = lv_obj_create(screen);
-  lv_obj_remove_style_all(tickLayer);
-  lv_obj_set_size(tickLayer, kScreenSize, kScreenSize);
-  lv_obj_set_scrollable(tickLayer, false);
-
-  for (int32_t i = 0; i <= 12; ++i) {
-    const float angle = (204.0f + static_cast<float>(i) * 11.0f) *
-                        0.017453292519943295f;
-    const bool major = (i % 3) == 0;
-    const float r1 = major ? 178.0f : 181.0f;
-    const float r2 = major ? 189.0f : 186.0f;
-    const lv_point_precise_t points[] = {
-        {static_cast<int32_t>(233.0f + r1 * cosf(angle)),
-         static_cast<int32_t>(233.0f + r1 * sinf(angle))},
-        {static_cast<int32_t>(233.0f + r2 * cosf(angle)),
-         static_cast<int32_t>(233.0f + r2 * sinf(angle))},
-    };
-    lv_obj_t* tick = lv_line_create(tickLayer);
-    lv_line_set_points(tick, points, 2);
-    lv_obj_set_style_line_color(tick, major ? lv_color_hex(0x445365)
-                                            : lv_color_hex(0x2B3744),
-                                0);
-    lv_obj_set_style_line_width(tick, major ? 2 : 1, 0);
-    lv_obj_set_style_line_rounded(tick, true, 0);
-  }
-
   m_gaugeMinLabel = makeLabel(screen, 47, 150, 30, 18, "0",
                               &lv_font_montserrat_10, kFaint,
                               LV_TEXT_ALIGN_CENTER);
