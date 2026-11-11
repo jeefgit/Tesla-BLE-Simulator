@@ -22,6 +22,7 @@ const lv_color_t kGreen = lv_color_hex(0x21C15E);
 const lv_color_t kAmber = lv_color_hex(0xFFB340);
 const lv_color_t kTrack = lv_color_hex(0x1D2733);
 const lv_color_t kCard = lv_color_hex(0x0C1218);
+const lv_color_t kBootRingColor = lv_color_hex(0xAEB8C2);
 
 lv_obj_t* makeLabel(lv_obj_t* parent, int32_t x, int32_t y, int32_t width,
                     int32_t height, const char* text, const lv_font_t* font,
@@ -140,8 +141,8 @@ constexpr int32_t kBootRingStepPercent = 1;
 constexpr uint32_t kBootRingTickMs =
     kBootRingDurationMs / (100 / kBootRingStepPercent);
 constexpr uint32_t kBootLogoHoldMs = 1000;
-constexpr uint32_t kBootLogoAnimMs = 750;
-constexpr int32_t kBootLogoStartScale = 128;
+constexpr uint32_t kBootLogoAnimMs = kBootRingDurationMs;
+constexpr int32_t kBootLogoStartScale = 64;
 constexpr int32_t kBootLogoEndScale = 320;
 constexpr int32_t kBootRingSize = 460;
 constexpr int32_t kBootRingWidth = 12;
@@ -285,7 +286,8 @@ void LvglDashboard::buildBootAnimation() {
 
   lv_obj_set_style_arc_width(m_bootRing, kBootRingWidth, LV_PART_INDICATOR);
   lv_obj_set_style_arc_rounded(m_bootRing, true, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(m_bootRing, kRed, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(m_bootRing, kBootRingColor,
+                             LV_PART_INDICATOR);
 
   // No knob: the arc is display-only.
   lv_obj_set_style_bg_opa(m_bootRing, LV_OPA_TRANSP, LV_PART_KNOB);
