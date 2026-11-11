@@ -12,7 +12,7 @@ constexpr int32_t kScreenSize = 466;
 constexpr uint32_t kPairingWindowMs = 30000;
 constexpr int32_t kArcMaxValue = 1000;
 constexpr float kGaugeMaxSpeedKmh = 240.0f;
-constexpr uint32_t kBootRingDurationMs = 2000;
+constexpr uint32_t kBootRingDurationMs = 3000;
 const lv_color_t kScreen = lv_color_hex(0x020406);
 const lv_color_t kText = lv_color_hex(0xF5F7FA);
 const lv_color_t kDim = lv_color_hex(0x8A93A6);
@@ -136,9 +136,9 @@ lv_color_t linkColor(UiLinkState state) {
 // state be logged.
 
 constexpr uint32_t kBootRingTickMs = 16;
-constexpr uint32_t kBootRingHoldMs = 400;
+constexpr uint32_t kBootRingHoldMs = 100;
 constexpr int32_t kBootRingSize = 460;
-constexpr int32_t kBootRingWidth = 14;
+constexpr int32_t kBootRingWidth = 12;
 // Start at 12 o'clock: LVGL's 0 degree is 3 o'clock and angles grow clockwise,
 // so a 270 degree rotation moves the arc's start to the top of the circle.
 constexpr int32_t kBootRingRotation = 270;
