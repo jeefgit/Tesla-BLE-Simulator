@@ -16,6 +16,7 @@ class DashboardApp {
  private:
 #if !CFG_DEMO_MODE
   TeslaUiSource m_source;
+  bool m_sourceStarted = false;
 #endif
   UiModel m_model;
   bool m_initialized = false;

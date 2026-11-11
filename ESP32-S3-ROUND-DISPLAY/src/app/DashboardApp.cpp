@@ -43,7 +43,7 @@ void DashboardApp::begin() {
   dashboard.begin();
   Serial.printf("UI built, free heap: %u bytes\n", ESP.getFreeHeap());
 #if !CFG_DEMO_MODE
-  m_source.begin();
+  m_sourceStarted = false;
 #endif
   dashboard.render(m_model);
   Serial.printf("First frame, free heap: %u bytes\n", ESP.getFreeHeap());
@@ -60,8 +60,14 @@ void DashboardApp::loop() {
     return;
   }
 #if !CFG_DEMO_MODE
-  m_source.loop();
-  m_model = m_source.model();
+  if (!m_sourceStarted && !dashboard.bootAnimationRunning()) {
+    m_source.begin();
+    m_sourceStarted = true;
+  }
+  if (m_sourceStarted) {
+    m_source.loop();
+    m_model = m_source.model();
+  }
 #endif
   const uint32_t now = millis();
   // The boot overlay hides everything, so redrawing the dashboard for its

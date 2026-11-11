@@ -12,7 +12,7 @@ constexpr int32_t kScreenSize = 466;
 constexpr uint32_t kPairingWindowMs = 30000;
 constexpr int32_t kArcMaxValue = 1000;
 constexpr float kGaugeMaxSpeedKmh = 240.0f;
-constexpr uint32_t kBootRingDurationMs = 3000;
+constexpr uint32_t kBootRingDurationMs = 1500;
 const lv_color_t kScreen = lv_color_hex(0x020406);
 const lv_color_t kText = lv_color_hex(0xF5F7FA);
 const lv_color_t kDim = lv_color_hex(0x8A93A6);
@@ -261,8 +261,8 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_set_style_border_width(m_bootRing, 0, LV_PART_KNOB);
   lv_obj_set_style_pad_all(m_bootRing, 0, LV_PART_KNOB);
 
-  // 1 % per tick, starting on the first lv_timer_handler() run (i.e. after BLE
-  // init). 100 steps at kBootRingTickMs each = kBootRingDurationMs.
+  // 1 % per tick, starting on the first lv_timer_handler() run. 100 steps at
+  // kBootRingTickMs each = kBootRingDurationMs.
   s_bootPercent = 0;
   s_bootStartMs = 0;
   s_bootNextLogMs = 0;
