@@ -125,17 +125,21 @@ lv_color_t linkColor(UiLinkState state) {
 // ---- boot animation -------------------------------------------------------
 // Circular progress fill on the outermost circle of the round panel: the full
 // circle is drawn as a dim track, then a purple ring fills it clockwise from
-// 12 o'clock. The filled share is driven by time: 0 % at 0 ms, 50 % at half
-// the duration, 100 % at kBootRingDurationMs. The overlay is removed shortly
-// after the circle is full so the dashboard becomes visible.
+// 12 o'clock. The filled share grows in 1 % steps until the circle is 100 %
+// full, then the overlay is removed so the dashboard becomes visible.
 //
-// The progress is driven by a plain repeating lv_timer instead of lv_anim.
-// lv_anim only advances inside lv_timer_handler(), so any long stall (BLE init,
-// a slow full-screen flush) silently eats animation time. Recomputing the
-// percentage from millis() on every tick keeps the duration exact and lets the
-// state be logged.
+// The fill advances one step per timer tick: 1 % per step, so every frame
+// draws a visibly larger purple segment (1 %, 2 %, 3 %, ... 100 %). The tick
+// period is derived from the duration, so 100 steps always take
+// kBootRingDurationMs. Driving it by step count instead of wall time means a
+// stall in lv_timer_handler() pauses the fill rather than silently skipping
+// most of it, and every 1 % step really gets rendered.
 
-constexpr uint32_t kBootRingTickMs = 16;
+constexpr int32_t kBootRingStepPercent = 1;
+// Step period derived from the duration, so the full ring always takes about
+// kBootRingDurationMs: 100 / step = number of ticks.
+constexpr uint32_t kBootRingTickMs =
+    kBootRingDurationMs / (100 / kBootRingStepPercent);
 constexpr uint32_t kBootRingHoldMs = 100;
 constexpr int32_t kBootRingSize = 460;
 constexpr int32_t kBootRingWidth = 12;
@@ -143,9 +147,9 @@ constexpr int32_t kBootRingWidth = 12;
 // so a 270 degree rotation moves the arc's start to the top of the circle.
 constexpr int32_t kBootRingRotation = 270;
 
+int32_t s_bootPercent = 0;
 uint32_t s_bootStartMs = 0;
 uint32_t s_bootNextLogMs = 0;
-bool s_bootStarted = false;
 bool s_bootRunning = false;
 
 void bootRingTick(lv_timer_t* timer) {
@@ -155,31 +159,29 @@ void bootRingTick(lv_timer_t* timer) {
     return;
   }
 
-  if (!s_bootStarted) {
-    s_bootStarted = true;
+  if (s_bootPercent == 0) {
     s_bootStartMs = millis();
     s_bootNextLogMs = 0;
     CFG_LOG("[UI] boot ring animation start");
   }
 
-  const uint32_t elapsed = millis() - s_bootStartMs;
-  const bool finished = elapsed >= kBootRingDurationMs;
-  const int32_t percent =
-      finished ? 100
-               : static_cast<int32_t>(
-                     (static_cast<int64_t>(100) * elapsed) /
-                     kBootRingDurationMs);
+  s_bootPercent += kBootRingStepPercent;
+  if (s_bootPercent > 100) {
+    s_bootPercent = 100;
+  }
   // Range is 0..100, so the value is literally "how much of the circle is
   // filled". LVGL maps it onto the 0..360 background arc.
-  lv_arc_set_value(ring, percent);
+  lv_arc_set_value(ring, s_bootPercent);
 
+  const uint32_t elapsed = millis() - s_bootStartMs;
   if (elapsed >= s_bootNextLogMs) {
     CFG_LOG("[UI] boot ring %lums fill=%ld%%",
-            static_cast<unsigned long>(elapsed), static_cast<long>(percent));
+            static_cast<unsigned long>(elapsed),
+            static_cast<long>(s_bootPercent));
     s_bootNextLogMs = elapsed + 250;
   }
 
-  if (finished) {
+  if (s_bootPercent >= 100) {
     s_bootRunning = false;
     lv_timer_delete(timer);
     CFG_LOG("[UI] boot ring animation finished");
@@ -259,10 +261,9 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_set_style_border_width(m_bootRing, 0, LV_PART_KNOB);
   lv_obj_set_style_pad_all(m_bootRing, 0, LV_PART_KNOB);
 
-  // The timer measures elapsed time itself, so the animation starts on the
-  // first lv_timer_handler() run (after BLE init) and always lasts 2 s of real
-  // time even if the handler is occasionally delayed.
-  s_bootStarted = false;
+  // 1 % per tick, starting on the first lv_timer_handler() run (i.e. after BLE
+  // init). 100 steps at kBootRingTickMs each = kBootRingDurationMs.
+  s_bootPercent = 0;
   s_bootStartMs = 0;
   s_bootNextLogMs = 0;
   s_bootRunning = true;
