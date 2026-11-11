@@ -8,6 +8,7 @@
 namespace {
 
 Arduino_CO5300* s_gfx = nullptr;
+bool s_brightnessReady = false;
 
 uint32_t getLvglTick() { return millis(); }
 
@@ -40,7 +41,13 @@ bool RoundDisplay::begin() {
     return false;
   }
 
-  m_gfx->setBrightness(160);
+  // CO5300's init sequence ends with DISPON at brightness 0xD0, but its GRAM
+  // still holds power-on garbage. That garbage is visible as colored patches
+  // until LVGL's first full frame arrives, so mute the panel and clear GRAM to
+  // black synchronously. Brightness is restored after the first LVGL frame.
+  m_gfx->setBrightness(0);
+  m_gfx->fillScreen(0x0000);
+
   lv_init();
   lv_tick_set_cb(getLvglTick);
   m_display = lv_display_create(board.width, board.height);
@@ -87,5 +94,11 @@ void RoundDisplay::flush(lv_display_t* display, const lv_area_t* area,
   s_gfx->draw16bitRGBBitmap(area->x1, area->y1,
                             reinterpret_cast<uint16_t*>(pixelMap), width,
                             height);
+  // Keep the panel muted until the first real frame is on screen, so the boot
+  // sequence never exposes uninitialized panel memory.
+  if (!s_brightnessReady) {
+    s_brightnessReady = true;
+    s_gfx->setBrightness(160);
+  }
   lv_display_flush_ready(display);
 }

@@ -468,14 +468,16 @@ void LvglDashboard::updateSpeedLabel(float speedKmh, bool valid) {
 }
 
 void LvglDashboard::updateGaugeArc(float speedKmh, bool valid) {
-  int32_t value = 0;
+  int32_t speed = 0;
   if (valid) {
-    const float clamped =
-        fminf(fmaxf(speedKmh, 0.0f), kGaugeMaxSpeedKmh);
-    value = static_cast<int32_t>(
-        lroundf(clamped * static_cast<float>(kArcMaxValue) /
-                kGaugeMaxSpeedKmh));
+    speed = static_cast<int32_t>(
+        lroundf(fminf(fmaxf(speedKmh, 0.0f), kGaugeMaxSpeedKmh)));
   }
+  // Map the rounded km/h (the same number shown on screen) to arc units, so the
+  // arc only invalidates when the visible speed actually changes instead of on
+  // every smoothed float step.
+  const int32_t value = speed * kArcMaxValue /
+                        static_cast<int32_t>(kGaugeMaxSpeedKmh);
   lv_arc_set_value(m_arc, value);
 }
 
@@ -515,7 +517,9 @@ void LvglDashboard::render(const UiModel& model) {
     lv_arc_set_value(m_arc, model.socValid ? model.soc * 10 : 0);
   } else if (m_showSpeedArc) {
     lv_obj_set_style_arc_color(m_arc, kRed, LV_PART_INDICATOR);
-    updateGaugeArc(model.speedKmh, model.speedValid);
+    // The value is applied by updateSpeedLabel() at the end of render(), which
+    // uses the same smoothed speed as the numeric readout. Updating here too
+    // would invalidate the arc twice per frame.
   } else {
     lv_arc_set_value(m_arc, 0);
   }
