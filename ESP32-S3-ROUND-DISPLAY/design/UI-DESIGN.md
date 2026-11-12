@@ -1,10 +1,12 @@
-# 圆形仪表界面设计稿 v0.1
+# 圆形仪表界面设计稿 v0.2
 
 目标硬件：**Waveshare ESP32-S3-Touch-AMOLED-1.75-B**（466×466，CO5300 QSPI，CST9217 触摸）。
-设计参考 `TESLA-DASHBOARD` 的界面语言与数据分层，但针对圆屏重新排版。
+本版按 `src/ui/LvglDashboard.cpp` 的实机实现重新校对，重点同步了**行驶页**的布局、
+配色与字号；其余三个状态页仍沿用 v0.1 版式，后续按同一方法校对。
 
 - 可交互查看：`design/dashboard-ui.html`（浏览器直接打开，1:1 尺寸，可勾选安全区）
 - 本文档：布局坐标、颜色/字号 token、状态机、数据映射与实现注意点
+- 预览图：`design/preview-driving.png` 已按当前固件重新生成
 
 设计稿包含四个状态：
 
@@ -29,22 +31,26 @@
 
 ## 2. 画布与几何
 
+> 下表坐标均取自 `LvglDashboard.cpp` 的 `lv_obj_set_pos/size`，单位为屏幕像素。
+
 | 项 | 值 | 说明 |
 | --- | --- | --- |
 | 逻辑画布 | 466 × 466 | 与面板原生分辨率一致，不做旋转 |
 | 可见圆 | R233 | 屏幕物理边界 |
-| 安全内容圆 | **R216** | 内容最低点 y≤426，左右最远 x=58..408 |
-| 速度/SOC 环 | R170，线宽 6 | 角度 204° → 336°（132°，顶部弧） |
-| 环端点标签 | R191 | `0 / 240`（行驶）或 `0 / 100`（充电） |
-| 刻度 | R178–189，13 根 | 每 11°，每 3 根为主刻度 |
-| 顶部状态带 | x113–353，y44–62 | 三栏：品牌 / 链路 / 锁 |
-| 数值区 | y88–246 | 车速 142px |
-| 档位 | y260 | P R N D，间距 26px |
-| 功率块 | y292–336 | 300px 宽，中心零位 |
-| 信息卡 | y344–400 | 132×56 两张，间距 12px |
-| 温度行 | y414–426 | 圆底部最窄处，只放两项 |
+| 速度 / SOC 环 | R170，线宽 6 | 控件 340×340 @ (63,63)，角度 204° → 336°（132°） |
+| 环端点标签 | x62 / x404，y150 | Montserrat 10，`0 / 240`（行驶）或 `0 / 100`（充电） |
+| 刻度 | 无 | 当前固件不绘制刻度，保持车速大字周围干净 |
+| 顶部状态带 | 240×20 @ (113,43) | 三栏：品牌 14px / 链路 14px / 锁 14px |
+| 车速数值 | 中心 (233,155) | Montserrat 48 + `transform_scale=600`，实测约 112px |
+| 单位 KM/H | y218，高 18 | Montserrat 14，青色 |
+| 档位胶囊 | 168×40 @ (149,248) | 深色底 + 36×34 青色高亮块，档位字 20px |
+| 功率面板 | 300×52 @ (83,298) | 内含 268×5 功率条 @ (98,335)，中心零位 |
+| 信息面板 | 300×52 @ (83,359) | 电量 / 续航左右分栏，分隔线 x150 |
+| 温度条 | 240×32 @ (113,418) | 圆底最窄处，只放 OUTSIDE / CABIN 两项 |
 
-> 半径换算：圆心 (233,233)。例如 y=414 时圆的半宽为 `sqrt(233² − 181²) ≈ 147px`，所以底部只能放 132px 卡片和一行短文字。
+> **圆屏裁切提醒**：底部温度面板下沿到 y450，左右两端在 y>430 的区域会超出可见圆。
+> 当前实现依赖 `overflow:hidden` 把它裁成弧形；R216 只作为文字安全参考，内容实际更靠近边缘。
+
 
 ---
 
@@ -53,54 +59,70 @@
 | Token | HEX | 用途 |
 | --- | --- | --- |
 | SCREEN | `#020406` | 圆屏最外圈 / 纯黑底 |
-| BG_TOP | `#101923` | 背景中心微亮，向边缘过渡到黑 |
+| BG_TOP | `#101923` | 设计稿背景中心微亮（固件当前为纯黑） |
 | TEXT | `#F5F7FA` | 主要数值、当前档位 |
 | DIM | `#8A93A6` | 单位、副标题、未激活文字 |
-| FAINT | `#5A6377` | 区域标签、刻度标签 |
+| FAINT | `#5A6377` | 区域标签、未选档位 |
 | TRACK | `#1D2733` | 圆环轨道、进度条底槽 |
-| LINE | `#1B2430` | 卡片描边、分隔线 |
-| TESLA_RED | `#E82127` | 速度环渐变终点、当前档位红点、超速/告警 |
-| REGEN_GREEN | `#21C15E` | 能量回收、充电环、充电功率 |
-| CAUTION | `#FFB340` | 扫描/连接中、配钥、低电量提醒 |
+| CARD | `#0C1218` | 功率 / 信息 / 温度面板底 |
+| CARD_LINE | `#283642` | 功率、信息面板描边 |
+| CARD_LINE_SOFT | `#1D2733` | 温度条描边；内部深槽 `#17232C`，分隔线 `#25313A` |
+| GAUGE_CYAN | `#43D9F5` | 速度环低段、`KM/H`、电量数值与进度条、档位高亮 |
+| TESLA_RED | `#E82127` | 速度环高段、正功率条、低电量/告警 |
+| REGEN_GREEN | `#21C15E` | 速度环中段、能量回收、充电环/功率 |
+| CAUTION | `#FFB340` | 速度环中高段、续航数值、扫描/连接/配钥 |
 | ALERT | `#FF453A` | 断连失败、胎压异常、车门开启 |
 
-速度环渐变：`#F4F7FA → #E82127`（沿环从左到右）；充电环渐变：`#8AF0B4 → #21C15E`。
-背景使用一层极淡的径向强调光（行驶红 / 充电绿 / 断连琥珀，透明度 7%–15%），AMOLED 上不会造成漏光。
+**速度环配色不是沿弧渐变，而是整段单色动态插值**：按车速在
+`#43D9F5 → #21C15E → #FFB340 → #E82127` 之间做三段线性混合，
+节点约在 0 / 80 / 160 / 240 km/h；128 km/h 示例约为 `#A6B94C`。
+充电环为纯 `#21C15E`；配钥页环为 `#FFB340`。
+
+背景在固件中是 `#020406` 纯色；设计稿里的径向微光仅用于概念展示，
+若要落地需要在 LVGL 里额外绘制一层渐变，当前未实现。
+
 
 ---
 
 ## 4. 字体
 
-参考固件只用 Montserrat（ASCII）。本稿用 Bahnschrift 近似显示，落地时建议：
+固件只使用 Montserrat（ASCII）。当前实现全部直接引用 LVGL 内置字号，再用
+`transform_scale` 放大标题，避免为每个状态单独生成大字号字库：
 
-| 层级 | 设计字号 | 字重 | LVGL 建议 |
+| 层级 | 设计字号 | 字重 | LVGL 实现 |
 | --- | --- | --- | --- |
-| 车速 | 142 | Light | Montserrat 140，仅生成数字 + `/`，4bpp |
-| 充电功率 | 84 | Light | 复用速度字体，缩放或单独 80px |
-| 状态标题 | 46 | Light | Montserrat 46 |
-| 数值 | 23 | Medium | Montserrat 24 |
-| 单位/标签 | 8–10 | Semibold | Montserrat 10 + 字距 1–3px |
-| 配钥倒计时 | 96 | Light | 复用 140px 字体或单独 96px |
+| 车速 | ≈112 | Light | `lv_font_montserrat_48` + `transform_scale=600` |
+| 充电功率 | 48 | Light | `lv_font_montserrat_48`（未再放大） |
+| 状态标题 | 49–56 | Light | `montserrat_48` + scale 260/300（配钥倒计时 440） |
+| 电量 / 续航 | 24 | Medium | `lv_font_montserrat_24` |
+| 功率 / 温度 / 档位 | 20 | Medium | `lv_font_montserrat_20` |
+| 顶部状态 / KM/H | 14 | Medium | `lv_font_montserrat_14` |
+| 标签 / 子文案 | 10 | Semibold | `lv_font_montserrat_10` |
 
-中文字体不进入固件：界面文案保持英文；串口日志继续用中文。大字字体按需只保留 `0-9 . % - : / k W m h`，避免整字库占用 Flash。
+> 早期稿写的是 142 / 84 / 46px 专用字体，但当前固件并未生成这些字号。
+> 后续若生成专用大字号，需要同步修改 `lv_conf.h` 与字体转换脚本。
+
+中文字体不进入固件：界面文案保持英文；串口日志继续用中文。
 
 ---
 
 ## 5. 状态与刷新逻辑
 
 ```
-SourceStatus.link / encrypted / PairingHint
+SourceStatus.link / PairingHint
         │
         ├─ phase != Idle && link == Ready  → 配钥页（最高优先级）
-        ├─ link != Ready 或 !encrypted     → LINK STATE 页
+        ├─ link != Ready                   → LINK STATE 页
         └─ 正常
              ├─ charging == true           → 充电页
              └─ charging == false          → 行驶页
 ```
 
-- 状态切换只在 `link / encrypted / pairing.phase / charging` 变化时重建可见性，不重建对象树。
-- 车速做 200ms ease-out 补间（参考 `Dashboard::onTimer`），数字每 50ms 最多更新一次。
-- 数据超过 `CFG_DATA_STALE_MS`（建议 3000ms）：对应数值变 `--`，环归零；链路仍 Ready 时不显示断连页。
+- 状态切换只在 `link / pairing.phase / charging` 变化时切换对象显隐，不重建对象树。
+- 车速在 `DashboardApp::loop()` 里做 **30ms smoothstep 补间**（`kSpeedTransitionMs = 30`），
+  主循环最多每 50ms 渲染一次；车速文字与圆弧共用同一个平滑值。
+- 圆弧按取整后的 km/h 写入 `lv_arc`（0–1000），只有可见数字变化时才触发重绘。
+- 数据过期降级 `CFG_DATA_STALE_MS` 目前只是设计建议，固件尚未实现；现场断连时会直接进入状态页。
 - 告警：参考固件用底部 16px ticker，圆屏没有这条边。建议下一版用**圆环呼吸 + 中心一行 10px 文案**，避免遮挡车速。
 
 ### 状态页文案（ASCII）
@@ -124,26 +146,27 @@ SourceStatus.link / encrypted / PairingHint
 
 | 区域 | 字段 | 显示规则 |
 | --- | --- | --- |
-| 车速 | `speedKmh` | 0–240 映射 132°；超量程截断；无效 `--` |
-| 档位 | `gear` | 当前档白色 + 红点，其余 `#39434F` |
-| 功率 | `motorPowerKw` | 正值白→红向右；负值绿色向左；量程 ±250 kW |
-| 电量 | `soc` | 0–100%；≤15% 红色并 1Hz 闪烁 |
-| 续航 | `rangeKm` | 整数 km |
+| 车速 | `speedKmh` | 0–240 映射 132°；超量程截断；无效 `--`，环归零 |
+| 速度环色 | `speedKmh` | 青色 → 绿色 → 琥珀 → 红色三段线性插值（80/160 km/h 节点） |
+| 档位 | `gear` | 当前档 36×34 青色高亮 + 深色字，其余 `#5A6370`；未知档无高亮 |
+| 功率 | `motorPowerKw` | 正值红色向右；负值绿色向左；量程 ±250 kW，比例 0.536 px/kW |
+| 电量 | `soc` | 0–100%；≤15% 数值与进度条转红色（当前实机无闪烁） |
+| 续航 | `rangeKm` | 整数 km，琥珀色 |
 | 充电 | `charging` / `chargePowerKw` | 环显示 SOC；中心显示 kW；ETA = (80%−SOC)×75kWh ÷ kW |
-| 温度 | `insideTempC` / `outsideTempC` | 默认整数；有小数时 10px |
+| 温度 | `insideTempC` / `outsideTempC` | 四舍五入整数 °C；标签 OUTSIDE / CABIN |
 | 锁 | `locked` | `LOCK` / `UNLOCK`（UNLOCK 用 CAUTION） |
-| 链路 | `SourceStatus.link` | 绿=LINK，琥珀=扫描/连接，灰=Idle，红=Error |
-| 配钥 | `PairingHint` | `TAP CARD / CONFIRM / TIMEOUT / KEY ADDED / FAILED` |
+| 链路 | `SourceStatus.link` | 绿=LINK，琥珀=扫描/连接/同步，灰=Idle，红=Retry/Error |
+| 配钥 | `PairingHint` | `TAP CARD / CONFIRM / RETRY / KEY ADDED / FAILED` |
 | 车门/胎压 | `doors[6]` / `tpms[4]` | 本稿未常驻显示，见待确认问题 |
 
 ---
 
 ## 7. LVGL 落地建议
 
-1. **对象树只建一次**：`buildDriving()` / `buildCharging()` / `buildLinkState()` / `buildPairing()` 按状态切换显隐。
-2. **绘制顺序**：背景 → 环（track/progress）→ 文本 → 卡片 → 遮罩/状态页。
-3. **圆环**：用 `lv_arc`（`LV_ARC_MODE_NORMAL`，背景弧透明、旋转 204°，范围 0–1320）或两个 `lv_obj` + `lv_draw_arc` 自绘；进度变化仅在整数变化时写。
-4. **字体**：`lv_font_conv` 生成仅含所需字形的 4bpp Montserrat；140px 字体约 40–80KB，可放 Flash 而非 PSRAM。
+1. **对象树只建一次**：`buildDriving()` / `buildCharging()` / `buildCards()` / `buildLinkPage()` / `buildPairingPage()` 按状态切换显隐。
+2. **绘制顺序**：背景 → 环（track/progress）→ 文本 → 面板 → 遮罩/状态页。
+3. **圆环**：用 `lv_arc`（`LV_ARC_MODE_NORMAL`，旋转 204°，范围 0–1000）实现；进度变化仅在整数变化时写。
+4. **字体**：当前复用了 LVGL 内置 Montserrat 14/20/24/48，大标题通过 `transform_scale` 放大；若要更锐利的车速大字，再用 `lv_font_conv` 生成专用 4bpp 字体。
 5. **缓冲**：466×466 RGB565 全屏约 425KB；建议双 1/4 缓冲（各 ~106KB）放内部 RAM，或单缓冲 + PSRAM。QSPI 刷新优先验证 30fps 下的撕裂。
 6. **触摸**：CST9217 坐标需按面板实际方向映射；圆屏建议只做「点按/长按」两类手势，避免滑动与 UI 冲突。
 7. **烧屏**：AMOLED 长时间静止会留影。建议亮度 60% 以下，并让环/小元素做 ±1px 缓慢位移或 5 分钟微调。

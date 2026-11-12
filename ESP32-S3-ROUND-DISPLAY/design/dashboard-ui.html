@@ -15,9 +15,11 @@
     --red: #e82127;
     --green: #21c15e;
     --amber: #ffb340;
+    --gauge: #43d9f5;
     --line: #1b2430;
     --card: #0c1218;
     --card-line: #1d2733;
+    --card-line-strong: #283642;
     --font: "Bahnschrift", "DIN Alternate", "Segoe UI", Arial, sans-serif;
     --mono: "Cascadia Mono", Consolas, monospace;
   }
@@ -98,18 +100,18 @@
     border: 1px solid rgba(255, 255, 255, .045); pointer-events: none;
   }
   .wash { position: absolute; inset: 0; pointer-events: none; }
-  .driving .wash { background: radial-gradient(ellipse at 50% 30%, rgba(232, 33, 39, .15), transparent 58%); }
+  .driving { background: #020406; }
   .charging .wash { background: radial-gradient(ellipse at 50% 32%, rgba(33, 193, 94, .13), transparent 58%); }
   .offline .wash { background: radial-gradient(ellipse at 50% 34%, rgba(255, 179, 64, .07), transparent 55%); }
 
   /* ---------- top status bar ---------- */
   .topbar {
-    position: absolute; top: 44px; left: 113px; right: 113px; height: 18px;
+    position: absolute; top: 43px; left: 113px; right: 113px; height: 20px;
     display: flex; align-items: center; justify-content: space-between;
-    font-size: 12px; font-weight: 600; letter-spacing: 1.2px; color: var(--faint);
+    font-size: 14px; font-weight: 600; letter-spacing: .4px; color: var(--faint);
   }
-  .topbar .brand { color: #c9d3de; letter-spacing: 2.4px; }
-  .topbar .link { display: flex; align-items: center; gap: 5px; color: #b7c2ce; }
+  .topbar .brand { color: #c9d3de; letter-spacing: 1px; }
+  .topbar .link { display: flex; align-items: center; gap: 4px; color: var(--green); }
   .topbar .dot {
     width: 5px; height: 5px; border-radius: 50%; background: var(--green);
     box-shadow: 0 0 7px rgba(33, 193, 94, .9);
@@ -121,7 +123,7 @@
 
   /* ---------- gauge ---------- */
   .gauge { position: absolute; inset: 0; width: 466px; height: 466px; }
-  .arc-track { fill: none; stroke: #1c2632; stroke-width: 6; stroke-linecap: round; }
+  .arc-track { fill: none; stroke: #1d2733; stroke-width: 6; stroke-linecap: round; }
   .offline .arc-track { stroke: #141c25; }
   .arc-progress { fill: none; stroke-width: 6; stroke-linecap: round; }
   .tick { stroke: #2b3744; stroke-width: 1.5; stroke-linecap: round; }
@@ -129,47 +131,62 @@
   .offline .tick { stroke: #1a232d; }
   .offline .tick.major { stroke: #232e3a; }
   .arc-label {
-    fill: #5a6377; font-size: 9px; font-weight: 600; letter-spacing: 1px;
+    fill: #5a6377; font-size: 10px; font-weight: 600; letter-spacing: 0;
     text-anchor: middle; font-family: var(--font);
   }
   .offline .arc-label { fill: #333d49; }
 
   /* ---------- hero ---------- */
   .speed {
-    position: absolute; top: 88px; left: 0; right: 0; text-align: center;
-    font-size: 142px; line-height: 150px; font-weight: 300;
-    letter-spacing: -5px; font-variant-numeric: tabular-nums; color: #fafbfc;
-    text-shadow: 0 0 34px rgba(255, 255, 255, .08);
+    position: absolute; top: 95px; left: 0; right: 0; text-align: center;
+    font-size: 112px; line-height: 120px; font-weight: 300;
+    letter-spacing: -2px; font-variant-numeric: tabular-nums; color: #f5f7fa;
   }
   .unit {
-    position: absolute; top: 236px; left: 0; right: 0; text-align: center;
-    font-size: 9px; font-weight: 600; letter-spacing: 7px; color: var(--dim);
-    padding-left: 7px;
+    position: absolute; top: 218px; left: 0; right: 0; height: 18px;
+    text-align: center; font-size: 14px; font-weight: 500; letter-spacing: 1px;
+    color: var(--gauge);
   }
 
-  .gears { position: absolute; top: 260px; left: 0; right: 0; display: flex; justify-content: center; gap: 26px; }
-  .gear { position: relative; font-size: 12px; font-weight: 600; letter-spacing: .5px; line-height: 16px; color: #39434f; }
-  .gear.on { color: #fff; }
-  .gear.on::after {
-    content: ""; position: absolute; left: 50%; bottom: -5px; width: 4px; height: 4px;
-    border-radius: 50%; background: var(--red); transform: translateX(-50%);
-    box-shadow: 0 0 6px rgba(232, 33, 39, .8);
+  .gears {
+    position: absolute; top: 248px; left: 149px; width: 168px; height: 40px;
+    display: flex; align-items: center;
+    border-radius: 12px; background: #0a1117; border: 1px solid #202d37;
+  }
+  .gear {
+    width: 42px; height: 40px; display: grid; place-items: center;
+    font-size: 20px; font-weight: 500; line-height: 1; color: #5a6370;
+  }
+  .gear.on {
+    width: 36px; height: 34px; margin: 3px; border-radius: 9px;
+    background: var(--gauge); color: #020406;
   }
 
   /* ---------- power ---------- */
-  .power { position: absolute; top: 292px; left: 83px; width: 300px; height: 44px; text-align: center; }
-  .power .cap { font-size: 8px; font-weight: 600; letter-spacing: 2px; color: var(--faint); }
-  .power .val { margin-top: 1px; font-size: 24px; font-weight: 500; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
-  .power .val small { margin-left: 5px; font-size: 9px; font-weight: 600; letter-spacing: 1px; color: var(--dim); }
-  .pbar { position: relative; width: 300px; height: 4px; margin: 7px auto 0; border-radius: 2px; background: #141c25; }
-  .pbar .zero { position: absolute; left: 50%; top: -3px; width: 1px; height: 10px; background: #2c3846; }
+  .power {
+    position: absolute; top: 298px; left: 83px; width: 300px; height: 52px;
+    border-radius: 12px; background: var(--card); border: 1px solid var(--card-line-strong);
+  }
+  .power .cap {
+    position: absolute; left: 14px; top: 8px; font-size: 10px; font-weight: 600;
+    letter-spacing: 1.2px; color: var(--faint);
+  }
+  .power .val {
+    position: absolute; left: 112px; top: 3px; width: 172px; height: 25px;
+    text-align: right; font-size: 20px; font-weight: 500; line-height: 25px;
+    letter-spacing: -.2px; font-variant-numeric: tabular-nums;
+  }
+  .pbar {
+    position: absolute; left: 15px; top: 37px; width: 268px; height: 5px;
+    border-radius: 3px; background: #17232c;
+  }
+  .pbar .zero { position: absolute; left: 35px; top: -2px; width: 2px; height: 9px; background: #637987; }
   .pbar .fill {
-    position: absolute; top: 0; left: 50%; height: 4px; border-radius: 2px;
-    background: linear-gradient(90deg, #f5f7fa, #e82127);
-    box-shadow: 0 0 8px rgba(232, 33, 39, .45);
+    position: absolute; top: 0; left: 36px; height: 5px; border-radius: 3px;
+    background: var(--red);
   }
 
-  /* ---------- cards ---------- */
+  /* ---------- cards (charging) ---------- */
   .cards { position: absolute; top: 344px; left: 0; right: 0; display: flex; justify-content: center; gap: 12px; }
   .card {
     position: relative; width: 132px; height: 56px; padding: 9px 12px; border-radius: 14px;
@@ -184,13 +201,56 @@
   .card .sub { margin-top: 4px; font-size: 8px; letter-spacing: .4px; color: var(--dim); }
   .card .sub b { color: var(--green); font-weight: 600; }
 
-  /* ---------- bottom temps ---------- */
+  /* ---------- driving info panels ---------- */
+  .drive-cards {
+    position: absolute; top: 359px; left: 83px; width: 300px; height: 52px;
+    border-radius: 12px; background: var(--card); border: 1px solid var(--card-line-strong);
+  }
+  .dcard { position: absolute; top: 0; height: 52px; }
+  .dcard.battery { left: 0; width: 150px; }
+  .dcard.range { left: 150px; width: 150px; }
+  .dcard .cap {
+    position: absolute; left: 16px; top: 5px; font-size: 10px; font-weight: 600;
+    letter-spacing: 1.2px; color: var(--faint);
+  }
+  .dcard .val {
+    position: absolute; left: 16px; top: 16px; font-size: 24px; font-weight: 500;
+    line-height: 27px; letter-spacing: -.5px; font-variant-numeric: tabular-nums;
+  }
+  .dcard.range .val { color: var(--amber); }
+  .dcard .meter {
+    position: absolute; left: 16px; top: 45px; width: 120px; height: 3px;
+    border-radius: 2px; background: #1d2733;
+  }
+  .dcard .meter i { display: block; height: 3px; border-radius: 2px; background: var(--gauge); }
+  .card-divider {
+    position: absolute; left: 150px; top: 9px; width: 1px; height: 34px; background: #25313a;
+  }
+
+  /* ---------- bottom temps (charging) ---------- */
   .temps {
     position: absolute; top: 414px; left: 0; right: 0;
     display: flex; justify-content: center; gap: 18px;
     font-size: 8px; font-weight: 600; letter-spacing: 1.4px; color: var(--faint);
   }
   .temps b { color: #aebac6; font-weight: 600; }
+
+  /* ---------- bottom temps (driving) ---------- */
+  .drive-temps {
+    position: absolute; top: 418px; left: 113px; width: 240px; height: 32px;
+    border-radius: 10px; background: var(--card); border: 1px solid var(--card-line);
+    font-size: 10px; font-weight: 600; letter-spacing: .8px; color: var(--faint);
+  }
+  .drive-temps .lab { position: absolute; top: 9px; }
+  .drive-temps .out-lab { left: 8px; }
+  .drive-temps .in-lab { left: 132px; }
+  .drive-temps .val {
+    position: absolute; top: 3px; font-size: 20px; font-weight: 500;
+    letter-spacing: -.2px; color: var(--fg);
+  }
+  .drive-temps .out-val { left: 54px; }
+  .drive-temps .in-val { left: 172px; }
+  .drive-temps .divider { position: absolute; left: 120px; top: 8px; width: 1px; height: 16px; background: #25313a; }
 
   /* ---------- charging ---------- */
   .charge { position: absolute; top: 94px; left: 0; right: 0; text-align: center; }
@@ -346,30 +406,21 @@
     <section class="item">
       <div class="item-head">
         <div class="name">行驶 <em>DRIVING</em></div>
-        <div class="note">速度环 · 档位 · 功率 · 电量/续航 · 温度</div>
+        <div class="note">速度环 · 档位胶囊 · 功率条 · 电量/续航 · 温度</div>
       </div>
       <div class="screen driving" role="img" aria-label="行驶仪表设计稿">
-        <div class="wash"></div>
 
         <svg class="gauge" viewBox="0 0 466 466" aria-hidden="true">
-          <defs>
-            <linearGradient id="grad-drive" x1="80" y1="150" x2="390" y2="150" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#f4f7fa"/>
-              <stop offset=".55" stop-color="#e82127"/>
-              <stop offset="1" stop-color="#e82127" stop-opacity=".35"/>
-            </linearGradient>
-          </defs>
           <circle class="arc-track" cx="233" cy="233" r="170" transform="rotate(204 233 233)" stroke-dasharray="391.6 1200"/>
-          <circle class="arc-progress" cx="233" cy="233" r="170" transform="rotate(204 233 233)" stroke="url(#grad-drive)" stroke-dasharray="208.7 1200"/>
-          <g class="ticks"></g>
-          <text class="arc-label" x="58" y="158">0</text>
-          <text class="arc-label" x="408" y="158">240</text>
+          <circle class="arc-progress" cx="233" cy="233" r="170" transform="rotate(204 233 233)" stroke="#a6b94c" stroke-dasharray="208.9 1200"/>
+          <text class="arc-label" x="62" y="164">0</text>
+          <text class="arc-label" x="404" y="164">240</text>
         </svg>
 
         <div class="topbar">
           <span class="brand">TESLA</span>
           <span class="link"><i class="dot"></i>LINK</span>
-          <span class="lock">LOCK</span>
+          <span class="lock" style="color:#5a6377">LOCK</span>
         </div>
 
         <div class="speed">128</div>
@@ -383,28 +434,34 @@
         </div>
 
         <div class="power">
-          <div class="cap">OUTPUT POWER</div>
-          <div class="val">44.0<small>kW</small></div>
+          <div class="cap">MOTOR POWER</div>
+          <div class="val">44.0 kW</div>
           <div class="pbar">
             <span class="zero"></span>
-            <i class="fill" style="width:27px"></i>
+            <i class="fill" style="width:23.6px"></i>
           </div>
         </div>
 
-        <div class="cards">
-          <div class="card">
+        <div class="drive-cards">
+          <div class="dcard battery">
             <div class="cap">BATTERY</div>
-            <div class="val">78<span>%</span></div>
+            <div class="val">78%</div>
             <div class="meter"><i style="width:78%"></i></div>
           </div>
-          <div class="card">
+          <div class="card-divider"></div>
+          <div class="dcard range">
             <div class="cap">RANGE</div>
-            <div class="val">312<span>km</span></div>
-            <div class="sub">DISTANCE TO EMPTY</div>
+            <div class="val">312 km</div>
           </div>
         </div>
 
-        <div class="temps"><span>OUT <b>18°C</b></span><span>IN <b>22°C</b></span></div>
+        <div class="drive-temps">
+          <span class="lab out-lab">OUTSIDE</span>
+          <span class="val out-val">18°C</span>
+          <span class="divider"></span>
+          <span class="lab in-lab">CABIN</span>
+          <span class="val in-val">22°C</span>
+        </div>
 
         <div class="guides">
           <div class="safe"></div><div class="cross-h"></div><div class="cross-v"></div>
@@ -588,16 +645,19 @@
         <div class="sw"><i style="background:#21c15e"></i><span><b>REGEN / CHG</b>#21C15E</span></div>
         <div class="sw"><i style="background:#ffb340"></i><span><b>CAUTION</b>#FFB340</span></div>
         <div class="sw"><i style="background:#1d2733"></i><span><b>TRACK</b>#1D2733</span></div>
+        <div class="sw"><i style="background:#43d9f5"></i><span><b>GAUGE CYAN</b>#43D9F5</span></div>
+        <div class="sw"><i style="background:#0c1218;border-color:#283642"></i><span><b>CARD</b>#0C1218</span></div>
       </div>
     </div>
 
     <div class="panel">
       <h3>TYPE SCALE</h3>
-      <div class="type-row"><span class="t t-hero">128</span><span class="s">142 / Light · SPEED</span></div>
-      <div class="type-row"><span class="t t-kw">11.2 kW</span><span class="s">84 / Light · CHARGE</span></div>
-      <div class="type-row"><span class="t t-title">SCANNING</span><span class="s">46 / Light · STATE</span></div>
-      <div class="type-row"><span class="t t-val">312 km · 78%</span><span class="s">23 / Medium · VALUE</span></div>
-      <div class="type-row"><span class="t t-cap">OUTPUT POWER</span><span class="s">8 / Semibold · CAPTION</span></div>
+      <div class="type-row"><span class="t t-hero">128</span><span class="s">48 / scale 600 ≈112 · SPEED</span></div>
+      <div class="type-row"><span class="t t-kw">44.0 kW</span><span class="s">20 / Medium · POWER</span></div>
+      <div class="type-row"><span class="t t-title">SCANNING</span><span class="s">48 / scaled · STATE</span></div>
+      <div class="type-row"><span class="t t-val">312 km · 78%</span><span class="s">24 / Medium · VALUE</span></div>
+      <div class="type-row"><span class="t t-cap">MOTOR POWER</span><span class="s">10 / Semibold · CAPTION</span></div>
+      <div class="type-row"><span class="t t-cap">KM/H · D</span><span class="s">14 · UNIT　20 · GEAR</span></div>
     </div>
 
     <div class="panel">
@@ -605,11 +665,14 @@
       <ul class="geo">
         <li><span>逻辑画布</span><b>466 × 466</b></li>
         <li><span>可见圆半径</span><b>R233</b></li>
-        <li><span>安全内容圆</span><b>R216</b></li>
         <li><span>速度环半径 / 线宽</span><b>R170 / 6</b></li>
         <li><span>速度环角度</span><b>204° – 336°</b></li>
-        <li><span>顶部状态带</span><b>x113 – 353</b></li>
-        <li><span>底部信息最低点</span><b>y426</b></li>
+        <li><span>端点标签</span><b>x62 / x404 · y150</b></li>
+        <li><span>顶部状态带</span><b>240 × 20 · (113,43)</b></li>
+        <li><span>档位胶囊</span><b>168 × 40 · (149,248)</b></li>
+        <li><span>功率面板</span><b>300 × 52 · (83,298)</b></li>
+        <li><span>信息面板</span><b>300 × 52 · (83,359)</b></li>
+        <li><span>温度面板</span><b>240 × 32 · (113,418)</b></li>
       </ul>
     </div>
   </div>
@@ -630,25 +693,25 @@
           <td>速度环</td>
           <td><code>128</code> + <code>KM/H</code></td>
           <td><code>speedKmh</code> <em>/ VF_SPEED</em></td>
-          <td>0–240 映射 132°；超量程截断；无数据显示 <code>--</code>，环归零</td>
+          <td>0–240 映射 132°；环色按车速在 <span class="accent-green">青→绿→琥珀→红</span> 四段间插值；无数据显示 <code>--</code>，环归零</td>
         </tr>
         <tr>
           <td>档位</td>
-          <td><code>P R N D</code></td>
+          <td><code>P R N D</code> 胶囊</td>
           <td><code>gear</code> <em>/ VF_GEAR</em></td>
-          <td>当前档白色 + 红点；其余 #39434F；未知档全暗</td>
+          <td>168×40 深色胶囊；当前档 36×34 青底、深色字；其余 #5A6370；未知档不高亮</td>
         </tr>
         <tr>
           <td>功率</td>
           <td><code>44.0 kW</code> + 中置条</td>
           <td><code>motorPowerKw</code> <em>/ VF_MOTOR_POWER</em></td>
-          <td>正值白→红向右；负值（回收）绿色向左；量程 ±250 kW</td>
+          <td>面板内 268×5 条；正值 <span class="accent-red">红色向右</span>；负值（回收）<span class="accent-green">绿色向左</span>；量程 ±250 kW（半宽 134px）</td>
         </tr>
         <tr>
           <td>电量 / 续航</td>
           <td><code>78%</code> · <code>312 km</code></td>
           <td><code>soc</code> / <code>rangeKm</code></td>
-          <td>≤15% 数值与进度条转 <span class="accent-red">TESLA RED</span> 并闪烁</td>
+          <td>同一 300×52 面板左右分栏，x150 分隔线；电量 ≤15% 数值与 120×3 进度条转 <span class="accent-red">TESLA RED</span>，续航数值为琥珀色</td>
         </tr>
         <tr>
           <td>充电</td>
@@ -658,9 +721,9 @@
         </tr>
         <tr>
           <td>温度</td>
-          <td><code>OUT 18°C</code> · <code>IN 22°C</code></td>
+          <td><code>OUTSIDE 18°C</code> · <code>CABIN 22°C</code></td>
           <td><code>outsideTempC</code> / <code>insideTempC</code> <em>/ VF_TEMPS</em></td>
-          <td>保留 1 位小数时改为 10px；缺数据显示 <code>--</code></td>
+          <td>240×32 面板置于圆底；标签 10px、数值 20px；缺数据显示 <code>--°C</code></td>
         </tr>
         <tr>
           <td>锁车 / 链路</td>
@@ -685,8 +748,8 @@
   </div>
 
   <div class="foot">
-    <span>TESLA-BLE-SIMULATOR · ESP32-S3-ROUND-DISPLAY · DESIGN v0.1</span>
-    <span>466 × 466 · 1:1 MOCKUP · 2026-11-09</span>
+    <span>TESLA-BLE-SIMULATOR · ESP32-S3-ROUND-DISPLAY · DESIGN v0.2</span>
+    <span>466 × 466 · 1:1 MOCKUP · 2026-11-12</span>
   </div>
 
 </div>
