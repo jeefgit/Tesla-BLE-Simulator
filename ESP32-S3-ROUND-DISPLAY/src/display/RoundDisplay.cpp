@@ -3,6 +3,9 @@
 #include <Arduino_GFX_Library.h>
 #include <esp_heap_caps.h>
 
+#include <cstring>
+
+#include "config.h"
 #include "platform/boards/waveshare_esp32_s3_touch_amoled_175_b.h"
 
 namespace {
@@ -36,6 +39,8 @@ bool RoundDisplay::begin() {
                              board.height, board.panelOffsetX,
                              board.panelOffsetY, 0, 0);
   s_gfx = m_gfx;
+  m_width = board.width;
+  m_height = board.height;
 
   if (!m_gfx->begin()) {
     return false;
@@ -70,6 +75,19 @@ bool RoundDisplay::begin() {
     return false;
   }
 
+  // 旋转缓冲只做像素搬运，放 PSRAM 即可，避免占用 BLE 需要的内
+  // 部 SRAM；如果板子没有 PSRAM 再退回内部 RAM。
+  m_rotateBuffer =
+      heap_caps_malloc(bufferBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (m_rotateBuffer == nullptr) {
+    m_rotateBuffer =
+        heap_caps_malloc(bufferBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  }
+  if (m_rotateBuffer == nullptr) {
+    CFG_LOG("[UI] rotation buffer unavailable, rotation disabled");
+  }
+
+  lv_display_set_user_data(m_display, this);
   lv_display_set_color_format(m_display, LV_COLOR_FORMAT_RGB565);
   lv_display_set_flush_cb(m_display, RoundDisplay::flush);
   lv_display_set_buffers(m_display, m_drawBuffer, nullptr, bufferBytes,
@@ -82,18 +100,107 @@ bool RoundDisplay::begin() {
 
 void RoundDisplay::loop() { lv_timer_handler(); }
 
+void RoundDisplay::rotateClockwise() {
+  if (m_rotateBuffer == nullptr) {
+    return;
+  }
+  m_rotation = static_cast<uint8_t>((m_rotation + 1) & 0x03);
+  CFG_LOG("[UI] display rotation -> %u deg",
+          static_cast<unsigned>(m_rotation) * 90);
+  // 旋转只改变 flush 的写出方向，LVGL 并不知道画面已变化；整屏标脏
+  // 让它用新的方向重新渲染一遍，否则旧方向的内容会留在屏幕上。
+  if (m_display != nullptr) {
+    lv_obj_invalidate(lv_screen_active());
+  }
+}
+
+// 把宽 width、高 height 的 RGB565 像素块按 m_rotation 的方向重排。
+// 输出块的行数/列数在 90°/270° 时会互换。
+void RoundDisplay::blitRotated(const uint16_t* src, uint16_t* dst,
+                               int32_t width, int32_t height) const {
+  switch (m_rotation) {
+    case 1:  // 顺时针 90°: (sx, sy) -> (height - 1 - sy, sx)
+      for (int32_t sy = 0; sy < height; ++sy) {
+        const uint16_t* row = src + sy * width;
+        for (int32_t sx = 0; sx < width; ++sx) {
+          dst[sx * height + (height - 1 - sy)] = row[sx];
+        }
+      }
+      break;
+    case 2:  // 180°: (sx, sy) -> (width - 1 - sx, height - 1 - sy)
+      for (int32_t sy = 0; sy < height; ++sy) {
+        for (int32_t sx = 0; sx < width; ++sx) {
+          dst[(height - 1 - sy) * width + (width - 1 - sx)] =
+              src[sy * width + sx];
+        }
+      }
+      break;
+    case 3:  // 顺时针 270°(= 逆时针 90°): (sx, sy) -> (sy, width - 1 - sx)
+      for (int32_t sy = 0; sy < height; ++sy) {
+        for (int32_t sx = 0; sx < width; ++sx) {
+          dst[(width - 1 - sx) * height + sy] = src[sy * width + sx];
+        }
+      }
+      break;
+    default:
+      std::memcpy(dst, src,
+                  static_cast<size_t>(width) * height * sizeof(uint16_t));
+      break;
+  }
+}
+
 void RoundDisplay::flush(lv_display_t* display, const lv_area_t* area,
                          uint8_t* pixelMap) {
+  auto* self = static_cast<RoundDisplay*>(lv_display_get_user_data(display));
+  if (self == nullptr) {
+    lv_display_flush_ready(display);
+    return;
+  }
+  self->flushArea(display, area, pixelMap);
+}
+
+void RoundDisplay::flushArea(lv_display_t* display, const lv_area_t* area,
+                             uint8_t* pixelMap) {
   if (s_gfx == nullptr) {
     lv_display_flush_ready(display);
     return;
   }
 
-  const int32_t width = area->x2 - area->x1 + 1;
-  const int32_t height = area->y2 - area->y1 + 1;
-  s_gfx->draw16bitRGBBitmap(area->x1, area->y1,
-                            reinterpret_cast<uint16_t*>(pixelMap), width,
-                            height);
+  int32_t x = area->x1;
+  int32_t y = area->y1;
+  int32_t width = area->x2 - area->x1 + 1;
+  int32_t height = area->y2 - area->y1 + 1;
+  uint16_t* pixels = reinterpret_cast<uint16_t*>(pixelMap);
+
+  if (m_rotation != 0 && m_rotateBuffer != nullptr) {
+    blitRotated(pixels, static_cast<uint16_t*>(m_rotateBuffer), width, height);
+    switch (m_rotation) {
+      case 1:
+        x = m_height - area->y2 - 1;
+        y = area->x1;
+        break;
+      case 2:
+        x = m_width - area->x2 - 1;
+        y = m_height - area->y2 - 1;
+        break;
+      case 3:
+        x = area->y1;
+        y = m_width - area->x2 - 1;
+        break;
+      default:
+        break;
+    }
+    // 只有 90°/270° 会交换宽高；180° 的行列数不变，交换反而会把
+    // 缓冲按错误步长解释，画面就会乱码。
+    if ((m_rotation & 1) != 0) {
+      const int32_t swapped = width;
+      width = height;
+      height = swapped;
+    }
+    pixels = static_cast<uint16_t*>(m_rotateBuffer);
+  }
+
+  s_gfx->draw16bitRGBBitmap(x, y, pixels, width, height);
   // Keep the panel muted until the first real frame is on screen, so the boot
   // sequence never exposes uninitialized panel memory.
   if (!s_brightnessReady) {

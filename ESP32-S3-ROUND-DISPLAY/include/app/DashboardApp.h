@@ -14,10 +14,15 @@ class DashboardApp {
   void setModel(const UiModel& model);
 
  private:
+  void pollBootButton();
+
 #if !CFG_DEMO_MODE
   TeslaUiSource m_source;
   bool m_sourceStarted = false;
 #endif
+  bool m_bootRawPressed = false;
+  bool m_bootPressed = false;
+  uint32_t m_bootLastChangeMs = 0;
   UiModel m_model;
   bool m_initialized = false;
   uint32_t m_lastRenderMs = 0;

@@ -11,6 +11,10 @@ namespace {
 
 constexpr uint32_t kSpeedTransitionMs = 30;
 
+// BOOT 键接 GPIO0，板上有外部上拉，按下为低电平。
+constexpr uint8_t kBootButtonPin = 0;
+constexpr uint32_t kBootDebounceMs = 30;
+
 RoundDisplay display;
 LvglDashboard dashboard;
 
@@ -51,6 +55,27 @@ void DashboardApp::begin() {
   m_lastRenderedModel = m_model;
   m_hasRenderedModel = true;
   m_initialized = true;
+
+  // BOOT 键平时是高电平，短按一次把画面顺时针旋转 90°。
+  pinMode(kBootButtonPin, INPUT_PULLUP);
+}
+
+void DashboardApp::pollBootButton() {
+  const bool rawPressed = digitalRead(kBootButtonPin) == LOW;
+  const uint32_t now = millis();
+  if (rawPressed != m_bootRawPressed) {
+    m_bootRawPressed = rawPressed;
+    m_bootLastChangeMs = now;
+    return;
+  }
+  // 电平稳定 kBootDebounceMs 后才算一次有效按下，避免抖动触发多次旋转。
+  if (rawPressed != m_bootPressed &&
+      now - m_bootLastChangeMs >= kBootDebounceMs) {
+    m_bootPressed = rawPressed;
+    if (m_bootPressed) {
+      display.rotateClockwise();
+    }
+  }
 }
 
 void DashboardApp::setModel(const UiModel& model) { m_model = model; }
@@ -60,6 +85,7 @@ void DashboardApp::loop() {
     delay(1000);
     return;
   }
+  pollBootButton();
 #if !CFG_DEMO_MODE
   if (!m_sourceStarted && !dashboard.bootAnimationRunning()) {
     m_source.begin();
