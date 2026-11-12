@@ -60,7 +60,9 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_chargeEtaSub = nullptr;
   lv_obj_t* m_chargeRangeValue = nullptr;
   lv_obj_t* m_chargeRangeSub = nullptr;
-  lv_obj_t* m_temperatureLabel = nullptr;
+  lv_obj_t* m_temperatureGroup = nullptr;
+  lv_obj_t* m_outsideTempLabel = nullptr;
+  lv_obj_t* m_insideTempLabel = nullptr;
   lv_obj_t* m_linkPage = nullptr;
   lv_obj_t* m_linkTitle = nullptr;
   lv_obj_t* m_linkSubtitle = nullptr;
@@ -81,5 +83,5 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_topGroup = nullptr;
   lv_obj_t* m_bootLayer = nullptr;
   lv_obj_t* m_bootRing = nullptr;
-  lv_obj_t* m_bootLabel = nullptr;
+  lv_obj_t* m_bootEmblem = nullptr;
 };

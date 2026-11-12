@@ -6,6 +6,8 @@
 
 #include "config.h"
 
+extern const lv_image_dsc_t teslaBootLogo;
+
 namespace {
 
 constexpr int32_t kScreenSize = 466;
@@ -198,7 +200,7 @@ constexpr int32_t kBootRingStepPercent = 1;
 constexpr uint32_t kBootRingTickMs =
     kBootRingDurationMs / (100 / kBootRingStepPercent);
 constexpr uint32_t kBootLogoHoldMs = 1000;
-constexpr uint32_t kBootLogoAnimMs = kBootRingDurationMs;
+constexpr uint32_t kBootLogoAnimMs = kBootRingDurationMs + 500;
 constexpr int32_t kBootLogoStartScale = 64;
 constexpr int32_t kBootLogoEndScale = 320;
 constexpr int32_t kBootRingSize = 460;
@@ -211,23 +213,23 @@ int32_t s_bootPercent = 0;
 uint32_t s_bootStartMs = 0;
 uint32_t s_bootNextLogMs = 0;
 bool s_bootRunning = false;
-lv_obj_t* s_bootLabel = nullptr;
+lv_obj_t* s_bootEmblem = nullptr;
 
 void bootLogoAnimate(void* object, int32_t scale) {
-  auto* label = static_cast<lv_obj_t*>(object);
-  setScale(label, scale);
+  auto* emblem = static_cast<lv_obj_t*>(object);
+  setScale(emblem, scale);
   const int32_t opacity =
       (scale - kBootLogoStartScale) * LV_OPA_COVER /
       (kBootLogoEndScale - kBootLogoStartScale);
-  lv_obj_set_style_opa(label, opacity, 0);
+  lv_obj_set_style_opa(emblem, opacity, 0);
 }
 
 void startBootLogoAnimation() {
-  if (s_bootLabel == nullptr) return;
+  if (s_bootEmblem == nullptr) return;
 
   lv_anim_t animation;
   lv_anim_init(&animation);
-  lv_anim_set_var(&animation, s_bootLabel);
+  lv_anim_set_var(&animation, s_bootEmblem);
   lv_anim_set_values(&animation, kBootLogoStartScale, kBootLogoEndScale);
   lv_anim_set_duration(&animation, kBootLogoAnimMs);
   lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
@@ -242,7 +244,7 @@ void bootLogoFinished(lv_timer_t* timer) {
   if (layer != nullptr) {
     lv_obj_delete(layer);
   }
-  s_bootLabel = nullptr;
+  s_bootEmblem = nullptr;
   s_bootRunning = false;
 }
 
@@ -351,12 +353,14 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_set_style_border_width(m_bootRing, 0, LV_PART_KNOB);
   lv_obj_set_style_pad_all(m_bootRing, 0, LV_PART_KNOB);
 
-  m_bootLabel = makeScaledLabel(m_bootLayer, kScreenSize / 2,
-                                kScreenSize / 2, "TESLA",
-                                &lv_font_montserrat_48, kText,
-                                kBootLogoStartScale);
-  lv_obj_set_style_opa(m_bootLabel, LV_OPA_TRANSP, 0);
-  s_bootLabel = m_bootLabel;
+  m_bootEmblem = lv_image_create(m_bootLayer);
+  lv_obj_remove_style_all(m_bootEmblem);
+  lv_image_set_src(m_bootEmblem, &teslaBootLogo);
+  lv_obj_set_pos(m_bootEmblem, (kScreenSize - 128) / 2,
+                 (kScreenSize - 163) / 2);
+  lv_obj_set_style_bg_opa(m_bootEmblem, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_opa(m_bootEmblem, LV_OPA_TRANSP, 0);
+  s_bootEmblem = m_bootEmblem;
 
   // 1 % per tick, starting on the first lv_timer_handler() run. 100 steps at
   // kBootRingTickMs each = kBootRingDurationMs.
@@ -523,7 +527,7 @@ void LvglDashboard::buildCards() {
   lv_obj_set_size(m_cardsGroup, 466, 466);
   lv_obj_set_scrollable(m_cardsGroup, false);
 
-  lv_obj_t* battery = makePanel(m_cardsGroup, 101, 344, 132, 56);
+  lv_obj_t* battery = makePanel(m_cardsGroup, 95, 344, 132, 56);
   makeLabel(battery, 12, 8, 108, 12, "BATTERY",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_LEFT);
   m_socLabel = makeLabel(battery, 12, 19, 108, 27, "--%",
@@ -544,8 +548,8 @@ void LvglDashboard::buildCards() {
   lv_obj_set_style_bg_color(m_socBar, kText, 0);
   lv_obj_set_style_bg_opa(m_socBar, LV_OPA_COVER, 0);
 
-  lv_obj_t* range = makePanel(m_cardsGroup, 245, 344, 132, 56);
-  makeLabel(range, 12, 8, 108, 12, "RANGE",
+  lv_obj_t* range = makePanel(m_cardsGroup, 239, 344, 132, 56);
+  makeLabel(range, 12, 8, 108, 12, "EST. RANGE",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_LEFT);
   m_rangeLabel = makeLabel(range, 12, 19, 108, 27, "-- km",
                            &lv_font_montserrat_24, kText, LV_TEXT_ALIGN_LEFT);
@@ -575,9 +579,24 @@ void LvglDashboard::buildCards() {
                                &lv_font_montserrat_10, kDim,
                                LV_TEXT_ALIGN_LEFT);
 
-  m_temperatureLabel =
-      makeLabel(screen, 60, 406, 346, 26, "OUT --°C    IN --°C",
-                &lv_font_montserrat_16, kDim, LV_TEXT_ALIGN_CENTER);
+  m_temperatureGroup = lv_obj_create(screen);
+  lv_obj_remove_style_all(m_temperatureGroup);
+  lv_obj_set_size(m_temperatureGroup, 466, 466);
+  lv_obj_set_scrollable(m_temperatureGroup, false);
+
+  lv_obj_t* outsideTemp = makePanel(m_temperatureGroup, 95, 406, 132, 42, 10);
+  makeLabel(outsideTemp, 10, 5, 112, 12, "OUTSIDE",
+            &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
+  m_outsideTempLabel = makeLabel(outsideTemp, 10, 19, 112, 20, "--°C",
+                                 &lv_font_montserrat_16, kText,
+                                 LV_TEXT_ALIGN_CENTER);
+
+  lv_obj_t* insideTemp = makePanel(m_temperatureGroup, 239, 406, 132, 42, 10);
+  makeLabel(insideTemp, 10, 5, 112, 12, "CABIN",
+            &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
+  m_insideTempLabel = makeLabel(insideTemp, 10, 19, 112, 20, "--°C",
+                                &lv_font_montserrat_16, kText,
+                                LV_TEXT_ALIGN_CENTER);
 }
 
 void LvglDashboard::buildLinkPage() {
@@ -835,7 +854,7 @@ void LvglDashboard::render(const UiModel& model) {
   setHidden(m_chargeGroup, !showCharging);
   setHidden(m_cardsGroup, !ready || showCharging || pairing);
   setHidden(m_chargeCardsGroup, !showCharging);
-  setHidden(m_temperatureLabel, !ready || pairing);
+  setHidden(m_temperatureGroup, !ready || pairing);
   setHidden(m_arc, showLinkPage || pairing);
   setHidden(m_gaugeMinLabel, pairing);
   setHidden(m_gaugeMaxLabel, pairing);
@@ -953,12 +972,17 @@ void LvglDashboard::render(const UiModel& model) {
   }
 
   if (model.temperatureValid) {
-    char temperatures[48];
-    snprintf(temperatures, sizeof(temperatures), "OUT %.0f°C    IN %.0f°C",
-             model.outsideTempC, model.insideTempC);
-    updateLabel(m_temperatureLabel, temperatures);
+    char outsideTemp[16];
+    char insideTemp[16];
+    snprintf(outsideTemp, sizeof(outsideTemp), "%.0f°C",
+             model.outsideTempC);
+    snprintf(insideTemp, sizeof(insideTemp), "%.0f°C",
+             model.insideTempC);
+    updateLabel(m_outsideTempLabel, outsideTemp);
+    updateLabel(m_insideTempLabel, insideTemp);
   } else {
-    updateLabel(m_temperatureLabel, "OUT --°C    IN --°C");
+    updateLabel(m_outsideTempLabel, "--°C");
+    updateLabel(m_insideTempLabel, "--°C");
   }
 
   if (showCharging) {
