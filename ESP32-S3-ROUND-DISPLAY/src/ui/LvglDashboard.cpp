@@ -184,21 +184,12 @@ lv_color_t linkColor(UiLinkState state) {
 // ---- boot animation -------------------------------------------------------
 // Circular progress fill on the outermost circle of the round panel: the full
 // circle is drawn as a dim track, then a silver ring fills it clockwise from
-// 12 o'clock. The filled share grows in 1 % steps until the circle is 100 %
+// 12 o'clock. The filled share follows elapsed time until the circle is 100 %
 // full, then the overlay is removed so the dashboard becomes visible.
 //
-// The fill advances one step per timer tick: 1 % per step, so every frame
-// draws a visibly larger silver segment (1 %, 2 %, 3 %, ... 100 %). The tick
-// period is derived from the duration, so 100 steps always take
-// kBootRingDurationMs. Driving it by step count instead of wall time means a
-// stall in lv_timer_handler() pauses the fill rather than silently skipping
-// most of it, and every 1 % step really gets rendered.
-
-constexpr int32_t kBootRingStepPercent = 1;
-// Step period derived from the duration, so the full ring always takes about
-// kBootRingDurationMs: 100 / step = number of ticks.
-constexpr uint32_t kBootRingTickMs =
-    kBootRingDurationMs / (100 / kBootRingStepPercent);
+// The timer only controls how often the arc is refreshed. Progress is based on
+// elapsed time so a delayed LVGL frame doesn't lengthen the animation.
+constexpr uint32_t kBootRingTickMs = 10;
 constexpr uint32_t kBootLogoHoldMs = 1000;
 constexpr uint32_t kBootLogoAnimMs = kBootRingDurationMs + 500;
 constexpr int32_t kBootLogoStartScale = 64;
@@ -212,6 +203,7 @@ constexpr int32_t kBootRingRotation = 270;
 int32_t s_bootPercent = 0;
 uint32_t s_bootStartMs = 0;
 uint32_t s_bootNextLogMs = 0;
+bool s_bootStarted = false;
 bool s_bootRunning = false;
 lv_obj_t* s_bootEmblem = nullptr;
 
@@ -255,22 +247,23 @@ void bootRingTick(lv_timer_t* timer) {
     return;
   }
 
-  if (s_bootPercent == 0) {
+  if (!s_bootStarted) {
     s_bootStartMs = millis();
     s_bootNextLogMs = 0;
+    s_bootStarted = true;
     CFG_LOG("[UI] boot ring animation start");
     startBootLogoAnimation();
   }
 
-  s_bootPercent += kBootRingStepPercent;
-  if (s_bootPercent > 100) {
-    s_bootPercent = 100;
-  }
+  const uint32_t elapsed = millis() - s_bootStartMs;
+  s_bootPercent = elapsed >= kBootRingDurationMs
+                      ? 100
+                      : static_cast<int32_t>(
+                            elapsed * 100 / kBootRingDurationMs);
   // Range is 0..100, so the value is literally "how much of the circle is
   // filled". LVGL maps it onto the 0..360 background arc.
   lv_arc_set_value(ring, s_bootPercent);
 
-  const uint32_t elapsed = millis() - s_bootStartMs;
   if (elapsed >= s_bootNextLogMs) {
     CFG_LOG("[UI] boot ring %lums fill=%ld%%",
             static_cast<unsigned long>(elapsed),
@@ -362,11 +355,11 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_set_style_opa(m_bootEmblem, LV_OPA_TRANSP, 0);
   s_bootEmblem = m_bootEmblem;
 
-  // 1 % per tick, starting on the first lv_timer_handler() run. 100 steps at
-  // kBootRingTickMs each = kBootRingDurationMs.
+  // Start the elapsed-time animation on the first lv_timer_handler() run.
   s_bootPercent = 0;
   s_bootStartMs = 0;
   s_bootNextLogMs = 0;
+  s_bootStarted = false;
   s_bootRunning = true;
   lv_timer_create(bootRingTick, kBootRingTickMs, m_bootRing);
 }
