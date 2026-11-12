@@ -22,7 +22,7 @@
 #define CFG_TESLA_UNITS_MILES 1
 
 // 驾驶状态轮询间隔；单条请求仍需等车端响应后才会发送下一条。
-#define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 100
+#define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 280
 
 // 1 = 先完成加密握手，再用 GetVehicleData 轮询
 // 0 = 只接收 53B 旁路 SimPayload（模拟器调试用）

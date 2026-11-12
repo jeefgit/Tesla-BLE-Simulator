@@ -162,12 +162,6 @@
 // 避免车端提示已消失/超时后固件永久停在「只等不重试」的状态。
 #define CFG_TESLA_PAIR_WAIT_TIMEOUT_MS 90000
 
-// 握手连续多次仍未建立会话时，直接按官方做法发 add-key-request
-// （真车对未登记公钥的 SessionInfoRequest 可能不回包，也可能只回无法解析的通知；
-//  add-key-request 本身不依赖握手，不能因为「收到过字节」就放弃配钥）
-// 4 次 × 2s ≈ 8s：已配对且车已唤醒时首次握手就会回包，不会误触发配钥提示
-#define CFG_TESLA_PAIR_FALLBACK_TRIES 4
-
 // 申请的角色与钥匙形态（Keys.Role: 2=OWNER 3=DRIVER；
 // KeyFormFactor: 7=ANDROID_DEVICE 9=CLOUD_KEY，官方 BLE 配钥示例用 9）
 #define CFG_TESLA_PAIR_ROLE 2

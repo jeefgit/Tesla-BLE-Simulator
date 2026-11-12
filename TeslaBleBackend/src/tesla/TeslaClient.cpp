@@ -381,20 +381,6 @@ void TeslaClient::loop() {
 #if CFG_TESLA_CRYPTO
   if (!m_crypto.hasSession()) {
 #if CFG_TESLA_PAIR_ON_DENIED
-    // 真车对未登记公钥的 SessionInfoRequest 可能完全不回包（官方 add-key-request
-    // 本身就不依赖握手）。连续多次握手仍未建立会话时，直接改发配钥请求；
-    // 即使收到过无法解析的通知，也不能因此放弃配钥。
-    if (!m_notPaired && !m_pairDone && !m_pairFallbackTried &&
-        m_handshakeTries >= CFG_TESLA_PAIR_FALLBACK_TRIES) {
-      m_pairFallbackTried = true;
-      m_notPaired = true;
-      m_pairSends = 0;
-      m_nextPairAt = millis();
-      CFG_LOG("[PAIR] 握手 %u 次仍未建立会话（收到 %u 次通知/%uB）→ 直接发 add-key-request",
-              (unsigned)m_handshakeTries, (unsigned)m_rxNotifies,
-              (unsigned)m_rxBytes);
-    }
-
     // 配钥流程进行中：不发握手（SessionInfoRequest 可能打断车端刷卡提示）
     if (m_notPaired && !m_pairDone) {
       const bool pairTimedOut =
@@ -467,7 +453,6 @@ void TeslaClient::onConnected() {
   m_pairSends = 0;
   m_nextPairAt = 0;
   m_pairWaitAt = 0;
-  m_pairFallbackTried = false;
   m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
   m_auxBurstActive = false;
   m_nextDrivePollAt = 0;
@@ -510,7 +495,6 @@ void TeslaClient::onDisconnected() {
   m_pairSuccessReported = false;
   m_pairSends = 0;
   m_pairWaitAt = 0;
-  m_pairFallbackTried = false;
   m_hint = PairingHint{};
   m_crypto.reset();
   CFG_LOG("BLE 断开，加密会话已清除");
@@ -646,7 +630,6 @@ void TeslaClient::onCryptoSession(bool ok) {
     m_pairWaitNfc = false;
     m_pairSends = 0;
     m_pairWaitAt = 0;
-    m_pairFallbackTried = false;
     m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
     m_hint = PairingHint{};
     // 握手成功后立即开始辅助数据首轮连续取数。

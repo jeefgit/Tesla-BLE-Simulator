@@ -108,7 +108,6 @@ class TeslaClient {
   uint32_t m_pairSends = 0;
   uint32_t m_nextPairAt = 0;
   uint32_t m_pairWaitAt = 0;       // 进入等待/最后一次发送的时刻（超时基准）
-  bool m_pairFallbackTried = false; // 握手无回包时是否已改发 add-key-request
   PairingHint m_hint;              // 屏幕提示状态（Dashboard 轮询）
   uint32_t m_hintUntil = 0;        // Success/Failed 的展示截止时刻
 

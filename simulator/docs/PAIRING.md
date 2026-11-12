@@ -277,7 +277,7 @@ RESULT: IDENTICAL —— 信封与官方 vehicle-command 完全一致
 | --- | --- |
 | 没有 `BLE 已连接: S……C` | 没连上车：查 `CFG_TESLA_VIN` 与实车 VIN 是否一致（广播名 `S+sha1(VIN)[:16]+C`） |
 | `[CRYPTO] 车辆不认识本机公钥 fault=3` | 正常（未配对）：`fault=3` 是 `MESSAGEFAULT_ERROR_UNKNOWN_KEY_ID`，不是签名错误；固件会立刻转去发 add-key-request |
-| 有连接但没有 `[PAIR] 已发送 add-key-request` | 固件在等握手回包；新固件收到 fault=3 会立即配钥，或在 4 次握手无果后兜底发送（`CFG_TESLA_PAIR_FALLBACK_TRIES`） |
+| 有连接但没有 `[PAIR] 已发送 add-key-request` | 固件尚未收到车端明确的未配对信号；握手无响应会继续重试，不会自动发起配钥。检查车端是否唤醒、通知是否到达及 VIN/密钥是否匹配 |
 | 有 `已发送`，但没有 `[PAIR] 配钥状态 operationStatus=1` | **真车通常就不回 WAIT**，不是没受理；直接按下一步贴卡 |
 | 贴卡后中控屏弹出「是否添加钥匙」 | 正常：在屏幕上点确认 |
 | `info=4` / `5` / `13` / `24` / `25` / `26` | 白名单满 / 非 OWNER / 已登记 / 车主拒绝 / 贴卡超时 / 屏幕确认超时；25/26 固件会自动重试 |
