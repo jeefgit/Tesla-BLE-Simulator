@@ -16,6 +16,7 @@ PlatformIO 固件工程。本目录与现有 `TESLA-DASHBOARD` 分开，后续�
 | LCD 引脚 | SIO0–3: GPIO 4–7；PCLK: GPIO 38；CS: GPIO 12；RESET: GPIO 39 |
 | 触摸 | CST9217 电容触摸，I²C 地址 `0x5A` |
 | 触摸引脚 | SDA: GPIO 15；SCL: GPIO 14；INT: GPIO 11；RESET: GPIO 40 |
+| 按键 | BOOT: GPIO0（按下为低）；PWR: 由 AXP2101 供电通路控制，经 TCA9554 EXIO4 读取 |
 
 AMOLED 亮度由 CO5300 面板命令控制，没有独立背光 PWM 引脚。
 板载 I²C 是共享总线；不要另建占用 GPIO14/15 的独立 I²C 总线。
@@ -74,6 +75,26 @@ ESP32-S3-ROUND-DISPLAY/
 `src/data/TeslaUiSource.cpp` 把 `VehicleState` / `SourceStatus` 映射成 `UiModel`，
 `DashboardApp` 每轮主循环刷新一次。`include/config.h` 中的 `CFG_DEMO_MODE`
 设为 `1` 可回到静态演示数据。CST9217 触摸输入尚未接入。
+
+### 按键与画面旋转
+
+短按板载 **BOOT 键（GPIO0，按下为低）** 可把画面顺时针旋转 90°：
+0° → 90° → 180° → 270° → 0°，如此循环。实现分两层：
+
+- `DashboardApp::pollBootButton()`：30 ms 消抖，检测到有效按下后调用
+  `RoundDisplay::rotateClockwise()`；按住不放只触发一次。
+- `RoundDisplay`：CO5300 的 MADCTL 只能做镜像、不能交换 XY，因此旋转在
+  flush 回调里用软件完成——RGB565 像素块重排到一块 466×50 的临时缓冲
+  （优先 PSRAM），再按旋转后的窗口坐标写给面板；切换时整屏标脏重绘。
+
+旋转方向会保存到 NVS（namespace `display`，key `rot`）：每次按键后立即写入，
+`RoundDisplay::begin()` 启动时读回，因此重启、断电或正常重新烧录固件后都会
+保持上次的方向，开机第一帧即为该方向。只有全片擦除（`pio run -t erase` /
+`esptool erase_flash`）、烧录包含 NVS 分区的整片镜像，或更换分区表时才会
+恢复默认 0°；想手动恢复默认方向，按 BOOT 键转回 0° 覆盖保存即可。
+
+板载只有 BOOT 和 PWR 两个按键，没有独立 RESET 键；复位由 `CHIP_PU` 控制，
+程序无法把复位动作当成普通按键读取，所以旋转触发使用 BOOT 键。
 
 BLE 配置在 `include/config.h`：
 

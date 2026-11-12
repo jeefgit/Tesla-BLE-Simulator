@@ -1,6 +1,7 @@
 #include "display/RoundDisplay.h"
 
 #include <Arduino_GFX_Library.h>
+#include <Preferences.h>
 #include <esp_heap_caps.h>
 
 #include <cstring>
@@ -12,6 +13,10 @@ namespace {
 
 Arduino_CO5300* s_gfx = nullptr;
 bool s_brightnessReady = false;
+
+// BOOT 键设置的旋转方向存在 NVS，掉电/重启后继续生效。
+constexpr char kPrefsNamespace[] = "display";
+constexpr char kPrefsRotationKey[] = "rot";
 
 uint32_t getLvglTick() { return millis(); }
 
@@ -87,6 +92,17 @@ bool RoundDisplay::begin() {
     CFG_LOG("[UI] rotation buffer unavailable, rotation disabled");
   }
 
+  // 恢复上次 BOOT 键设置的旋转方向，这样开机第一帧就是用户选的方向。
+  Preferences prefs;
+  if (prefs.begin(kPrefsNamespace, true)) {
+    m_rotation = prefs.getUChar(kPrefsRotationKey, 0) & 0x03;
+    prefs.end();
+  }
+  if (m_rotation != 0) {
+    CFG_LOG("[UI] restored display rotation %u deg",
+            static_cast<unsigned>(m_rotation) * 90);
+  }
+
   lv_display_set_user_data(m_display, this);
   lv_display_set_color_format(m_display, LV_COLOR_FORMAT_RGB565);
   lv_display_set_flush_cb(m_display, RoundDisplay::flush);
@@ -107,6 +123,12 @@ void RoundDisplay::rotateClockwise() {
   m_rotation = static_cast<uint8_t>((m_rotation + 1) & 0x03);
   CFG_LOG("[UI] display rotation -> %u deg",
           static_cast<unsigned>(m_rotation) * 90);
+  // 立即写回 NVS，下次上电自动沿用这个方向。
+  Preferences prefs;
+  if (prefs.begin(kPrefsNamespace, false)) {
+    prefs.putUChar(kPrefsRotationKey, m_rotation);
+    prefs.end();
+  }
   // 旋转只改变 flush 的写出方向，LVGL 并不知道画面已变化；整屏标脏
   // 让它用新的方向重新渲染一遍，否则旧方向的内容会留在屏幕上。
   if (m_display != nullptr) {
