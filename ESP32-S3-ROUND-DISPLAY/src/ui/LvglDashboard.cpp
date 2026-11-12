@@ -430,50 +430,50 @@ void LvglDashboard::buildDriving() {
 
   m_speedLabel = makeScaledLabel(m_speedGroup, 233, 163, "--",
                                  &lv_font_montserrat_48, kText, 600);
-  makeLabel(m_speedGroup, 0, 235, 466, 18, "km/h",
-            &lv_font_montserrat_14, kDim, LV_TEXT_ALIGN_CENTER);
+  makeLabel(m_speedGroup, 0, 235, 466, 18, "KM/H",
+            &lv_font_montserrat_14, kGaugeColor, LV_TEXT_ALIGN_CENTER);
 
   const char* gears[] = {"P", "R", "N", "D"};
-  const int32_t gearX[] = {179, 205, 231, 257};
+  const int32_t gearX[] = {176, 206, 236, 266};
   m_gearHighlight = lv_obj_create(m_speedGroup);
   lv_obj_remove_style_all(m_gearHighlight);
-  lv_obj_set_size(m_gearHighlight, 24, 24);
-  lv_obj_set_style_radius(m_gearHighlight, 7, 0);
-  lv_obj_set_style_bg_color(m_gearHighlight, lv_color_hex(0x35191D), 0);
+  lv_obj_set_size(m_gearHighlight, 30, 30);
+  lv_obj_set_style_radius(m_gearHighlight, 9, 0);
+  lv_obj_set_style_bg_color(m_gearHighlight, kGaugeColor, 0);
   lv_obj_set_style_bg_opa(m_gearHighlight, LV_OPA_COVER, 0);
   lv_obj_set_hidden(m_gearHighlight, true);
 
   for (int32_t i = 0; i < 4; ++i) {
-    m_gearLabels[i] = makeLabel(m_speedGroup, gearX[i], 259, 18, 18,
-                                gears[i], &lv_font_montserrat_14, kFaint,
+    m_gearLabels[i] = makeLabel(m_speedGroup, gearX[i], 258, 24, 24,
+                                gears[i], &lv_font_montserrat_20, kFaint,
                                 LV_TEXT_ALIGN_CENTER);
   }
 
   makeLabel(m_speedGroup, 83, 291, 300, 14, "MOTOR POWER",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
-  m_powerLabel = makeLabel(m_speedGroup, 83, 305, 300, 29, "--.- kW",
-                           &lv_font_montserrat_24, kText, LV_TEXT_ALIGN_CENTER);
+  m_powerLabel = makeLabel(m_speedGroup, 73, 303, 320, 33, "--.- kW",
+                           &lv_font_montserrat_28, kText, LV_TEXT_ALIGN_CENTER);
 
   lv_obj_t* powerTrack = lv_obj_create(m_speedGroup);
   lv_obj_remove_style_all(powerTrack);
-  lv_obj_set_pos(powerTrack, 83, 338);
-  lv_obj_set_size(powerTrack, 300, 4);
-  lv_obj_set_style_radius(powerTrack, 2, 0);
-  lv_obj_set_style_bg_color(powerTrack, lv_color_hex(0x141C25), 0);
+  lv_obj_set_pos(powerTrack, 73, 341);
+  lv_obj_set_size(powerTrack, 320, 6);
+  lv_obj_set_style_radius(powerTrack, 3, 0);
+  lv_obj_set_style_bg_color(powerTrack, lv_color_hex(0x17232C), 0);
   lv_obj_set_style_bg_opa(powerTrack, LV_OPA_COVER, 0);
 
   lv_obj_t* zero = lv_obj_create(powerTrack);
   lv_obj_remove_style_all(zero);
-  lv_obj_set_pos(zero, 149, -3);
-  lv_obj_set_size(zero, 1, 10);
-  lv_obj_set_style_bg_color(zero, lv_color_hex(0x2C3846), 0);
+  lv_obj_set_pos(zero, 159, -2);
+  lv_obj_set_size(zero, 2, 10);
+  lv_obj_set_style_bg_color(zero, lv_color_hex(0x637987), 0);
   lv_obj_set_style_bg_opa(zero, LV_OPA_COVER, 0);
 
   m_powerFill = lv_obj_create(powerTrack);
   lv_obj_remove_style_all(m_powerFill);
-  lv_obj_set_pos(m_powerFill, 150, 0);
-  lv_obj_set_size(m_powerFill, 0, 4);
-  lv_obj_set_style_radius(m_powerFill, 2, 0);
+  lv_obj_set_pos(m_powerFill, 160, 0);
+  lv_obj_set_size(m_powerFill, 0, 6);
+  lv_obj_set_style_radius(m_powerFill, 3, 0);
   lv_obj_set_style_bg_color(m_powerFill, kRed, 0);
   lv_obj_set_style_bg_opa(m_powerFill, LV_OPA_COVER, 0);
 }
@@ -520,16 +520,24 @@ void LvglDashboard::buildCards() {
   lv_obj_set_size(m_cardsGroup, 466, 466);
   lv_obj_set_scrollable(m_cardsGroup, false);
 
-  lv_obj_t* battery = makePanel(m_cardsGroup, 95, 344, 132, 56);
-  makeLabel(battery, 12, 8, 108, 12, "BATTERY",
+  lv_obj_t* battery = makePanel(m_cardsGroup, 83, 344, 144, 56);
+  lv_obj_set_style_border_color(battery, lv_color_hex(0x24414B), 0);
+  lv_obj_t* batteryAccent = lv_obj_create(battery);
+  lv_obj_remove_style_all(batteryAccent);
+  lv_obj_set_pos(batteryAccent, 12, 8);
+  lv_obj_set_size(batteryAccent, 3, 12);
+  lv_obj_set_style_radius(batteryAccent, 2, 0);
+  lv_obj_set_style_bg_color(batteryAccent, kGaugeColor, 0);
+  lv_obj_set_style_bg_opa(batteryAccent, LV_OPA_COVER, 0);
+  makeLabel(battery, 21, 8, 111, 12, "BATTERY",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_LEFT);
-  m_socLabel = makeLabel(battery, 12, 19, 108, 27, "--%",
+  m_socLabel = makeLabel(battery, 12, 19, 120, 27, "--%",
                          &lv_font_montserrat_24, kText, LV_TEXT_ALIGN_LEFT);
 
   lv_obj_t* meterTrack = lv_obj_create(battery);
   lv_obj_remove_style_all(meterTrack);
   lv_obj_set_pos(meterTrack, 12, 48);
-  lv_obj_set_size(meterTrack, 108, 3);
+  lv_obj_set_size(meterTrack, 120, 3);
   lv_obj_set_style_radius(meterTrack, 2, 0);
   lv_obj_set_style_bg_color(meterTrack, kTrack, 0);
   lv_obj_set_style_bg_opa(meterTrack, LV_OPA_COVER, 0);
@@ -541,10 +549,18 @@ void LvglDashboard::buildCards() {
   lv_obj_set_style_bg_color(m_socBar, kText, 0);
   lv_obj_set_style_bg_opa(m_socBar, LV_OPA_COVER, 0);
 
-  lv_obj_t* range = makePanel(m_cardsGroup, 239, 344, 132, 56);
-  makeLabel(range, 12, 8, 108, 12, "EST. RANGE",
+  lv_obj_t* range = makePanel(m_cardsGroup, 239, 344, 144, 56);
+  lv_obj_set_style_border_color(range, lv_color_hex(0x49391F), 0);
+  lv_obj_t* rangeAccent = lv_obj_create(range);
+  lv_obj_remove_style_all(rangeAccent);
+  lv_obj_set_pos(rangeAccent, 12, 8);
+  lv_obj_set_size(rangeAccent, 3, 12);
+  lv_obj_set_style_radius(rangeAccent, 2, 0);
+  lv_obj_set_style_bg_color(rangeAccent, kAmber, 0);
+  lv_obj_set_style_bg_opa(rangeAccent, LV_OPA_COVER, 0);
+  makeLabel(range, 21, 8, 111, 12, "EST. RANGE",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_LEFT);
-  m_rangeLabel = makeLabel(range, 12, 19, 108, 27, "-- km",
+  m_rangeLabel = makeLabel(range, 12, 19, 120, 27, "-- km",
                            &lv_font_montserrat_24, kText, LV_TEXT_ALIGN_LEFT);
 
   m_chargeCardsGroup = lv_obj_create(screen);
@@ -577,17 +593,17 @@ void LvglDashboard::buildCards() {
   lv_obj_set_size(m_temperatureGroup, 466, 466);
   lv_obj_set_scrollable(m_temperatureGroup, false);
 
-  lv_obj_t* outsideTemp = makePanel(m_temperatureGroup, 95, 406, 132, 42, 10);
-  makeLabel(outsideTemp, 10, 5, 112, 12, "OUTSIDE",
+  lv_obj_t* outsideTemp = makePanel(m_temperatureGroup, 83, 406, 144, 42, 10);
+  makeLabel(outsideTemp, 10, 5, 124, 12, "OUTSIDE",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
-  m_outsideTempLabel = makeLabel(outsideTemp, 10, 19, 112, 20, "--°C",
+  m_outsideTempLabel = makeLabel(outsideTemp, 10, 19, 124, 20, "--°C",
                                  &lv_font_montserrat_16, kText,
                                  LV_TEXT_ALIGN_CENTER);
 
-  lv_obj_t* insideTemp = makePanel(m_temperatureGroup, 239, 406, 132, 42, 10);
-  makeLabel(insideTemp, 10, 5, 112, 12, "CABIN",
+  lv_obj_t* insideTemp = makePanel(m_temperatureGroup, 239, 406, 144, 42, 10);
+  makeLabel(insideTemp, 10, 5, 124, 12, "CABIN",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
-  m_insideTempLabel = makeLabel(insideTemp, 10, 19, 112, 20, "--°C",
+  m_insideTempLabel = makeLabel(insideTemp, 10, 19, 124, 20, "--°C",
                                 &lv_font_montserrat_16, kText,
                                 LV_TEXT_ALIGN_CENTER);
 }
@@ -905,12 +921,12 @@ void LvglDashboard::render(const UiModel& model) {
   for (uint8_t i = 0; i < 4; ++i) {
     const bool selected = model.gear == gears[i];
     if (selected) {
-      lv_obj_set_pos(m_gearHighlight, 176 + i * 26, 256);
+      lv_obj_set_pos(m_gearHighlight, 173 + i * 30, 255);
       lv_obj_set_hidden(m_gearHighlight, false);
       selectedGearVisible = true;
     }
     lv_obj_set_style_text_color(m_gearLabels[i],
-                                selected ? kText : lv_color_hex(0x5A6370), 0);
+                                selected ? kScreen : lv_color_hex(0x5A6370), 0);
   }
   if (!selectedGearVisible) {
     lv_obj_set_hidden(m_gearHighlight, true);
@@ -923,14 +939,14 @@ void LvglDashboard::render(const UiModel& model) {
              fabsf(model.motorPowerKw));
     updateLabel(m_powerLabel, powerText);
     const int32_t fillWidth = static_cast<int32_t>(
-        fminf(fabsf(model.motorPowerKw), 250.0f) * 0.6f);
+        fminf(fabsf(model.motorPowerKw), 250.0f) * 0.64f);
     const bool regen = model.motorPowerKw < 0;
-    lv_obj_set_size(m_powerFill, fillWidth, 4);
-    lv_obj_set_pos(m_powerFill, regen ? 150 - fillWidth : 150, 0);
+    lv_obj_set_size(m_powerFill, fillWidth, 6);
+    lv_obj_set_pos(m_powerFill, regen ? 160 - fillWidth : 160, 0);
     lv_obj_set_style_bg_color(m_powerFill, regen ? kGreen : kRed, 0);
   } else {
     updateLabel(m_powerLabel, "--.- kW");
-    lv_obj_set_size(m_powerFill, 0, 4);
+    lv_obj_set_size(m_powerFill, 0, 6);
   }
 
   if (model.socValid) {
@@ -938,9 +954,9 @@ void LvglDashboard::render(const UiModel& model) {
     snprintf(soc, sizeof(soc), "%d%%", static_cast<int>(model.soc));
     updateLabel(m_socLabel, soc);
     const int32_t width =
-        model.soc < 0 ? 0 : (model.soc > 100 ? 108 : model.soc * 108 / 100);
+        model.soc < 0 ? 0 : (model.soc > 100 ? 120 : model.soc * 120 / 100);
     lv_obj_set_size(m_socBar, width, 3);
-    const lv_color_t socColor = model.soc <= 15 ? kRed : kText;
+    const lv_color_t socColor = model.soc <= 15 ? kRed : kGaugeColor;
     lv_obj_set_style_text_color(m_socLabel, socColor, 0);
     lv_obj_set_style_bg_color(m_socBar, socColor, 0);
     lv_obj_set_size(
