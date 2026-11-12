@@ -1,6 +1,7 @@
 #include "app/DashboardApp.h"
 
 #include <Arduino.h>
+#include <Wire.h>
 #include <string.h>
 
 #include "config.h"
@@ -14,6 +15,36 @@ constexpr uint32_t kSpeedTransitionMs = 30;
 // BOOT 键接 GPIO0，板上有外部上拉，按下为低电平。
 constexpr uint8_t kBootButtonPin = 0;
 constexpr uint32_t kBootDebounceMs = 30;
+
+// PWR 键不在 ESP32 的 GPIO 上，而是经板载 TCA9554（I2C 0x20）的
+// EXIO4 读取：高电平表示按下，低电平表示松开。
+constexpr uint8_t kPwrButtonSda = 15;
+constexpr uint8_t kPwrButtonScl = 14;
+constexpr uint8_t kPwrExpanderAddress = 0x20;
+constexpr uint8_t kPwrExpanderInputReg = 0x00;
+constexpr uint8_t kPwrExpanderConfigReg = 0x03;
+constexpr uint8_t kPwrButtonMask = 1u << 4;  // EXIO4
+constexpr uint32_t kPwrDebounceMs = 30;
+constexpr uint32_t kPwrLongPressMs = 3000;
+
+int16_t readExpanderReg(uint8_t reg) {
+  Wire.beginTransmission(kPwrExpanderAddress);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) {
+    return -1;
+  }
+  if (Wire.requestFrom(kPwrExpanderAddress, 1) != 1) {
+    return -1;
+  }
+  return static_cast<int16_t>(Wire.read());
+}
+
+bool writeExpanderReg(uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(kPwrExpanderAddress);
+  Wire.write(reg);
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
 
 RoundDisplay display;
 LvglDashboard dashboard;
@@ -58,6 +89,75 @@ void DashboardApp::begin() {
 
   // BOOT 键平时是高电平，短按一次把画面顺时针旋转 90°。
   pinMode(kBootButtonPin, INPUT_PULLUP);
+  beginPowerButton();
+}
+
+void DashboardApp::beginPowerButton() {
+  Wire.begin(kPwrButtonSda, kPwrButtonScl);
+  Wire.setClock(100000);
+
+  const int16_t config = readExpanderReg(kPwrExpanderConfigReg);
+  if (config < 0) {
+    CFG_LOG("[BTN] TCA9554 not found; PWR long-press disabled");
+    return;
+  }
+  // 配置寄存器里 1 = 输入。EXIO4 必须保持输入才能读回 PWR 状态。
+  if ((config & kPwrButtonMask) == 0) {
+    if (!writeExpanderReg(kPwrExpanderConfigReg,
+                          static_cast<uint8_t>(config | kPwrButtonMask))) {
+      CFG_LOG("[BTN] failed to configure TCA9554 EXIO4 as input");
+      return;
+    }
+  }
+
+  m_pwrAvailable = true;
+  const int16_t inputs = readExpanderReg(kPwrExpanderInputReg);
+  m_pwrRawPressed = inputs >= 0 && (inputs & kPwrButtonMask) != 0;
+  m_pwrPressed = m_pwrRawPressed;
+  // 如果开机时 PWR 仍被按住（例如正用它上电），先等松开再进入长按检测，
+  // 避免上电动作被立刻当成重启。
+  m_pwrArmed = !m_pwrRawPressed;
+  CFG_LOG("[BTN] PWR button ready (EXIO4, %s)",
+          m_pwrRawPressed ? "held" : "released");
+}
+
+void DashboardApp::pollPowerButton() {
+  if (!m_pwrAvailable) {
+    return;
+  }
+  const int16_t inputs = readExpanderReg(kPwrExpanderInputReg);
+  if (inputs < 0) {
+    // 总线偶发错误时保持上一次状态，避免误判按下/松开。
+    return;
+  }
+  const bool rawPressed = (inputs & kPwrButtonMask) != 0;
+  const uint32_t now = millis();
+  if (rawPressed != m_pwrRawPressed) {
+    m_pwrRawPressed = rawPressed;
+    m_pwrLastChangeMs = now;
+    return;
+  }
+  if (now - m_pwrLastChangeMs < kPwrDebounceMs) {
+    return;
+  }
+  if (rawPressed != m_pwrPressed) {
+    m_pwrPressed = rawPressed;
+    if (m_pwrPressed) {
+      m_pwrPressStartMs = now;
+      CFG_LOG("[BTN] PWR pressed (hold %ums to restart)",
+              static_cast<unsigned>(kPwrLongPressMs));
+    } else {
+      // 松开后才允许下一次长按；这也让开机时按住的上电动作失效。
+      m_pwrArmed = true;
+      CFG_LOG("[BTN] PWR released");
+    }
+  }
+  if (m_pwrPressed && m_pwrArmed &&
+      now - m_pwrPressStartMs >= kPwrLongPressMs) {
+    CFG_LOG("[BTN] PWR long press -> restart");
+    Serial.flush();
+    ESP.restart();
+  }
 }
 
 void DashboardApp::pollBootButton() {
@@ -86,6 +186,7 @@ void DashboardApp::loop() {
     return;
   }
   pollBootButton();
+  pollPowerButton();
 #if !CFG_DEMO_MODE
   if (!m_sourceStarted && !dashboard.bootAnimationRunning()) {
     m_source.begin();

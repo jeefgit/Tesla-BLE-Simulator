@@ -598,8 +598,8 @@ void LvglDashboard::buildCards() {
       makePanel(m_temperatureGroup, 113, 418, 240, 32, 10);
   makeLabel(temperaturePanel, 8, 9, 46, 14, "OUTSIDE",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_LEFT);
-  m_outsideTempLabel = makeLabel(temperaturePanel, 54, 6, 62, 20, "--°C",
-                                 &lv_font_montserrat_16, kText,
+  m_outsideTempLabel = makeLabel(temperaturePanel, 54, 3, 62, 26, "--°C",
+                                 &lv_font_montserrat_20, kText,
                                  LV_TEXT_ALIGN_LEFT);
   lv_obj_t* temperatureDivider = lv_obj_create(temperaturePanel);
   lv_obj_remove_style_all(temperatureDivider);
@@ -609,8 +609,8 @@ void LvglDashboard::buildCards() {
   lv_obj_set_style_bg_opa(temperatureDivider, LV_OPA_COVER, 0);
   makeLabel(temperaturePanel, 132, 9, 38, 14, "CABIN",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_LEFT);
-  m_insideTempLabel = makeLabel(temperaturePanel, 172, 6, 62, 20, "--°C",
-                                &lv_font_montserrat_16, kText,
+  m_insideTempLabel = makeLabel(temperaturePanel, 172, 3, 62, 26, "--°C",
+                                &lv_font_montserrat_20, kText,
                                 LV_TEXT_ALIGN_LEFT);
 }
 

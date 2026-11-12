@@ -15,6 +15,8 @@ class DashboardApp {
 
  private:
   void pollBootButton();
+  void beginPowerButton();
+  void pollPowerButton();
 
 #if !CFG_DEMO_MODE
   TeslaUiSource m_source;
@@ -23,6 +25,12 @@ class DashboardApp {
   bool m_bootRawPressed = false;
   bool m_bootPressed = false;
   uint32_t m_bootLastChangeMs = 0;
+  bool m_pwrAvailable = false;
+  bool m_pwrArmed = false;
+  bool m_pwrRawPressed = false;
+  bool m_pwrPressed = false;
+  uint32_t m_pwrLastChangeMs = 0;
+  uint32_t m_pwrPressStartMs = 0;
   UiModel m_model;
   bool m_initialized = false;
   uint32_t m_lastRenderMs = 0;
