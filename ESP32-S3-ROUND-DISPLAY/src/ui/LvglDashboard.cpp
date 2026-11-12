@@ -115,6 +115,13 @@ void setScale(lv_obj_t* object, int32_t scale) {
   lv_obj_set_style_transform_scale(object, scale, 0);
 }
 
+void setPairCardPulse(void* object, int32_t scale) {
+  auto* card = static_cast<lv_obj_t*>(object);
+  setScale(card, scale);
+  const int32_t opacity = 45 + (scale - 240) * 55 / 100;
+  lv_obj_set_style_opa(card, opacity, 0);
+}
+
 // A scaled label whose box is exactly one line high. The text then fills the
 // box, so scaling around the 50%/50% pivot keeps it centered on both axes.
 lv_obj_t* makeScaledLabel(lv_obj_t* parent, int32_t centerX, int32_t centerY,
@@ -641,19 +648,81 @@ void LvglDashboard::buildPairingPage() {
   lv_obj_set_size(m_pairPage, 466, 466);
   lv_obj_set_scrollable(m_pairPage, false);
 
-  makeLabel(m_pairPage, 35, 83, 396, 18, "ADD NEW KEY",
+  makeLabel(m_pairPage, 35, 66, 396, 18, "ADD NEW KEY",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
-  m_pairTitle = makeScaledLabel(m_pairPage, 233, 140, "TAP CARD",
-                                &lv_font_montserrat_48, kAmber, 280);
-  makeLabel(m_pairPage, 32, 173, 402, 25,
-            "ON CONSOLE READER BY ARMREST", &lv_font_montserrat_10, kDim,
+  m_pairTitle = makeScaledLabel(m_pairPage, 233, 119, "TAP CARD",
+                                &lv_font_montserrat_48, kAmber, 260);
+  makeLabel(m_pairPage, 32, 154, 402, 20,
+            "HOLD CARD NEAR THE CONSOLE READER", &lv_font_montserrat_10, kDim,
             LV_TEXT_ALIGN_CENTER);
-  m_pairCount = makeScaledLabel(m_pairPage, 233, 255, "30",
-                                &lv_font_montserrat_48, kText, 500);
+
+  m_pairCardGlow = lv_obj_create(m_pairPage);
+  lv_obj_remove_style_all(m_pairCardGlow);
+  lv_obj_set_pos(m_pairCardGlow, 176, 196);
+  lv_obj_set_size(m_pairCardGlow, 114, 68);
+  lv_obj_set_style_radius(m_pairCardGlow, 14, 0);
+  lv_obj_set_style_border_width(m_pairCardGlow, 1, 0);
+  lv_obj_set_style_border_color(m_pairCardGlow, kAmber, 0);
+  lv_obj_set_style_bg_opa(m_pairCardGlow, LV_OPA_TRANSP, 0);
+  lv_obj_clear_flag(m_pairCardGlow, LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_t* card = lv_obj_create(m_pairPage);
+  lv_obj_remove_style_all(card);
+  lv_obj_set_pos(card, 183, 201);
+  lv_obj_set_size(card, 100, 58);
+  lv_obj_set_style_radius(card, 10, 0);
+  lv_obj_set_style_bg_color(card, lv_color_hex(0x171811), 0);
+  lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(card, 1, 0);
+  lv_obj_set_style_border_color(card, kAmber, 0);
+  lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_t* chip = lv_obj_create(card);
+  lv_obj_remove_style_all(chip);
+  lv_obj_set_pos(chip, 12, 14);
+  lv_obj_set_size(chip, 18, 24);
+  lv_obj_set_style_radius(chip, 4, 0);
+  lv_obj_set_style_bg_color(chip, lv_color_hex(0x392D17), 0);
+  lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(chip, 1, 0);
+  lv_obj_set_style_border_color(chip, kAmber, 0);
+
+  lv_obj_t* cardStripe = lv_obj_create(card);
+  lv_obj_remove_style_all(cardStripe);
+  lv_obj_set_pos(cardStripe, 39, 17);
+  lv_obj_set_size(cardStripe, 43, 3);
+  lv_obj_set_style_radius(cardStripe, 2, 0);
+  lv_obj_set_style_bg_color(cardStripe, lv_color_hex(0x695127), 0);
+  lv_obj_set_style_bg_opa(cardStripe, LV_OPA_COVER, 0);
+  lv_obj_t* cardStripe2 = lv_obj_create(card);
+  lv_obj_remove_style_all(cardStripe2);
+  lv_obj_set_pos(cardStripe2, 39, 26);
+  lv_obj_set_size(cardStripe2, 32, 2);
+  lv_obj_set_style_radius(cardStripe2, 1, 0);
+  lv_obj_set_style_bg_color(cardStripe2, lv_color_hex(0x695127), 0);
+  lv_obj_set_style_bg_opa(cardStripe2, LV_OPA_COVER, 0);
+
+  m_pairWaveOuter = makeScanArc(m_pairPage, 70, 3, 225, 195,
+                                kScanCyan, 34);
+  m_pairWaveInner = makeScanArc(m_pairPage, 48, 3, 236, 206,
+                                kAmber, 34);
+  lv_arc_set_bg_angles(m_pairWaveOuter, 300, 60);
+  lv_arc_set_bg_angles(m_pairWaveInner, 300, 60);
+  lv_obj_set_style_arc_color(m_pairWaveOuter,
+                             lv_color_hex(0x19323A), LV_PART_MAIN);
+  lv_obj_set_style_arc_color(m_pairWaveInner,
+                             lv_color_hex(0x302718), LV_PART_MAIN);
+  lv_obj_move_foreground(m_pairWaveOuter);
+  lv_obj_move_foreground(m_pairWaveInner);
+  makeLabel(m_pairPage, 179, 269, 108, 16, "NFC  READY",
+            &lv_font_montserrat_10, kScanCyan, LV_TEXT_ALIGN_CENTER);
+
+  m_pairCount = makeScaledLabel(m_pairPage, 233, 315, "30",
+                                &lv_font_montserrat_48, kText, 440);
 
   lv_obj_t* bar = lv_obj_create(m_pairPage);
   lv_obj_remove_style_all(bar);
-  lv_obj_set_pos(bar, 93, 317);
+  lv_obj_set_pos(bar, 93, 367);
   lv_obj_set_size(bar, 280, 7);
   lv_obj_set_style_radius(bar, 4, 0);
   lv_obj_set_style_bg_color(bar, kTrack, 0);
@@ -666,16 +735,44 @@ void LvglDashboard::buildPairingPage() {
   lv_obj_set_style_bg_color(m_pairBarFill, kAmber, 0);
   lv_obj_set_style_bg_opa(m_pairBarFill, LV_OPA_COVER, 0);
 
-  m_pairTry = makeLabel(m_pairPage, 50, 332, 366, 16, "TRY 1 / 3",
+  m_pairTry = makeLabel(m_pairPage, 50, 384, 366, 16, "TRY 1 / 3",
                         &lv_font_montserrat_10, kFaint,
                         LV_TEXT_ALIGN_CENTER);
-  m_pairStatus = makeLabel(m_pairPage, 32, 350, 402, 20,
+  m_pairStatus = makeLabel(m_pairPage, 32, 403, 402, 20,
                            "WAITING FOR KEY CARD",
                            &lv_font_montserrat_10, kAmber,
                            LV_TEXT_ALIGN_CENTER);
-  makeLabel(m_pairPage, 30, 380, 406, 20,
-            "THE VEHICLE WINDOW CLOSES AUTOMATICALLY",
+  makeLabel(m_pairPage, 30, 428, 406, 16,
+            "WINDOW CLOSES AUTOMATICALLY",
             &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
+}
+
+void LvglDashboard::startPairAnimation() {
+  if (m_pairAnimationRunning) return;
+  m_pairAnimationRunning = true;
+  startScanArcAnimation(m_pairWaveOuter, 0, 360, 2300);
+  startScanArcAnimation(m_pairWaveInner, 360, 0, 1500);
+
+  lv_anim_t pulse;
+  lv_anim_init(&pulse);
+  lv_anim_set_var(&pulse, m_pairCardGlow);
+  lv_anim_set_values(&pulse, 240, 340);
+  lv_anim_set_duration(&pulse, 850);
+  lv_anim_set_playback_time(&pulse, 850);
+  lv_anim_set_exec_cb(&pulse, setPairCardPulse);
+  lv_anim_set_repeat_count(&pulse, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_start(&pulse);
+}
+
+void LvglDashboard::stopPairAnimation() {
+  if (!m_pairAnimationRunning) return;
+  lv_anim_delete(m_pairWaveOuter, rotateScanArc);
+  lv_anim_delete(m_pairWaveInner, rotateScanArc);
+  lv_anim_delete(m_pairCardGlow, setPairCardPulse);
+  m_pairAnimationRunning = false;
+  lv_arc_set_rotation(m_pairWaveOuter, 0);
+  lv_arc_set_rotation(m_pairWaveInner, 0);
+  setPairCardPulse(m_pairCardGlow, 240);
 }
 
 void LvglDashboard::setHidden(lv_obj_t* object, bool hidden) {
@@ -739,6 +836,14 @@ void LvglDashboard::render(const UiModel& model) {
   setHidden(m_arc, showLinkPage);
   setHidden(m_linkPage, !showLinkPage);
   setHidden(m_pairPage, !pairing);
+  const bool pairAnimationActive =
+      pairing && model.pairing != UiPairingPhase::Success &&
+      model.pairing != UiPairingPhase::Failed;
+  if (pairAnimationActive) {
+    startPairAnimation();
+  } else {
+    stopPairAnimation();
+  }
   if (showLinkPage) {
     startLinkAnimation();
   } else {
