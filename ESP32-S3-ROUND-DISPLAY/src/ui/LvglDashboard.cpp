@@ -21,6 +21,7 @@ const lv_color_t kRed = lv_color_hex(0xE82127);
 const lv_color_t kGreen = lv_color_hex(0x21C15E);
 const lv_color_t kAmber = lv_color_hex(0xFFB340);
 const lv_color_t kTrack = lv_color_hex(0x1D2733);
+const lv_color_t kGaugeColor = lv_color_hex(0x43D9F5);
 const lv_color_t kCard = lv_color_hex(0x0C1218);
 const lv_color_t kBootRingColor = lv_color_hex(0xAEB8C2);
 const lv_color_t kScanCyan = lv_color_hex(0x43D9F5);
@@ -386,7 +387,7 @@ void LvglDashboard::buildGauge() {
   lv_obj_set_style_arc_color(m_arc, kTrack, LV_PART_MAIN);
   lv_obj_set_style_arc_width(m_arc, 6, LV_PART_INDICATOR);
   lv_obj_set_style_arc_rounded(m_arc, true, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(m_arc, kRed, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(m_arc, kGaugeColor, LV_PART_INDICATOR);
   lv_obj_set_style_pad_all(m_arc, 0, LV_PART_KNOB);
   lv_obj_set_style_bg_opa(m_arc, LV_OPA_TRANSP, LV_PART_KNOB);
   lv_obj_set_style_border_width(m_arc, 0, LV_PART_KNOB);
@@ -874,7 +875,7 @@ void LvglDashboard::render(const UiModel& model) {
     lv_obj_set_style_arc_color(m_arc, kGreen, LV_PART_INDICATOR);
     lv_arc_set_value(m_arc, model.socValid ? model.soc * 10 : 0);
   } else if (m_showSpeedArc) {
-    lv_obj_set_style_arc_color(m_arc, kRed, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(m_arc, kGaugeColor, LV_PART_INDICATOR);
     // The value is applied by updateSpeedLabel() at the end of render(), which
     // uses the same smoothed speed as the numeric readout. Updating here too
     // would invalidate the arc twice per frame.
