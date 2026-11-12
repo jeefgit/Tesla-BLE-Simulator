@@ -116,10 +116,10 @@ void setScale(lv_obj_t* object, int32_t scale) {
 }
 
 void setPairCardPulse(void* object, int32_t scale) {
-  auto* card = static_cast<lv_obj_t*>(object);
-  setScale(card, scale);
+  auto* frame = static_cast<lv_obj_t*>(object);
+  setScale(frame, scale);
   const int32_t opacity = 45 + (scale - 240) * 55 / 100;
-  lv_obj_set_style_opa(card, opacity, 0);
+  lv_obj_set_style_opa(frame, opacity, 0);
 }
 
 // A scaled label whose box is exactly one line high. The text then fills the
@@ -702,18 +702,14 @@ void LvglDashboard::buildPairingPage() {
   lv_obj_set_style_bg_color(cardStripe2, lv_color_hex(0x695127), 0);
   lv_obj_set_style_bg_opa(cardStripe2, LV_OPA_COVER, 0);
 
-  m_pairWaveOuter = makeScanArc(m_pairPage, 70, 3, 225, 195,
-                                kScanCyan, 34);
-  m_pairWaveInner = makeScanArc(m_pairPage, 48, 3, 236, 206,
-                                kAmber, 34);
-  lv_arc_set_bg_angles(m_pairWaveOuter, 300, 60);
-  lv_arc_set_bg_angles(m_pairWaveInner, 300, 60);
-  lv_obj_set_style_arc_color(m_pairWaveOuter,
-                             lv_color_hex(0x19323A), LV_PART_MAIN);
-  lv_obj_set_style_arc_color(m_pairWaveInner,
-                             lv_color_hex(0x302718), LV_PART_MAIN);
-  lv_obj_move_foreground(m_pairWaveOuter);
-  lv_obj_move_foreground(m_pairWaveInner);
+  m_pairPulse = lv_obj_create(m_pairPage);
+  lv_obj_remove_style_all(m_pairPulse);
+  lv_obj_set_size(m_pairPulse, 8, 8);
+  lv_obj_set_pos(m_pairPulse, 256, 226);
+  lv_obj_set_style_radius(m_pairPulse, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(m_pairPulse, kScanCyan, 0);
+  lv_obj_set_style_bg_opa(m_pairPulse, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(m_pairPulse, LV_OBJ_FLAG_CLICKABLE);
   makeLabel(m_pairPage, 179, 269, 108, 16, "NFC  READY",
             &lv_font_montserrat_10, kScanCyan, LV_TEXT_ALIGN_CENTER);
 
@@ -750,28 +746,34 @@ void LvglDashboard::buildPairingPage() {
 void LvglDashboard::startPairAnimation() {
   if (m_pairAnimationRunning) return;
   m_pairAnimationRunning = true;
-  startScanArcAnimation(m_pairWaveOuter, 0, 360, 2300);
-  startScanArcAnimation(m_pairWaveInner, 360, 0, 1500);
 
   lv_anim_t pulse;
   lv_anim_init(&pulse);
-  lv_anim_set_var(&pulse, m_pairCardGlow);
-  lv_anim_set_values(&pulse, 240, 340);
-  lv_anim_set_duration(&pulse, 850);
-  lv_anim_set_playback_time(&pulse, 850);
-  lv_anim_set_exec_cb(&pulse, setPairCardPulse);
+  lv_anim_set_var(&pulse, m_pairPulse);
+  lv_anim_set_values(&pulse, 70, LV_OPA_COVER);
+  lv_anim_set_duration(&pulse, 650);
+  lv_anim_set_playback_time(&pulse, 650);
+  lv_anim_set_exec_cb(&pulse, setScanPulseOpacity);
   lv_anim_set_repeat_count(&pulse, LV_ANIM_REPEAT_INFINITE);
   lv_anim_start(&pulse);
+
+  lv_anim_t cardPulse;
+  lv_anim_init(&cardPulse);
+  lv_anim_set_var(&cardPulse, m_pairCardGlow);
+  lv_anim_set_values(&cardPulse, 240, 340);
+  lv_anim_set_duration(&cardPulse, 850);
+  lv_anim_set_playback_time(&cardPulse, 850);
+  lv_anim_set_exec_cb(&cardPulse, setPairCardPulse);
+  lv_anim_set_repeat_count(&cardPulse, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_start(&cardPulse);
 }
 
 void LvglDashboard::stopPairAnimation() {
   if (!m_pairAnimationRunning) return;
-  lv_anim_delete(m_pairWaveOuter, rotateScanArc);
-  lv_anim_delete(m_pairWaveInner, rotateScanArc);
+  lv_anim_delete(m_pairPulse, setScanPulseOpacity);
   lv_anim_delete(m_pairCardGlow, setPairCardPulse);
   m_pairAnimationRunning = false;
-  lv_arc_set_rotation(m_pairWaveOuter, 0);
-  lv_arc_set_rotation(m_pairWaveInner, 0);
+  lv_obj_set_style_opa(m_pairPulse, LV_OPA_COVER, 0);
   setPairCardPulse(m_pairCardGlow, 240);
 }
 
@@ -833,7 +835,10 @@ void LvglDashboard::render(const UiModel& model) {
   setHidden(m_cardsGroup, !ready || showCharging || pairing);
   setHidden(m_chargeCardsGroup, !showCharging);
   setHidden(m_temperatureLabel, !ready || pairing);
-  setHidden(m_arc, showLinkPage);
+  setHidden(m_arc, showLinkPage || pairing);
+  setHidden(m_gaugeMinLabel, pairing);
+  setHidden(m_gaugeMaxLabel, pairing);
+  setHidden(m_topGroup, pairing);
   setHidden(m_linkPage, !showLinkPage);
   setHidden(m_pairPage, !pairing);
   const bool pairAnimationActive =

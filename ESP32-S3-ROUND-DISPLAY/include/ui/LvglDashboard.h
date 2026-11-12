@@ -76,8 +76,7 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_pairTry = nullptr;
   lv_obj_t* m_pairBarFill = nullptr;
   lv_obj_t* m_pairCardGlow = nullptr;
-  lv_obj_t* m_pairWaveInner = nullptr;
-  lv_obj_t* m_pairWaveOuter = nullptr;
+  lv_obj_t* m_pairPulse = nullptr;
   bool m_pairAnimationRunning = false;
   lv_obj_t* m_topGroup = nullptr;
   lv_obj_t* m_bootLayer = nullptr;
