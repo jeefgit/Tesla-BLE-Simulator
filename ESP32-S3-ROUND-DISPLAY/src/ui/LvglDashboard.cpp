@@ -844,17 +844,33 @@ void LvglDashboard::updateSpeedLabel(float speedKmh, bool valid) {
 }
 
 void LvglDashboard::updateGaugeArc(float speedKmh, bool valid) {
-  int32_t speed = 0;
+  float speed = 0.0f;
   if (valid) {
-    speed = static_cast<int32_t>(
-        lroundf(fminf(fmaxf(speedKmh, 0.0f), kGaugeMaxSpeedKmh)));
+    speed = fminf(fmaxf(speedKmh, 0.0f), kGaugeMaxSpeedKmh);
   }
-  // Map the rounded km/h (the same number shown on screen) to arc units, so the
-  // arc only invalidates when the visible speed actually changes instead of on
-  // every smoothed float step.
-  const int32_t value = speed * kArcMaxValue /
+  const int32_t roundedSpeed = static_cast<int32_t>(lroundf(speed));
+  const int32_t value = roundedSpeed * kArcMaxValue /
                         static_cast<int32_t>(kGaugeMaxSpeedKmh);
   lv_arc_set_value(m_arc, value);
+
+  constexpr uint32_t speedColors[] = {0x43D9F5, 0x21C15E, 0xFFB340, 0xE82127};
+  constexpr float colorSegments = 3.0f;
+  const float colorPosition = speed / kGaugeMaxSpeedKmh * colorSegments;
+  const uint32_t segment =
+      static_cast<uint32_t>(fminf(colorPosition, colorSegments - 1.0f));
+  const float blend = colorPosition - segment;
+  const uint32_t from = speedColors[segment];
+  const uint32_t to = speedColors[segment + 1];
+  const uint8_t red = static_cast<uint8_t>(lroundf(
+      ((from >> 16) & 0xFF) * (1.0f - blend) +
+      ((to >> 16) & 0xFF) * blend));
+  const uint8_t green = static_cast<uint8_t>(lroundf(
+      ((from >> 8) & 0xFF) * (1.0f - blend) +
+      ((to >> 8) & 0xFF) * blend));
+  const uint8_t blue = static_cast<uint8_t>(lroundf(
+      (from & 0xFF) * (1.0f - blend) + (to & 0xFF) * blend));
+  lv_obj_set_style_arc_color(m_arc, lv_color_make(red, green, blue),
+                             LV_PART_INDICATOR);
 }
 
 void LvglDashboard::render(const UiModel& model) {
@@ -909,10 +925,8 @@ void LvglDashboard::render(const UiModel& model) {
     lv_obj_set_style_arc_color(m_arc, kGreen, LV_PART_INDICATOR);
     lv_arc_set_value(m_arc, model.socValid ? model.soc * 10 : 0);
   } else if (m_showSpeedArc) {
-    lv_obj_set_style_arc_color(m_arc, kGaugeColor, LV_PART_INDICATOR);
     // The value is applied by updateSpeedLabel() at the end of render(), which
-    // uses the same smoothed speed as the numeric readout. Updating here too
-    // would invalidate the arc twice per frame.
+    // uses the same smoothed speed as the numeric readout.
   } else {
     lv_arc_set_value(m_arc, 0);
   }
