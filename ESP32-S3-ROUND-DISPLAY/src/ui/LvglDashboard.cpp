@@ -645,6 +645,7 @@ void LvglDashboard::render(const UiModel& model) {
   setHidden(m_cardsGroup, !ready || showCharging || pairing);
   setHidden(m_chargeCardsGroup, !showCharging);
   setHidden(m_temperatureLabel, !ready || pairing);
+  setHidden(m_arc, showLinkPage);
   setHidden(m_linkPage, !showLinkPage);
   setHidden(m_pairPage, !pairing);
 
