@@ -1,5 +1,8 @@
 #include "ble/BleLink.h"
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #include "tesla/BackendConfig.h"
 
 namespace {
@@ -20,6 +23,14 @@ void BleLink::begin() {
   s_instance = this;
   NimBLEDevice::init("TESLA-DASH");
   NimBLEDevice::setMTU(CFG_MTU);  // 请求更大的 MTU，53 字节帧一次推完
+  m_txQueue = xQueueCreate(1, sizeof(TxPacket));
+  if (!m_txQueue) {
+    CFG_LOG("创建 BLE 发送队列失败");
+  } else if (xTaskCreate(txTask, "ble_tx", 6144, this, 1, nullptr) != pdPASS) {
+    vQueueDelete(m_txQueue);
+    m_txQueue = nullptr;
+    CFG_LOG("创建 BLE 发送任务失败");
+  }
   m_state = State::Idle;
   CFG_LOG("BLE 协议栈就绪（特斯拉 Central），目标前缀 %u 个", (unsigned)kTargetNameCount);
 }
@@ -27,6 +38,12 @@ void BleLink::begin() {
 void BleLink::loop() {
   // 1) 先把 BLE 收到的字节交给上层（在 loop 上下文，安全）
   drainRx();
+
+  if (!m_writeInFlight && m_writeFailed) {
+    m_writeFailed = false;
+    CFG_LOG("BLE GATT 异步写入失败，启动重连");
+    scheduleReconnect();
+  }
 
   // 2) 连接状态机
   switch (m_state) {
@@ -54,20 +71,22 @@ void BleLink::loop() {
       break;
 
     case State::Connecting:
-      if (connectAndSubscribe()) {
-        m_state = State::Ready;
-        CFG_LOG("BLE 已连接: %s，链路就绪", m_remoteName.c_str());
-      } else {
-        CFG_LOG("连接准备失败 (%u/%u)", (unsigned)(m_failCount + 1),
-                (unsigned)CFG_CONNECT_FAIL_LIMIT);
-        if (++m_failCount >= CFG_CONNECT_FAIL_LIMIT) dropTarget();
-        m_state = State::Reconnecting;
-        m_nextAttemptAt = millis() + CFG_RECONNECT_INTERVAL_MS;
+      if (!m_connectTaskRunning) {
+        m_connectTaskRunning = true;
+        const BaseType_t result =
+            xTaskCreate(connectTask, "ble_connect", 8192, this, 1, nullptr);
+        if (result != pdPASS) {
+          m_connectTaskRunning = false;
+          CFG_LOG("创建 BLE 连接任务失败");
+          if (++m_failCount >= CFG_CONNECT_FAIL_LIMIT) dropTarget();
+          m_state = State::Reconnecting;
+          m_nextAttemptAt = millis() + CFG_RECONNECT_INTERVAL_MS;
+        }
       }
       break;
 
     case State::Ready:
-      if (!m_client || !m_client->isConnected()) {
+      if ((!m_client || !m_client->isConnected()) && !m_writeInFlight) {
         CFG_LOG("BLE 连接断开");
         scheduleReconnect();
       }
@@ -79,6 +98,41 @@ void BleLink::loop() {
         m_state = m_hasTarget ? State::Connecting : State::Scanning;
       }
       break;
+  }
+}
+
+void BleLink::connectTask(void* context) {
+  static_cast<BleLink*>(context)->runConnectAttempt();
+  vTaskDelete(nullptr);
+}
+
+void BleLink::runConnectAttempt() {
+  if (connectAndSubscribe()) {
+    m_failCount = 0;
+    m_state = State::Ready;
+    CFG_LOG("BLE 已连接: %s，链路就绪", m_remoteName.c_str());
+  } else {
+    CFG_LOG("连接准备失败 (%u/%u)", (unsigned)(m_failCount + 1),
+            (unsigned)CFG_CONNECT_FAIL_LIMIT);
+    if (++m_failCount >= CFG_CONNECT_FAIL_LIMIT) dropTarget();
+    m_state = State::Reconnecting;
+    m_nextAttemptAt = millis() + CFG_RECONNECT_INTERVAL_MS;
+  }
+  m_connectTaskRunning = false;
+}
+
+void BleLink::txTask(void* context) {
+  static_cast<BleLink*>(context)->runTxTask();
+}
+
+void BleLink::runTxTask() {
+  TxPacket packet;
+  for (;;) {
+    if (xQueueReceive(m_txQueue, &packet, portMAX_DELAY) != pdPASS) continue;
+    if (!writeRawBlocking(packet.data, packet.len)) {
+      m_writeFailed = true;
+    }
+    m_writeInFlight = false;
   }
 }
 
@@ -279,9 +333,38 @@ bool BleLink::send(const char* cmd) {
 
 bool BleLink::sendRaw(const uint8_t* data, size_t len) {
   if (!data || len == 0 || m_state != State::Ready) return false;
+  if (len > kMaxTxSize) {
+    CFG_LOG("BLE 发送帧超出队列容量（%u/%uB）", (unsigned)len,
+            (unsigned)kMaxTxSize);
+    return false;
+  }
+  if (!m_txQueue) {
+    CFG_LOG("BLE 发送队列不可用");
+    return false;
+  }
+  if (m_writeInFlight) return false;
   if (!m_client || !m_client->isConnected() || !m_writeChar) {
-    CFG_LOG("BLE 链路或写特征不可用，启动重连");
+    CFG_LOG("BLE 链路或写特征不可用");
     scheduleReconnect();
+    return false;
+  }
+
+  TxPacket packet{};
+  packet.len = len;
+  memcpy(packet.data, data, len);
+  m_writeInFlight = true;
+  if (xQueueSend(m_txQueue, &packet, 0) != pdPASS) {
+    m_writeInFlight = false;
+    CFG_LOG("BLE 发送队列忙，暂未提交数据");
+    return false;
+  }
+  return true;
+}
+
+bool BleLink::writeRawBlocking(const uint8_t* data, size_t len) {
+  if (!data || len == 0 || !m_client || !m_client->isConnected() ||
+      !m_writeChar) {
+    CFG_LOG("BLE 链路或写特征不可用");
     return false;
   }
 
@@ -301,7 +384,6 @@ bool BleLink::sendRaw(const uint8_t* data, size_t len) {
     if (!m_writeChar->writeValue(data + off, n, true)) {
       CFG_LOG("BLE GATT 写入失败（%u/%uB，MTU=%u）", (unsigned)off,
               (unsigned)len, (unsigned)mtu);
-      scheduleReconnect();
       return false;
     }
   }

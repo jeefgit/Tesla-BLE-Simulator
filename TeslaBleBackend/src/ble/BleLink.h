@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 #include <NimBLEDevice.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 
 #include <functional>
 #include <string>
@@ -13,7 +15,8 @@
 // 对上层只暴露 send() 和 setRxHandler()，BLE 细节全部封在这里。
 //
 // 线程说明：
-//   - send()/loop() 运行在 Arduino loop 任务
+//   - loop()/send() 运行在 Arduino loop 任务；sendRaw() 只复制并排队数据
+//   - BLE GATT 连接初始化与写入在独立任务中执行
 //   - BLE 数据回调运行在 NimBLE 协议栈任务，只往环形缓冲里写字节，
 //     由 loop() 取出后才调用 RxHandler，所以上层回调是安全的。
 // ---------------------------------------------------------------------------
@@ -43,7 +46,7 @@ class BleLink {
   // 发送 ASCII 指令，自动补 '\r'
   bool send(const char* cmd);
   bool send(const String& cmd) { return send(cmd.c_str()); }
-  // 发送原始字节
+  // 排队发送原始字节；true 表示已入队，不代表车端已确认写入。
   bool sendRaw(const uint8_t* data, size_t len);
 
   State state() const { return m_state; }
@@ -59,27 +62,41 @@ class BleLink {
   // NimBLE 回调是 C 风格函数指针，用静态实例回到成员函数
   static BleLink* s_instance;
   static constexpr size_t kRxRingSize = 512;  // 环形缓冲大小（取模实现，任意正整数均可）
+  static constexpr size_t kMaxTxSize = 2048;
+  struct TxPacket {
+    size_t len;
+    uint8_t data[kMaxTxSize];
+  };
   void onBleBytes(const uint8_t* data, size_t len);
   void drainRx();
+  static void txTask(void* context);
+  void runTxTask();
+  bool writeRawBlocking(const uint8_t* data, size_t len);
 
   bool startScan();
   bool scanForTarget(const NimBLEScanResults& results);
   bool connectAndSubscribe();
+  static void connectTask(void* context);
+  void runConnectAttempt();
   void scheduleReconnect();
   void dropTarget();
 
-  State m_state = State::Idle;
+  volatile State m_state = State::Idle;
   RxHandler m_rx;
 
   NimBLEClient* m_client = nullptr;
   NimBLERemoteCharacteristic* m_writeChar = nullptr;
   NimBLERemoteCharacteristic* m_notifyChar = nullptr;
+  QueueHandle_t m_txQueue = nullptr;
 
   // 目标设备信息（断链后重新扫描以刷新广播地址）
   std::string m_targetAddr;
   uint8_t m_targetType = 0;
   bool m_hasTarget = false;
   bool m_scanStarted = false;
+  volatile bool m_connectTaskRunning = false;
+  volatile bool m_writeInFlight = false;
+  volatile bool m_writeFailed = false;
   uint8_t m_failCount = 0;
   String m_targetName;  // 精确广播名（可空 = 走前缀兜底）
 
