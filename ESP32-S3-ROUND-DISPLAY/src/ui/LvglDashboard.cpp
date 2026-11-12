@@ -70,7 +70,7 @@ lv_obj_t* makeScanArc(lv_obj_t* parent, int32_t size, int32_t width,
   lv_arc_set_range(arc, 0, 100);
   lv_arc_set_value(arc, value);
   lv_arc_set_mode(arc, LV_ARC_MODE_NORMAL);
-  lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(arc, false);
   lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(arc, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(arc, 0, LV_PART_MAIN);
@@ -315,7 +315,7 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_set_style_bg_opa(m_bootLayer, LV_OPA_COVER, 0);
   lv_obj_set_style_pad_all(m_bootLayer, 0, 0);
   lv_obj_set_scrollable(m_bootLayer, false);
-  lv_obj_clear_flag(m_bootLayer, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(m_bootLayer, false);
   lv_obj_move_foreground(m_bootLayer);
 
   // Circular progress ring at the outermost edge of the round panel: the full
@@ -331,7 +331,7 @@ void LvglDashboard::buildBootAnimation() {
   lv_arc_set_range(m_bootRing, 0, 100);
   lv_arc_set_value(m_bootRing, 0);
   lv_arc_set_mode(m_bootRing, LV_ARC_MODE_NORMAL);
-  lv_obj_clear_flag(m_bootRing, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(m_bootRing, false);
 
   lv_obj_set_style_bg_opa(m_bootRing, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(m_bootRing, 0, LV_PART_MAIN);
@@ -597,7 +597,7 @@ void LvglDashboard::buildLinkPage() {
   lv_obj_set_style_radius(m_scanPulse, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(m_scanPulse, kScanCyan, 0);
   lv_obj_set_style_bg_opa(m_scanPulse, LV_OPA_COVER, 0);
-  lv_obj_clear_flag(m_scanPulse, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(m_scanPulse, false);
   makeLabel(m_linkPage, 203, 177, 60, 18, "BLE",
             &lv_font_montserrat_10, kDim, LV_TEXT_ALIGN_CENTER);
   makeLabel(m_linkPage, 33, 74, 400, 18, "TESLA BLE",
@@ -664,7 +664,7 @@ void LvglDashboard::buildPairingPage() {
   lv_obj_set_style_border_width(m_pairCardGlow, 1, 0);
   lv_obj_set_style_border_color(m_pairCardGlow, kAmber, 0);
   lv_obj_set_style_bg_opa(m_pairCardGlow, LV_OPA_TRANSP, 0);
-  lv_obj_clear_flag(m_pairCardGlow, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(m_pairCardGlow, false);
 
   lv_obj_t* card = lv_obj_create(m_pairPage);
   lv_obj_remove_style_all(card);
@@ -675,7 +675,7 @@ void LvglDashboard::buildPairingPage() {
   lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(card, 1, 0);
   lv_obj_set_style_border_color(card, kAmber, 0);
-  lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(card, false);
 
   lv_obj_t* chip = lv_obj_create(card);
   lv_obj_remove_style_all(chip);
@@ -709,7 +709,7 @@ void LvglDashboard::buildPairingPage() {
   lv_obj_set_style_radius(m_pairPulse, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(m_pairPulse, kScanCyan, 0);
   lv_obj_set_style_bg_opa(m_pairPulse, LV_OPA_COVER, 0);
-  lv_obj_clear_flag(m_pairPulse, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(m_pairPulse, false);
   makeLabel(m_pairPage, 179, 269, 108, 16, "NFC  READY",
             &lv_font_montserrat_10, kScanCyan, LV_TEXT_ALIGN_CENTER);
 

@@ -249,7 +249,8 @@ class TelemetryState:
             'tpms_fl': 2.9,
             'tpms_fr': 2.9,
             'tpms_rl': 2.9,
-            'tpms_rr': 2.9
+            'tpms_rr': 2.9,
+            'script_phase_desc': "阶段 0: 待机/就绪"
         }
 
     def get_data(self):
@@ -290,6 +291,22 @@ class TelemetryState:
     def reset_frame(self):
         with self.lock:
             self.frame_counter = 0
+
+    def advance_script_frame(self):
+        """推进一帧剧本并写入共享遥测状态。
+
+        与 BLE 推送/命令通道解耦：无论走 53B 旁路还是加密 real path，
+        都按统一时钟推进，避免 GetVehicleData 请求驱动的加密通道永远停在
+        初始状态（剧本不演进）。
+        """
+        with self.lock:
+            if not self.use_script_mode:
+                return None
+            self.frame_counter = (self.frame_counter + 1) % 1030
+            frame = self.frame_counter
+        mock_data = generate_mock_frame(frame)
+        self.update_data(**mock_data)
+        return mock_data
 
     def get_vin(self):
         with self.lock:
@@ -2362,6 +2379,10 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                 state.set_connected(is_conn)
                 
                 if is_conn:
+                    # 自动剧本时钟：连接期间统一按 20Hz 推进（与推送通道/协议路径解耦）
+                    if state.is_script_mode():
+                        state.advance_script_frame()
+
                     now_t = time.time()
                     if crypto_server is not None and state.is_crypto_enabled() and crypto_server.sessions:
                         # 加密 real path：遥测由 ESP32 的 GetVehicleData 请求驱动，不主动推 53B
@@ -2386,12 +2407,8 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                             elif state.get_loss_rate() > 0 and random.random() < state.get_loss_rate():
                                 log_queue.put(f"[BLE-Server] 📉 模拟 BLE 无线链路丢包, 本批次跳过推送")
                             else:
-                                if state.is_script_mode():
-                                    frame = state.increment_frame()
-                                    mock_data = generate_mock_frame(frame)
-                                    state.update_data(**mock_data)
-                                else:
-                                    mock_data = state.get_data()
+                                mock_data = state.get_data()
+                                if not state.is_script_mode():
                                     mock_data['script_phase_desc'] = "真实节奏模式"
 
                                 payload = pack_telemetry(mock_data)
@@ -2408,12 +2425,8 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
                                     log_queue.put(f"[-] 推送遥测数据出错: {e}")
                     else:
                         # 理想 20Hz 主动推送模式
-                        if state.is_script_mode():
-                            frame = state.increment_frame()
-                            mock_data = generate_mock_frame(frame)
-                            state.update_data(**mock_data)
-                        else:
-                            mock_data = state.get_data()
+                        mock_data = state.get_data()
+                        if not state.is_script_mode():
                             mock_data['script_phase_desc'] = "手动干预模式"
                         
                         payload = pack_telemetry(mock_data)
