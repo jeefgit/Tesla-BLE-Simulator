@@ -35,7 +35,17 @@ void BleLink::loop() {
       break;
 
     case State::Scanning:
-      if (scanForTarget()) {
+      if (!m_scanStarted) {
+        if (!startScan()) {
+          m_state = State::Reconnecting;
+          m_nextAttemptAt = millis() + CFG_RECONNECT_INTERVAL_MS;
+        }
+        break;
+      }
+
+      if (NimBLEDevice::getScan()->isScanning()) break;
+      m_scanStarted = false;
+      if (scanForTarget(NimBLEDevice::getScan()->getResults())) {
         m_state = State::Connecting;
       } else {
         m_state = State::Reconnecting;
@@ -72,18 +82,22 @@ void BleLink::loop() {
   }
 }
 
-bool BleLink::scanForTarget() {
-  CFG_LOG("扫描 BLE 设备 (%d s)...", CFG_SCAN_SECONDS);
-
+bool BleLink::startScan() {
   NimBLEScan* scan = NimBLEDevice::getScan();
   scan->setActiveScan(true);
   scan->setInterval(100);
   scan->setWindow(99);
   scan->clearResults();
-  // NimBLE 2.x：getResults(duration_ms, is_continue) 启动扫描并阻塞到完成
-  // （1.x 的 start() 是阻塞式且单位为秒，2.x 语义已变，不能沿用）
-  NimBLEScanResults results =
-      scan->getResults((uint32_t)CFG_SCAN_SECONDS * 1000, false);
+  CFG_LOG("开始异步扫描 BLE 设备 (%d s)...", CFG_SCAN_SECONDS);
+  if (!scan->start((uint32_t)CFG_SCAN_SECONDS * 1000, false, false)) {
+    CFG_LOG("启动 BLE 扫描失败");
+    return false;
+  }
+  m_scanStarted = true;
+  return true;
+}
+
+bool BleLink::scanForTarget(const NimBLEScanResults& results) {
   const int count = results.getCount();
 
   // 第一优先级：精确广播名匹配（特斯拉按 VIN 推导，区分大小写）

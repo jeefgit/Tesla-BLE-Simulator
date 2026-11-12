@@ -62,7 +62,8 @@ class BleLink {
   void onBleBytes(const uint8_t* data, size_t len);
   void drainRx();
 
-  bool scanForTarget();
+  bool startScan();
+  bool scanForTarget(const NimBLEScanResults& results);
   bool connectAndSubscribe();
   void scheduleReconnect();
   void dropTarget();
@@ -78,6 +79,7 @@ class BleLink {
   std::string m_targetAddr;
   uint8_t m_targetType = 0;
   bool m_hasTarget = false;
+  bool m_scanStarted = false;
   uint8_t m_failCount = 0;
   String m_targetName;  // 精确广播名（可空 = 走前缀兜底）
 

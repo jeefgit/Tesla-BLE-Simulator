@@ -24,6 +24,8 @@ class LvglDashboard : public IDashboard {
   void buildLinkPage();
   void buildPairingPage();
   void buildBootAnimation();
+  void startLinkAnimation();
+  void stopLinkAnimation();
 
   void setHidden(lv_obj_t* object, bool hidden);
   void updateLabel(lv_obj_t* label, const char* text);
@@ -61,6 +63,10 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_linkTitle = nullptr;
   lv_obj_t* m_linkSubtitle = nullptr;
   lv_obj_t* m_linkMeta = nullptr;
+  lv_obj_t* m_scanArcOuter = nullptr;
+  lv_obj_t* m_scanArcInner = nullptr;
+  lv_obj_t* m_scanPulse = nullptr;
+  bool m_linkAnimationRunning = false;
   lv_obj_t* m_pairPage = nullptr;
   lv_obj_t* m_pairTitle = nullptr;
   lv_obj_t* m_pairCount = nullptr;

@@ -23,6 +23,7 @@ const lv_color_t kAmber = lv_color_hex(0xFFB340);
 const lv_color_t kTrack = lv_color_hex(0x1D2733);
 const lv_color_t kCard = lv_color_hex(0x0C1218);
 const lv_color_t kBootRingColor = lv_color_hex(0xAEB8C2);
+const lv_color_t kScanCyan = lv_color_hex(0x43D9F5);
 
 lv_obj_t* makeLabel(lv_obj_t* parent, int32_t x, int32_t y, int32_t width,
                     int32_t height, const char* text, const lv_font_t* font,
@@ -55,6 +56,54 @@ lv_obj_t* makePanel(lv_obj_t* parent, int32_t x, int32_t y, int32_t width,
   lv_obj_set_style_pad_all(panel, 0, 0);
   lv_obj_set_scrollable(panel, false);
   return panel;
+}
+
+lv_obj_t* makeScanArc(lv_obj_t* parent, int32_t size, int32_t width,
+                      int32_t x, int32_t y, lv_color_t color,
+                      int32_t value) {
+  lv_obj_t* arc = lv_arc_create(parent);
+  lv_obj_remove_style_all(arc);
+  lv_obj_set_pos(arc, x, y);
+  lv_obj_set_size(arc, size, size);
+  lv_arc_set_rotation(arc, 0);
+  lv_arc_set_bg_angles(arc, 0, 360);
+  lv_arc_set_range(arc, 0, 100);
+  lv_arc_set_value(arc, value);
+  lv_arc_set_mode(arc, LV_ARC_MODE_NORMAL);
+  lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_width(arc, 0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(arc, 0, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(arc, 2, LV_PART_MAIN);
+  lv_obj_set_style_arc_color(arc, lv_color_hex(0x172734), LV_PART_MAIN);
+  lv_obj_set_style_arc_width(arc, width, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(arc, color, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
+  lv_obj_set_style_border_width(arc, 0, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(arc, 0, LV_PART_KNOB);
+  return arc;
+}
+
+void rotateScanArc(void* object, int32_t angle) {
+  lv_arc_set_rotation(static_cast<lv_obj_t*>(object), angle);
+}
+
+void setScanPulseOpacity(void* object, int32_t opacity) {
+  lv_obj_set_style_opa(static_cast<lv_obj_t*>(object), opacity, 0);
+}
+
+void startScanArcAnimation(lv_obj_t* arc, int32_t start, int32_t end,
+                           uint32_t duration) {
+  lv_anim_t animation;
+  lv_anim_init(&animation);
+  lv_anim_set_var(&animation, arc);
+  lv_anim_set_values(&animation, start, end);
+  lv_anim_set_duration(&animation, duration);
+  lv_anim_set_path_cb(&animation, lv_anim_path_linear);
+  lv_anim_set_exec_cb(&animation, rotateScanArc);
+  lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_start(&animation);
 }
 
 void setScale(lv_obj_t* object, int32_t scale) {
@@ -530,17 +579,59 @@ void LvglDashboard::buildLinkPage() {
   lv_obj_set_size(m_linkPage, 466, 466);
   lv_obj_set_scrollable(m_linkPage, false);
 
-  makeLabel(m_linkPage, 33, 104, 400, 18, "TESLA BLE",
+  m_scanArcOuter = makeScanArc(m_linkPage, 148, 4, 159, 92,
+                               kScanCyan, 20);
+  m_scanArcInner = makeScanArc(m_linkPage, 108, 3, 179, 112,
+                               kAmber, 24);
+  m_scanPulse = lv_obj_create(m_linkPage);
+  lv_obj_remove_style_all(m_scanPulse);
+  lv_obj_set_size(m_scanPulse, 8, 8);
+  lv_obj_set_pos(m_scanPulse, 229, 162);
+  lv_obj_set_style_radius(m_scanPulse, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(m_scanPulse, kScanCyan, 0);
+  lv_obj_set_style_bg_opa(m_scanPulse, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(m_scanPulse, LV_OBJ_FLAG_CLICKABLE);
+  makeLabel(m_linkPage, 203, 177, 60, 18, "BLE",
+            &lv_font_montserrat_10, kDim, LV_TEXT_ALIGN_CENTER);
+  makeLabel(m_linkPage, 33, 74, 400, 18, "TESLA BLE",
             &lv_font_montserrat_10, kBootRingColor, LV_TEXT_ALIGN_CENTER);
-  m_linkTitle = makeScaledLabel(m_linkPage, 233, 174, "SCANNING",
+  m_linkTitle = makeScaledLabel(m_linkPage, 233, 274, "SCANNING",
                                 &lv_font_montserrat_48, kText, 300);
   m_linkSubtitle =
-      makeLabel(m_linkPage, 31, 214, 404, 20,
+      makeLabel(m_linkPage, 31, 306, 404, 20,
                 "KEEP VEHICLE AWAKE",
                 &lv_font_montserrat_10, kDim, LV_TEXT_ALIGN_CENTER);
-  m_linkMeta = makeLabel(m_linkPage, 40, 258, 386, 18, "ELAPSED 0s",
+  m_linkMeta = makeLabel(m_linkPage, 40, 333, 386, 18, "ELAPSED 0s",
                          &lv_font_montserrat_10, kFaint,
                          LV_TEXT_ALIGN_CENTER);
+}
+
+void LvglDashboard::startLinkAnimation() {
+  if (m_linkAnimationRunning) return;
+  m_linkAnimationRunning = true;
+  startScanArcAnimation(m_scanArcOuter, 0, 360, 2600);
+  startScanArcAnimation(m_scanArcInner, 360, 0, 1900);
+
+  lv_anim_t pulse;
+  lv_anim_init(&pulse);
+  lv_anim_set_var(&pulse, m_scanPulse);
+  lv_anim_set_values(&pulse, 70, LV_OPA_COVER);
+  lv_anim_set_duration(&pulse, 650);
+  lv_anim_set_playback_time(&pulse, 650);
+  lv_anim_set_exec_cb(&pulse, setScanPulseOpacity);
+  lv_anim_set_repeat_count(&pulse, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_start(&pulse);
+}
+
+void LvglDashboard::stopLinkAnimation() {
+  if (!m_linkAnimationRunning) return;
+  lv_anim_delete(m_scanArcOuter, rotateScanArc);
+  lv_anim_delete(m_scanArcInner, rotateScanArc);
+  lv_anim_delete(m_scanPulse, setScanPulseOpacity);
+  m_linkAnimationRunning = false;
+  lv_arc_set_rotation(m_scanArcOuter, 0);
+  lv_arc_set_rotation(m_scanArcInner, 0);
+  lv_obj_set_style_opa(m_scanPulse, LV_OPA_COVER, 0);
 }
 
 void LvglDashboard::buildPairingPage() {
@@ -648,6 +739,11 @@ void LvglDashboard::render(const UiModel& model) {
   setHidden(m_arc, showLinkPage);
   setHidden(m_linkPage, !showLinkPage);
   setHidden(m_pairPage, !pairing);
+  if (showLinkPage) {
+    startLinkAnimation();
+  } else {
+    stopLinkAnimation();
+  }
 
   updateLabel(m_gaugeMinLabel, "0");
   updateLabel(m_gaugeMaxLabel, showCharging ? "100" : "240");
