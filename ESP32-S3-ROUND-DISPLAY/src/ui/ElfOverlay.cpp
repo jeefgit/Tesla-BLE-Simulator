@@ -62,8 +62,8 @@ constexpr int32_t kGazeRangeX = 22;
 constexpr int32_t kGazeRangeY = 14;
 
 // "z z z" 三个字母的位置（挂在根容器上）。
-constexpr int32_t kZX[3] = {324, 350, 372};
-constexpr int32_t kZY[3] = {96, 72, 50};
+constexpr int32_t kZX[3] = {300, 330, 356};
+constexpr int32_t kZY[3] = {118, 90, 62};
 
 int32_t randomBetween(int32_t low, int32_t high) {
   if (high <= low) {
@@ -110,10 +110,11 @@ lv_obj_t* makeText(lv_obj_t* parent, int32_t x, int32_t y, int32_t w,
   lv_label_set_text(label, text);
   lv_obj_set_pos(label, x, y);
   lv_obj_set_size(label, w, h);
-  lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(label, &lv_font_montserrat_28, 0);
   lv_obj_set_style_text_color(label, color, 0);
   lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_opa(label, 0, 0);
+  lv_obj_set_style_text_opa(label, LV_OPA_COVER, 0);
+  lv_obj_set_style_opa(label, 0, 0);
   lv_obj_set_style_bg_opa(label, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(label, 0, 0);
   lv_obj_set_style_pad_all(label, 0, 0);
@@ -192,7 +193,7 @@ void ElfOverlay::buildObjects() {
 
   // 入睡时出现的 ASCII "z z z"。
   for (int i = 0; i < 3; ++i) {
-    m_z[i] = makeText(m_root, kZX[i], kZY[i], 28, 24, "z", kSleep);
+    m_z[i] = makeText(m_root, kZX[i], kZY[i], 36, 34, "z", kSleep);
     lv_obj_add_flag(m_z[i], LV_OBJ_FLAG_HIDDEN);
   }
 
@@ -495,6 +496,7 @@ void ElfOverlay::startZzz() {
   stopZzz();
   for (int i = 0; i < 3; ++i) {
     lv_obj_clear_flag(m_z[i], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(m_z[i], 180, 0);
   }
   lv_anim_t anim;
   lv_anim_init(&anim);
@@ -505,6 +507,7 @@ void ElfOverlay::startZzz() {
   lv_anim_set_path_cb(&anim, lv_anim_path_linear);
   lv_anim_set_repeat_count(&anim, LV_ANIM_REPEAT_INFINITE);
   lv_anim_start(&anim);
+  CFG_LOG("[ELF] zzz on");
 }
 
 void ElfOverlay::stopZzz() {
@@ -648,9 +651,8 @@ void ElfOverlay::setZOpacity(void* var, int32_t progress) {
     // 三个 z 相位错开，形成依次亮起的效果。
     const int32_t phase = (progress + i * 333) % 1000;
     const int32_t wave = phase < 500 ? phase : 1000 - phase;
-    const int32_t opacity = 50 + wave * 160 / 500;
-    lv_obj_set_style_text_opa(self->m_z[i],
-                              static_cast<lv_opa_t>(opacity), 0);
+    const int32_t opacity = 70 + wave * 185 / 500;
+    lv_obj_set_style_opa(self->m_z[i], static_cast<lv_opa_t>(opacity), 0);
   }
 }
 

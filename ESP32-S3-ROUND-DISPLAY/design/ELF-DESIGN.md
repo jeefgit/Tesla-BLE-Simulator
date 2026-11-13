@@ -332,7 +332,7 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 2. **眨眼不要用缩放**：LVGL 9 的 `transform_scale` 是等比缩放，压不扁眼睛；用 `height + y` 才能做出“合眼”。
 3. **不要用 `lv_obj_set_style_shadow_*` 做柔光**：软件阴影在 466 屏上很贵；用“大一圈、低透明度的同色圆”代替。
 4. **对象数控制在 25 个以内**，`m_root` 不透明纯黑（`#020406`）、无边框、不可点击、不可滚动。
-5. **不新增字体/图片**：`z z z` 用内置 `montserrat_20`，眼睛全部用 `lv_obj` 几何图形。
+5. **不新增字体/图片**：`z z z` 用内置 `montserrat_28`，眼睛全部用 `lv_obj` 几何图形。
 6. **防烧屏**：呼吸动画自带 ±2px 漂移；45s 自动隐藏；亮度上限仍由 `RoundDisplay` 钳在 80%。
 7. **浮层顺序**：`m_elf.begin()` 必须在 `dashboard.begin()` 之后，否则会被开机图层盖住；`show()` 里可再 `lv_obj_move_foreground(m_root)` 保险。
 8. **AMOLED 纯白**：眼球用 `#E8F7FF`，并把高光不透明度控制在 90% 以内。
@@ -401,7 +401,7 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 > 实现要点：
 > - 触摸移动直接改虹膜 `x/y`，不做动画；松手后 600ms 恢复随机注视。
 > - 轻点（位移 < 12px）触发 Happy：眼睛 150→10→150 快眨两次（`reverse` + `repeat_count=2`），瞳孔 74→82，腮红 12%→30%，600ms 后恢复。
-> - 20s 无交互 → Sleepy（眼高 86、瞳孔下移 8、呼吸周期 9s）；再过 10s → Sleeping（眼高 46，显示三个低亮度 `z`，透明度错峰呼吸）。
+> - 20s 无交互 → Sleepy（眼高 86、瞳孔下移 8、呼吸周期 9s）；再过 10s → Sleeping（眼高 46，显示三个低亮度 `z`，整体不透明度错峰呼吸，串口打印 `[ELF] zzz on`）。
 > - 任何触摸/轻点都会重置交互计时，并从 Sleepy/Sleeping 唤醒回 Idle。
 > - 自动隐藏在 `ElfOverlay` 内部定时器触发；`DashboardApp` 检测可见性下降沿后强制补画一帧。
 
