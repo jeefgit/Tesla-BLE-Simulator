@@ -51,7 +51,7 @@
 #define CFG_AUTO_SLEEP_ENABLE 1
 
 // 静止多久后进入 deep sleep；默认 60 秒。
-#define CFG_AUTO_SLEEP_IDLE_MS (300UL * 1000UL)
+#define CFG_AUTO_SLEEP_IDLE_MS (150UL * 1000UL)
 
 // 是否使用 QMI8658 检测板子运动。
 #define CFG_AUTO_SLEEP_IMU_ENABLE 1

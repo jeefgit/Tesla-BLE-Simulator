@@ -25,7 +25,8 @@
 #define CFG_DATA_STALE_MS 3000
 #endif
 #ifndef CFG_SCAN_SECONDS
-#define CFG_SCAN_SECONDS 3
+// 单次 BLE 扫描时长（秒）；1s 足够发现目标，缩短等待
+#define CFG_SCAN_SECONDS 1
 #endif
 #ifndef CFG_RECONNECT_INTERVAL_MS
 #define CFG_RECONNECT_INTERVAL_MS 3000

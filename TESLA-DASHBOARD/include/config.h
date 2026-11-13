@@ -48,8 +48,8 @@
 // BLE 扫描 / 连接
 // ---------------------------------------------------------------------------
 
-// 扫描时长（秒）
-#define CFG_SCAN_SECONDS 3
+// 扫描时长（秒）；1s 足够发现目标，缩短扫描等待
+#define CFG_SCAN_SECONDS 1
 
 // 断线后重连间隔（毫秒）
 #define CFG_RECONNECT_INTERVAL_MS 3000

@@ -17,6 +17,7 @@ PlatformIO 固件工程。本目录与现有 `TESLA-DASHBOARD` 分开，后续�
 | 触摸 | CST9217 电容触摸，I²C 地址 `0x5A` |
 | 触摸引脚 | SDA: GPIO 15；SCL: GPIO 14；INT: GPIO 11；RESET: GPIO 40 |
 | 按键 | BOOT: GPIO0（按下为低）；PWR: 由 AXP2101 供电通路控制，经 TCA9554 EXIO4 读取 |
+| IMU | QMI8658 六轴，I²C 地址 `0x6B`；INT2 直连 GPIO21（可作 deep sleep 唤醒源） |
 
 AMOLED 亮度由 CO5300 面板命令控制，没有独立背光 PWM 引脚；固件支持在屏幕上
 上下滑动实时调节亮度（见“上下滑动调节亮度”一节）。
@@ -43,11 +44,14 @@ ESP32-S3-ROUND-DISPLAY/
 │   │   ├── IDisplay.h
 │   │   └── RoundDisplay.h
 │   ├── input/
-│   │   └── Cst9217Touch.h       # CST9217 触摸轮询驱动
+│   │   ├── Cst9217Touch.h       # CST9217 触摸轮询驱动
+│   │   └── Qmi8658.h            # QMI8658 IMU 最小驱动（加速度 / WoM）
 │   ├── platform/
 │   │   ├── BoardProfile.h
 │   │   └── boards/
 │   │       └── waveshare_esp32_s3_touch_amoled_175_b.h
+│   ├── power/
+│   │   └── PowerManager.h       # 静止自动休眠 / 运动唤醒状态机
 │   └── ui/
 │       ├── IDashboard.h
 │       └── LvglDashboard.h
@@ -57,7 +61,10 @@ ESP32-S3-ROUND-DISPLAY/
     ├── display/
     │   └── RoundDisplay.cpp
     ├── input/
-    │   └── Cst9217Touch.cpp
+    │   ├── Cst9217Touch.cpp
+    │   └── Qmi8658.cpp
+    ├── power/
+    │   └── PowerManager.cpp
     ├── ui/
     │   └── LvglDashboard.cpp
     └── main.cpp
@@ -167,6 +174,66 @@ start——CST9217 对后者不应答。
 `[TOUCH] press` 每按下/松开各出现一次（空闲不刷屏）；`[GESTURE] press`
 里的 `raw` 是面板原始坐标、`screen` 是旋转换算后的画面坐标，可用于核对触摸
 方向是否与画面一致。
+
+### 静止自动休眠 / 运动唤醒
+
+固件支持“设备静止一段时间后熄屏并进入 ESP32-S3 deep sleep，拿起设备后自动唤醒”。
+运动只由板载 **QMI8658 IMU** 判断（设备自身是否被移动），不读取车辆速度。
+
+**判定与流程**
+
+- 运行时约每 40 ms 读一次加速度，维护慢速重力估计，用
+  `|acc - gravity|` 判断晃动或姿态变化；连续 3 个采样超过阈值才算运动。
+- 触摸、BOOT 键、PWR 键操作都会重置静止计时。
+- 连续静止达到 `CFG_AUTO_SLEEP_IDLE_MS`（默认 60 秒）后：
+  1. 亮度归零并让 CO5300 面板进入 sleep-in；
+  2. 把 QMI8658 配置为 Wake-on-Motion，运动时通过 INT2（GPIO21）翻转；
+  3. 确认 INT2 已回到低电平后，配置 `ext1 ANY_HIGH` 唤醒并进入 deep sleep。
+- 拿起设备 → INT2 拉高 → ESP32 唤醒并**完整重启固件**，因此会重新播放开机动画。
+- 启动动画、配钥流程、IMU 不可用时不会休眠；IMU 缺失时自动休眠会保持关闭，
+  避免睡下去无法唤醒。
+
+**USB 供电 / 充电**
+
+本机没有电池、长期插 USB 供电，因此 `CFG_AUTO_SLEEP_WHILE_CHARGING` 默认设为
+`1`：USB 插入和车辆充电状态都不会阻止休眠。休眠时屏幕、BLE 和串口都会停止，
+串口断开是正常现象；运动唤醒后串口会重新枚举。
+
+**唤醒限制**
+
+deep sleep 下 PWR 键不能唤醒 ESP32：PWR 只接 AXP2101 / TCA9554，不在 RTC GPIO
+上。当前唤醒源是 QMI8658 INT2（GPIO21）；BOOT 键（GPIO0）可作为后续扩展。
+
+**配置**（`include/config.h`）
+
+```cpp
+#define CFG_AUTO_SLEEP_ENABLE 1                        // 0 = 关闭自动休眠
+#define CFG_AUTO_SLEEP_IDLE_MS (60UL * 1000UL)         // 静止多久后休眠
+#define CFG_AUTO_SLEEP_IMU_ENABLE 1
+#define CFG_AUTO_SLEEP_IMU_POLL_MS 40                  // IMU 轮询间隔
+#define CFG_AUTO_SLEEP_MOTION_THRESHOLD_MG 50          // 运动判定阈值
+#define CFG_AUTO_SLEEP_MOTION_CONFIRM_SAMPLES 3
+#define CFG_AUTO_SLEEP_WHILE_CHARGING 1                // 1 = 充电中也休眠
+#define CFG_AUTO_SLEEP_WAKE_GPIO 21                    // QMI8658 INT2
+#define CFG_AUTO_SLEEP_WOM_THRESHOLD_MG 50             // WoM 唤醒阈值
+#define CFG_AUTO_SLEEP_WOM_BLANKING 8
+#define CFG_AUTO_SLEEP_WAKE_CONFIRM_MS 0               // 0 = 唤醒后不立即回睡
+#define CFG_AUTO_SLEEP_TIMER_WAKE_MS 0                 // 可选定时唤醒兜底
+```
+
+`CFG_AUTO_SLEEP_WAKE_CONFIRM_MS` 建议保持 `0`：启动和建界面需要数秒，如果设置
+成 2000，确认窗口会在启动过程中过期，可能出现“唤醒后刚显示界面又睡回去”的
+现象。调试时如需设备常亮，把 `CFG_AUTO_SLEEP_ENABLE` 改为 `0`。
+
+串口日志示例：
+
+```text
+[IMU] QMI8658 ready (id=0x05)
+[PWR] wake cause=EXT1 motion=1
+[PWR] idle for 60s -> deep sleep
+[IMU] WoM configured (threshold=50mg, blanking=8)
+[PWR] entering deep sleep; move device to wake
+```
 
 BLE 配置在 `include/config.h`：
 
