@@ -84,7 +84,7 @@ stateDiagram-v2
 | --- | --- |
 | 开机动画未结束 | 忽略横滑，不显示 |
 | 配钥页 / 断连页 / 充电页 | 允许显示（不透明纯黑浮层覆盖，退出后恢复原页） |
-| 小精灵可见时车辆数据变化 | 照常更新 `UiModel`，但**暂停仪表重绘**；不透明黑色根容器遮住仪表，退出时强制重绘一帧 |
+| 小精灵可见时车辆数据变化 | **暂停 BLE 轮询**（不调用 `m_source.loop()`）且暂停仪表重绘；`m_model` 保持最后一份数据，退出后恢复并强制重绘一帧 |
 | 小精灵可见时到自动休眠时间 | 先隐藏小精灵，休眠逻辑照旧（触摸本身已重置静止计时） |
 | 触摸芯片初始化失败 | 手势不可用，小精灵永不显示，不影响仪表 |
 | 屏幕旋转 | 手势方向跟画面；小精灵本身居中，无需重排 |
@@ -241,7 +241,7 @@ class ElfOverlay {
 | 文件 | 改动 |
 | --- | --- |
 | `include/app/DashboardApp.h` | 增加 `#include "ui/ElfOverlay.h"`、成员 `ElfOverlay m_elf;`、横向手势状态 `m_elfSwipeLatched`、`m_touchMaxTravel` |
-| `src/app/DashboardApp.cpp` | `begin()` 里 `dashboard.begin()` 之后调用 `m_elf.begin()`（保证浮层在开机图层之上）；`pollTouch()` 增加横向累计与显隐/轻点判定；`loop()` 里小精灵可见时跳过仪表重绘 |
+| `src/app/DashboardApp.cpp` | `begin()` 里 `dashboard.begin()` 之后调用 `m_elf.begin()`（保证浮层在开机图层之上）；`pollTouch()` 增加横向累计与显隐/轻点判定；`loop()` 里小精灵可见时**暂停 BLE 轮询与仪表重绘** |
 | `include/config.h` | 新增 `CFG_ELF_*` 开关与阈值 |
 | `README.md` | 增加一节“离线小精灵”与本文链接（可选，建议加） |
 
@@ -303,18 +303,27 @@ if (m_touchDown) {
 }
 ```
 
-### 5.4 渲染抑制
+### 5.4 渲染抑制与轮询暂停
 
 ```cpp
 // DashboardApp::loop()
+#if !CFG_DEMO_MODE
+if (m_sourceStarted && !m_elf.visible()) {
+  m_source.loop();          // 小精灵显示期间暂停 BLE 轮询
+  m_model = m_source.model();
+}
+#endif
+
 if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
     now - m_lastRenderMs >= 50) {
   ...
 }
 ```
 
-- 小精灵可见期间仪表数据照常更新（`m_model`），只是不画。
-- `hide()` 完成后强制 `m_hasRenderedModel = false;`，下一轮一定重画一帧，避免残影/旧数据。
+- **小精灵可见期间暂停数据轮询**：不调用 `m_source.loop()`，即不访问 BLE、不更新 `UiModel`，避免后台请求与动画抢 CPU/BLE。`m_model` 保持显示前的最后一份数据。
+- 同时暂停仪表重绘（`!m_elf.visible()`）。
+- `hide()` 完成后强制 `m_hasRenderedModel = false;`，下一轮一定重画一帧；退出后第一轮 `loop()` 恢复轮询，仪表随即拿到最新数据。
+- 暂停上限由 45s 自动隐藏兜底，不会长时间失去车况更新。暂停期间若车端因无请求断开，恢复后 `BleLink` 的连接状态机会自动重连。
 
 ### 5.5 LVGL / 性能注意事项（本项目踩过的坑）
 
@@ -366,6 +375,7 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 - [x] 新建 `ElfOverlay`，画静态双眼（眼球 + 虹膜 + 瞳孔 + 高光）。
 - [x] `DashboardApp` 横向手势：左/右滑显示、再横滑隐藏，串口打印 `[ELF] show/hide`。
 - [x] 小精灵可见时跳过仪表重绘，退出时强制重绘一帧。
+- [x] 小精灵可见时暂停 BLE 数据轮询，退出后自动恢复。
 - [x] 根容器改为不透明纯黑，呼出时完全盖住仪表页。
 - [ ] 验证 0°/90°/180°/270° 四个方向手势一致。
 

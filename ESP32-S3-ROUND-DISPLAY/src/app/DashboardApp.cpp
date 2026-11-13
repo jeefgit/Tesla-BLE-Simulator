@@ -345,8 +345,12 @@ void DashboardApp::loop() {
     m_sourceStarted = true;
   }
   if (m_sourceStarted) {
-    m_source.loop();
-    m_model = m_source.model();
+    // 小精灵显示期间暂停数据轮询：不访问 BLE、不更新模型，避免后台
+    // 请求和动画抢资源；退出后下一轮立即恢复，仪表显示最新的缓存值。
+    if (!m_elf.visible()) {
+      m_source.loop();
+      m_model = m_source.model();
+    }
   }
 #endif
   // 静止自动休眠：IMU 运动检测、触摸/按键活动与配钥/充电条件都在这里判断。
