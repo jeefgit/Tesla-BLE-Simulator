@@ -6,6 +6,8 @@
 
 #include "config.h"
 #include "display/RoundDisplay.h"
+#include "input/Cst9217Touch.h"
+#include "platform/boards/waveshare_esp32_s3_touch_amoled_175_b.h"
 #include "ui/LvglDashboard.h"
 
 namespace {
@@ -26,6 +28,13 @@ constexpr uint8_t kPwrExpanderConfigReg = 0x03;
 constexpr uint8_t kPwrButtonMask = 1u << 4;  // EXIO4
 constexpr uint32_t kPwrDebounceMs = 30;
 constexpr uint32_t kPwrLongPressMs = 3000;
+
+// 上下滑动调亮度的手势参数，全部按 LVGL 画面坐标计算（已换算旋转）。
+// 纵向累计位移超过 kSwipeActivatePx、且明显大于横向位移才判定为滑动；
+// 激活后每像素对应 1 档亮度（0~255），上滑调亮、下滑调暗。
+constexpr int32_t kSwipeActivatePx = 24;
+constexpr int32_t kSwipeDominancePx = 16;
+constexpr int32_t kBrightnessStepPerPx = 1;
 
 int16_t readExpanderReg(uint8_t reg) {
   Wire.beginTransmission(kPwrExpanderAddress);
@@ -90,6 +99,17 @@ void DashboardApp::begin() {
   // BOOT 键平时是高电平，短按一次把画面顺时针旋转 90°。
   pinMode(kBootButtonPin, INPUT_PULLUP);
   beginPowerButton();
+  beginTouch();
+}
+
+void DashboardApp::beginTouch() {
+  const BoardProfile& board = kWaveshareEsp32S3TouchAmoled175B;
+  // PWR 键的 TCA9554 已经把 15/14 上的 Wire 起好了，触摸芯片是同一总线的
+  // 另一个设备（0x5A），复用这个实例即可。
+  if (!m_touch.begin(Wire, board.touchAddress, board.pinTouchReset,
+                     board.pinTouchInt)) {
+    CFG_LOG("[TOUCH] CST9217 not found; swipe brightness disabled");
+  }
 }
 
 void DashboardApp::beginPowerButton() {
@@ -178,6 +198,83 @@ void DashboardApp::pollBootButton() {
   }
 }
 
+void DashboardApp::pollTouch() {
+  int16_t rawX = 0;
+  int16_t rawY = 0;
+  const bool pressed = m_touch.poll(rawX, rawY);
+  if (!pressed) {
+    if (m_touchDown) {
+      m_touchDown = false;
+      m_touchHorizontal = false;
+      CFG_LOG("[GESTURE] release raw=(%d,%d)->(%d,%d) screen=(%d,%d)",
+              m_touchStartRawX, m_touchStartRawY, rawX, rawY, m_touchLastX,
+              m_touchLastY);
+      if (m_swipeActive) {
+        m_swipeActive = false;
+        // 拖动过程中只写面板寄存器，松手才把最终亮度存进 NVS。
+        display.saveBrightness();
+        CFG_LOG("[TOUCH] brightness saved -> %u",
+                static_cast<unsigned>(display.brightness()));
+      }
+    }
+    return;
+  }
+
+  const int16_t rawTouchX = rawX;
+  const int16_t rawTouchY = rawY;
+  // 触摸原始坐标跟画面旋转走：先换算成 LVGL 逻辑坐标，这样"屏幕上的上下"
+  // 在任何旋转角度下都指向同一个手势方向，方向感与看到的画面一致。
+  display.mapTouchToScreen(rawX, rawY);
+  m_touchLastX = rawX;
+  m_touchLastY = rawY;
+
+  if (!m_touchDown) {
+    m_touchDown = true;
+    m_touchHorizontal = false;
+    m_swipeActive = false;
+    m_touchStartX = rawX;
+    m_touchStartY = rawY;
+    m_touchStartRawX = rawTouchX;
+    m_touchStartRawY = rawTouchY;
+    CFG_LOG("[GESTURE] press rot=%u raw=(%d,%d) screen=(%d,%d)",
+            static_cast<unsigned>(display.rotation()), rawTouchX, rawTouchY,
+            rawX, rawY);
+    return;
+  }
+
+  const int32_t dx = rawX - m_touchStartX;
+  const int32_t dy = rawY - m_touchStartY;
+  if (!m_swipeActive) {
+    if (m_touchHorizontal) {
+      return;
+    }
+    if (abs(dy) >= kSwipeActivatePx && abs(dy) > abs(dx) + kSwipeDominancePx) {
+      m_swipeActive = true;
+      m_swipeAnchorY = rawY;
+      m_swipeBaseBrightness = display.brightness();
+      CFG_LOG("[TOUCH] brightness swipe start (dx=%d dy=%d base %u)",
+              static_cast<int>(dx), static_cast<int>(dy),
+              static_cast<unsigned>(m_swipeBaseBrightness));
+    } else if (abs(dx) > abs(dy) + kSwipeDominancePx) {
+      // 横向拖动不是亮度手势，本次按下不再触发。
+      m_touchHorizontal = true;
+      CFG_LOG("[GESTURE] horizontal drag ignored (dx=%d dy=%d)",
+              static_cast<int>(dx), static_cast<int>(dy));
+    }
+    return;
+  }
+
+  // 上滑（画面坐标 y 减小）调亮，下滑调暗；亮度实时跟手变化。
+  const int32_t delta = (m_swipeAnchorY - rawY) * kBrightnessStepPerPx;
+  int32_t target = m_swipeBaseBrightness + delta;
+  if (target < 0) {
+    target = 0;
+  } else if (target > 255) {
+    target = 255;
+  }
+  display.setBrightness(static_cast<uint8_t>(target));
+}
+
 void DashboardApp::setModel(const UiModel& model) { m_model = model; }
 
 void DashboardApp::loop() {
@@ -187,6 +284,7 @@ void DashboardApp::loop() {
   }
   pollBootButton();
   pollPowerButton();
+  pollTouch();
 #if !CFG_DEMO_MODE
   if (!m_sourceStarted && !dashboard.bootAnimationRunning()) {
     m_source.begin();

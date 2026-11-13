@@ -17,6 +17,7 @@ bool s_brightnessReady = false;
 // BOOT 键设置的旋转方向存在 NVS，掉电/重启后继续生效。
 constexpr char kPrefsNamespace[] = "display";
 constexpr char kPrefsRotationKey[] = "rot";
+constexpr char kPrefsBrightnessKey[] = "bri";
 
 uint32_t getLvglTick() { return millis(); }
 
@@ -92,10 +93,11 @@ bool RoundDisplay::begin() {
     CFG_LOG("[UI] rotation buffer unavailable, rotation disabled");
   }
 
-  // 恢复上次 BOOT 键设置的旋转方向，这样开机第一帧就是用户选的方向。
+  // 恢复上次 BOOT 键设置的旋转方向和滑动调过的亮度，开机第一帧即生效。
   Preferences prefs;
   if (prefs.begin(kPrefsNamespace, true)) {
     m_rotation = prefs.getUChar(kPrefsRotationKey, 0) & 0x03;
+    m_brightness = prefs.getUChar(kPrefsBrightnessKey, kDefaultBrightness);
     prefs.end();
   }
   if (m_rotation != 0) {
@@ -224,10 +226,69 @@ void RoundDisplay::flushArea(lv_display_t* display, const lv_area_t* area,
 
   s_gfx->draw16bitRGBBitmap(x, y, pixels, width, height);
   // Keep the panel muted until the first real frame is on screen, so the boot
-  // sequence never exposes uninitialized panel memory.
+  // sequence never exposes uninitialized panel memory. The restored brightness
+  // level is applied here instead of a hardcoded value.
   if (!s_brightnessReady) {
     s_brightnessReady = true;
-    s_gfx->setBrightness(160);
+    s_gfx->setBrightness(m_brightness);
   }
   lv_display_flush_ready(display);
+}
+
+void RoundDisplay::setBrightness(uint8_t brightness) {
+  if (brightness == m_brightness) {
+    return;
+  }
+  m_brightness = brightness;
+  // 首帧刷出前保持静音状态，避免露出未初始化的 GRAM 内容；
+  // setBrightness 只有在面板点亮后才直接生效。
+  if (s_brightnessReady && s_gfx != nullptr) {
+    s_gfx->setBrightness(brightness);
+  }
+}
+
+void RoundDisplay::saveBrightness() {
+  Preferences prefs;
+  if (prefs.begin(kPrefsNamespace, false)) {
+    prefs.putUChar(kPrefsBrightnessKey, m_brightness);
+    prefs.end();
+  }
+}
+
+// 触摸芯片报告的是面板物理坐标，flush 时画面被顺时针转了 m_rotation 个 90°，
+// 这里做 blitRotated 的逆变换还原成 LVGL 画面坐标：
+//   r=1（顺时针 90°）: panel_x = H-1-y, panel_y = x      -> x = py, y = H-1-px
+//   r=2（180°）    : panel_x = W-1-x, panel_y = H-1-y   -> x = W-1-px, y = H-1-py
+//   r=3（270°）    : panel_x = y, panel_y = W-1-x       -> x = W-1-py, y = px
+// 面板是 466x466 的正方形，宽高相等，四个方向都不存在尺寸错位问题。
+void RoundDisplay::mapTouchToScreen(int16_t& x, int16_t& y) const {
+  const int32_t px = x;
+  const int32_t py = y;
+  switch (m_rotation) {
+    case 1:
+      x = static_cast<int16_t>(py);
+      y = static_cast<int16_t>(m_height - 1 - px);
+      break;
+    case 2:
+      x = static_cast<int16_t>(m_width - 1 - px);
+      y = static_cast<int16_t>(m_height - 1 - py);
+      break;
+    case 3:
+      x = static_cast<int16_t>(m_width - 1 - py);
+      y = static_cast<int16_t>(px);
+      break;
+    default:
+      break;
+  }
+  // 触摸原始值是 12 位，偶尔会超出面板范围，钳制到画面内。
+  if (x < 0) {
+    x = 0;
+  } else if (x >= static_cast<int16_t>(m_width)) {
+    x = static_cast<int16_t>(m_width - 1);
+  }
+  if (y < 0) {
+    y = 0;
+  } else if (y >= static_cast<int16_t>(m_height)) {
+    y = static_cast<int16_t>(m_height - 1);
+  }
 }
