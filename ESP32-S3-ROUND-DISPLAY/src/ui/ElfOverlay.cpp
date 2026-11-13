@@ -191,7 +191,8 @@ void ElfOverlay::begin() {
   m_pupilBaseSize = kPupilSize;
   m_timer = lv_timer_create(timerCallback, 50, this);
   m_built = true;
-  CFG_LOG("[ELF] overlay built, heap %u", ESP.getFreeHeap());
+  CFG_LOG("[ELF] overlay built, heap %lu",
+          static_cast<unsigned long>(ESP.getFreeHeap()));
 }
 
 void ElfOverlay::buildObjects() {
@@ -201,7 +202,7 @@ void ElfOverlay::buildObjects() {
   // 不可点击、默认隐藏。
   m_root = makeBlock(screen, 0, 0, kScreenSize, kScreenSize, 0, kElfBg,
                      LV_OPA_COVER);
-  lv_obj_add_flag(m_root, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(m_root, true);
 
   // 装饰弧：R210、1px、8% 青色，用大圆边框代替阴影。
   m_aura = makeBlock(m_root, 23, 23, 420, 420, LV_RADIUS_CIRCLE,
@@ -253,7 +254,7 @@ void ElfOverlay::buildObjects() {
   // 入睡时出现的 ASCII "z z z"。
   for (int i = 0; i < 3; ++i) {
     m_z[i] = makeText(m_body, kZX[i], kZY[i], 36, 34, "z", kSleep);
-    lv_obj_add_flag(m_z[i], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(m_z[i], true);
   }
 
   // 初始为闭眼状态，第一次 show() 才有“睁开”的过程。
@@ -280,7 +281,7 @@ void ElfOverlay::show() {
   lv_anim_delete(this, setGazeY);
   stopZzz();
   resetHappyVisuals();
-  lv_obj_clear_flag(m_root, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(m_root, false);
   lv_obj_move_foreground(m_root);
   m_state = State::Waking;
   m_blinkPhase = BlinkPhase::None;
@@ -570,7 +571,7 @@ void ElfOverlay::startHappy() {
   m_blinkPhase = BlinkPhase::None;
   m_happyUntil = millis() + kHappyMs;
   lv_anim_delete(this, setMouthOpa);
-  startAnim(this, setMouthOpa, lv_obj_get_style_bg_opa(m_mouth, 0),
+  startAnim(this, setMouthOpa, lv_obj_get_style_bg_opa(m_mouth, LV_PART_MAIN),
             kMouthHappyOpa, 200, lv_anim_path_ease_out, nullptr);
 
   // 快速眨两下：150 → 10（90ms），10 → 150（140ms），重复 2 次。
@@ -661,7 +662,7 @@ void ElfOverlay::startSquint() {
 void ElfOverlay::startZzz() {
   stopZzz();
   for (int i = 0; i < 3; ++i) {
-    lv_obj_clear_flag(m_z[i], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(m_z[i], false);
     lv_obj_set_style_opa(m_z[i], 180, 0);
   }
   lv_anim_t anim;
@@ -680,7 +681,7 @@ void ElfOverlay::stopZzz() {
   lv_anim_delete(this, setZOpacity);
   for (int i = 0; i < 3; ++i) {
     if (m_z[i] != nullptr) {
-      lv_obj_add_flag(m_z[i], LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_hidden(m_z[i], true);
     }
   }
 }
@@ -875,7 +876,7 @@ void ElfOverlay::onHideDone(lv_anim_t* anim) {
   self->m_state = State::Hidden;
   self->m_blinkPhase = BlinkPhase::None;
   self->stopBreathing();
-  lv_obj_add_flag(self->m_root, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(self->m_root, true);
 }
 
 void ElfOverlay::onBlinkClosed(lv_anim_t* anim) {
