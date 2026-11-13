@@ -187,7 +187,7 @@ stateDiagram-v2
 | **眨眼** | 随机 2.4–6.0s | 闭 90ms / 停 40ms / 睁 140ms；20% 概率连眨两下 | 三段 `lv_anim` 或状态机计时 |
 | **随机注视** | 随机 2.5–5.0s | 目标 x ±22、y ±14，350ms ease_out | `lv_anim` 改瞳孔 `x/y` |
 | **追随手指** | 触摸移动 | 目标 = 手指位置换算的偏移，限幅；80ms 跟随 | 直接 `lv_obj_set_pos()`，不做动画 |
-| **呼吸** | 常驻（可见时） | 整体 y ±2px，周期 6s，ease_in_out | `lv_anim` repeat_infinite，兼做防烧屏漂移 |
+| **呼吸** | 常驻（可见时） | 身体容器 y ±5px，周期 6s，ease_in_out | `lv_anim` repeat_infinite，兼做防烧屏漂移；黑底与装饰弧不动 |
 | **开心（Happy）** | 轻点 | 连眨 2 次 + 瞳孔 74→82 + 腮红 12%→30%，600ms | 组合动画 |
 | **困倦（Sleepy）** | 20s 无交互 | 眼高 150 → 86，瞳孔下移 +8，呼吸周期 6s→9s | 状态切换 + 慢动画 |
 | **入睡（Sleeping）** | 再 10s | 眼高 → 46，显示 `z z z` 呼吸闪烁 | `lv_label` 三个字符，250ms 周期 |
@@ -333,7 +333,7 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 3. **不要用 `lv_obj_set_style_shadow_*` 做柔光**：软件阴影在 466 屏上很贵；用“大一圈、低透明度的同色圆”代替。
 4. **对象数控制在 25 个以内**，`m_root` 不透明纯黑（`#020406`）、无边框、不可点击、不可滚动。
 5. **不新增字体/图片**：`z z z` 用内置 `montserrat_28`，眼睛全部用 `lv_obj` 几何图形。
-6. **防烧屏**：呼吸动画自带 ±2px 漂移；45s 自动隐藏；亮度上限仍由 `RoundDisplay` 钳在 80%。
+6. **防烧屏**：呼吸动画让眼睛整体漂移 ±5px；45s 自动隐藏；亮度上限仍由 `RoundDisplay` 钳在 80%。
 7. **浮层顺序**：`m_elf.begin()` 必须在 `dashboard.begin()` 之后，否则会被开机图层盖住；`show()` 里可再 `lv_obj_move_foreground(m_root)` 保险。
 8. **AMOLED 纯白**：眼球用 `#E8F7FF`，并把高光不透明度控制在 90% 以内。
 9. **横滑要持续累计位移**：判定为横向手势后仍要在每次 `pollTouch()` 里更新 `dx`，不能提前退出函数。阶段 1 实机出现过慢速横滑无效，就是这个原因。
@@ -386,7 +386,7 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 
 - [x] 睁眼/闭眼过渡（睁眼 220ms ease_out，闭眼 120ms ease_in）。
 - [x] 随机眨眼（闭 90ms / 停 40ms / 睁 140ms，20% 概率连眨，第二下后恢复正常间隔）。
-- [x] 随机注视（±22 / ±14，350ms ease_out，2.5–5.0s 一次）+ 呼吸漂移（整屏 y +2 ↔ −2，6s 循环）。
+- [x] 随机注视（±22 / ±14，350ms ease_out，2.5–5.0s 一次）+ 呼吸漂移（身体容器 y +5 ↔ −5，6s 循环，黑底与装饰弧保持不动）。
 - [x] 串口日志：`[ELF] blink` / `[ELF] blink x2` / `[ELF] gaze -> (x,y)`。
 
 > 实现要点：眨眼用 `height + y`，中心固定在 y=208；所有动画只改眼睛/虹膜/根容器的几何属性。状态机 `Hidden → Waking → Idle → Blinking / Hiding`，由 50ms `lv_timer` 调度，`hide()` 期间 `visible()` 仍为 true，等闭眼动画结束才真正隐藏，避免硬切。
@@ -440,18 +440,19 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 ```text
 lv_screen_active()
 └── m_root (466×466, 不透明黑, hidden)
-    ├── m_aura       (R210 弧, 8% 青)
-    ├── m_eyeL       (128×150 @ 90,133, 胶囊)
-    │   ├── m_irisL  (92×92, 居中)
-    │   │   ├── m_pupilL (74×74)
-    │   │   ├── m_hi1L   (26×26)
-    │   │   └── m_hi2L   (12×12)
-    ├── m_eyeR       (128×150 @ 248,133)
-    │   └── ... 同左
-    ├── m_blushL     (34×16 @ 103,298)
-    ├── m_blushR     (34×16 @ 329,298)
-    ├── m_mouth      (44×14 @ 211,342, 默认 hidden)
-    └── m_z[0..2]    ("z" ×3, 右上角错峰闪烁, 默认 hidden)
+    ├── m_aura       (R210 弧, 8% 青, 呼吸时不动)
+    └── m_body       (466×466, 透明, 呼吸时 y ±5px)
+        ├── m_eyeL   (128×150 @ 90,133, 胶囊)
+        │   ├── m_irisL  (92×92, 居中)
+        │   │   ├── m_pupilL (74×74)
+        │   │   ├── m_hi1L   (26×26)
+        │   │   └── m_hi2L   (12×12)
+        ├── m_eyeR   (128×150 @ 248,133)
+        │   └── ... 同左
+        ├── m_blushL (34×16 @ 103,298)
+        ├── m_blushR (34×16 @ 329,298)
+        ├── m_mouth  (44×14 @ 211,342, 默认 hidden)
+        └── m_z[0..2] ("z" ×3, 右上角错峰闪烁, 默认 hidden)
 ```
 
 > 高光挂在**虹膜**下而不是瞳孔下，这样瞳孔放大时高光位置稳定，不会跟着“漂”。

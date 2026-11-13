@@ -53,8 +53,8 @@ constexpr uint32_t kWakeMs = 220;
 constexpr uint32_t kHideMs = 120;
 constexpr uint32_t kGazeMs = 350;
 constexpr uint32_t kHappyMs = 600;
-// 呼吸：+2 → -2px；正常 3s 单程（6s 周期），困倦 4.5s 单程（9s 周期）。
-constexpr int32_t kBreathOffsetPx = 2;
+// 呼吸：身体整体 +5 → -5px，3s 单程（6s 周期）；困倦 4.5s 单程（9s 周期）。
+constexpr int32_t kBreathOffsetPx = 5;
 constexpr uint32_t kBreathHalfMs = 3000;
 constexpr uint32_t kBreathSleepyHalfMs = 4500;
 
@@ -167,9 +167,14 @@ void ElfOverlay::buildObjects() {
   lv_obj_set_style_border_color(m_aura, kGlow, 0);
   lv_obj_set_style_border_opa(m_aura, 20, 0);  // 约 8%
 
+  // 身体容器：眼睛/腮红/嘴/zzz 都挂在这里，呼吸时整体上下漂移，
+  // 根容器的黑底和装饰弧保持不动，画面边缘不会露出仪表。
+  m_body = makeBlock(m_root, 0, 0, kScreenSize, kScreenSize, 0,
+                     lv_color_black(), LV_OPA_TRANSP);
+
   for (int i = 0; i < 2; ++i) {
     // 眼球：胶囊形，子对象随高度压缩被裁掉，形成“合眼”。
-    m_eye[i] = makeBlock(m_root, kEyeX[i], kEyeY, kEyeW, kEyeH, 64, kSclera,
+    m_eye[i] = makeBlock(m_body, kEyeX[i], kEyeY, kEyeW, kEyeH, 64, kSclera,
                          LV_OPA_COVER, true);
 
     m_iris[i] = makeBlock(m_eye[i], kIrisInset, kIrisY, kIrisSize, kIrisSize,
@@ -183,17 +188,17 @@ void ElfOverlay::buildObjects() {
               140);
 
     // 腮红：低不透明度胶囊，默认几乎看不见。
-    m_blush[i] = makeBlock(m_root, kBlushX[i], 298, 34, 16, 8, kBlush,
+    m_blush[i] = makeBlock(m_body, kBlushX[i], 298, 34, 16, 8, kBlush,
                            kBlushOpa);
   }
 
   // 嘴：默认隐藏，开心时再出现。
-  m_mouth = makeBlock(m_root, 211, 342, 44, 14, 7, kSleep, 77);
+  m_mouth = makeBlock(m_body, 211, 342, 44, 14, 7, kSleep, 77);
   lv_obj_add_flag(m_mouth, LV_OBJ_FLAG_HIDDEN);
 
   // 入睡时出现的 ASCII "z z z"。
   for (int i = 0; i < 3; ++i) {
-    m_z[i] = makeText(m_root, kZX[i], kZY[i], 36, 34, "z", kSleep);
+    m_z[i] = makeText(m_body, kZX[i], kZY[i], 36, 34, "z", kSleep);
     lv_obj_add_flag(m_z[i], LV_OBJ_FLAG_HIDDEN);
   }
 
@@ -267,12 +272,12 @@ void ElfOverlay::animateEyes(int32_t fromHeight, int32_t toHeight,
 }
 
 void ElfOverlay::startBreathing(uint32_t halfPeriodMs) {
-  lv_anim_delete(m_root, setRootY);
-  lv_obj_set_y(m_root, kBreathOffsetPx);
+  lv_anim_delete(m_body, setBodyY);
+  lv_obj_set_y(m_body, kBreathOffsetPx);
   lv_anim_t anim;
   lv_anim_init(&anim);
-  lv_anim_set_var(&anim, m_root);
-  lv_anim_set_exec_cb(&anim, setRootY);
+  lv_anim_set_var(&anim, m_body);
+  lv_anim_set_exec_cb(&anim, setBodyY);
   lv_anim_set_values(&anim, kBreathOffsetPx, -kBreathOffsetPx);
   lv_anim_set_duration(&anim, halfPeriodMs);
   lv_anim_set_reverse_duration(&anim, halfPeriodMs);
@@ -282,8 +287,8 @@ void ElfOverlay::startBreathing(uint32_t halfPeriodMs) {
 }
 
 void ElfOverlay::stopBreathing() {
-  lv_anim_delete(m_root, setRootY);
-  lv_obj_set_y(m_root, 0);
+  lv_anim_delete(m_body, setBodyY);
+  lv_obj_set_y(m_body, 0);
 }
 
 void ElfOverlay::startBlink() {
@@ -615,7 +620,7 @@ void ElfOverlay::setGazeY(void* var, int32_t y) {
   }
 }
 
-void ElfOverlay::setRootY(void* var, int32_t y) {
+void ElfOverlay::setBodyY(void* var, int32_t y) {
   lv_obj_set_y(static_cast<lv_obj_t*>(var), y);
 }
 

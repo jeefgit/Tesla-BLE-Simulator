@@ -66,7 +66,7 @@ class ElfOverlay {
   static void setEyeOpen(void* var, int32_t height);
   static void setGazeX(void* var, int32_t x);
   static void setGazeY(void* var, int32_t y);
-  static void setRootY(void* var, int32_t y);
+  static void setBodyY(void* var, int32_t y);
   static void setPupilSize(void* var, int32_t size);
   static void setBlushOpa(void* var, int32_t opacity);
   static void setZOpacity(void* var, int32_t progress);
@@ -77,6 +77,7 @@ class ElfOverlay {
 
   lv_obj_t* m_root = nullptr;
   lv_obj_t* m_aura = nullptr;
+  lv_obj_t* m_body = nullptr;
   lv_obj_t* m_eye[2] = {};
   lv_obj_t* m_iris[2] = {};
   lv_obj_t* m_pupil[2] = {};
