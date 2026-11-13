@@ -258,6 +258,27 @@ void RoundDisplay::saveBrightness() {
   }
 }
 
+void RoundDisplay::setBrightnessRaw(uint8_t brightness) {
+  if (s_gfx == nullptr) {
+    return;
+  }
+  // 不影响 m_brightness：唤醒/重启后仍恢复用户设置的那档亮度。
+  s_gfx->setBrightness(brightness);
+}
+
+void RoundDisplay::panelSleep(bool sleep) {
+  if (s_gfx == nullptr) {
+    return;
+  }
+  if (sleep) {
+    s_gfx->setBrightness(0);
+    s_gfx->displayOff();  // DISPOFF + SLPIN
+  } else {
+    s_gfx->displayOn();  // SLPOUT + DISPON
+    s_gfx->setBrightness(m_brightness);
+  }
+}
+
 // 触摸芯片报告的是面板物理坐标，flush 时画面被顺时针转了 m_rotation 个 90°，
 // 这里做 blitRotated 的逆变换还原成 LVGL 画面坐标：
 //   r=1（顺时针 90°）: panel_x = H-1-y, panel_y = x      -> x = py, y = H-1-px

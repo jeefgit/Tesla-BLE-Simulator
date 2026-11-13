@@ -43,6 +43,50 @@
 #endif
 #endif
 
+// ---------------------------------------------------------------------------
+// 自动休眠 / 运动唤醒
+//   设备（板子自身）持续静止后熄屏并进入 ESP32-S3 deep sleep；由 QMI8658
+//   的 Wake-on-Motion 通过 INT2（GPIO21）唤醒。判断只使用 IMU，不读取车速。
+// ---------------------------------------------------------------------------
+#define CFG_AUTO_SLEEP_ENABLE 1
+
+// 静止多久后进入 deep sleep；默认 60 秒。
+#define CFG_AUTO_SLEEP_IDLE_MS (300UL * 1000UL)
+
+// 是否使用 QMI8658 检测板子运动。
+#define CFG_AUTO_SLEEP_IMU_ENABLE 1
+
+// 运行期 IMU 轮询间隔；25~50 Hz 足够。
+#define CFG_AUTO_SLEEP_IMU_POLL_MS 40
+
+// 运动判定阈值（mg，1 mg = 0.001 g）；先 40~80，再按实测调整。
+#define CFG_AUTO_SLEEP_MOTION_THRESHOLD_MG 50
+
+// 连续多少个采样超过阈值才认为“真的在动”。
+#define CFG_AUTO_SLEEP_MOTION_CONFIRM_SAMPLES 3
+
+// 充电中是否允许休眠（1 = 允许）。
+// 本机没有电池、长期插 USB 供电，所以 USB 插入 / 车辆充电都不应阻止休眠。
+// 如果以后换成带电池的版本、希望充电时保持亮屏，再改为 0。
+#define CFG_AUTO_SLEEP_WHILE_CHARGING 1
+
+// 运动唤醒引脚：QMI8658 INT2 = GPIO21（属于 ESP32-S3 RTC GPIO）。
+#define CFG_AUTO_SLEEP_WAKE_GPIO 21
+
+// WoM 阈值（mg）；越大越不敏感、越省电，但越容易漏掉轻微运动。
+#define CFG_AUTO_SLEEP_WOM_THRESHOLD_MG 50
+
+// WoM blanking 样本数，避免刚开启 WoM 时的瞬态误触发。
+#define CFG_AUTO_SLEEP_WOM_BLANKING 8
+
+// 唤醒后确认运动的时间；0 = 不确认。
+// 本机长期 USB 供电，唤醒后不应很快又睡回去（否则拿起来会看到界面一闪），
+// 所以默认关闭。需要防“碰一下就唤醒”时可改成 2000。
+#define CFG_AUTO_SLEEP_WAKE_CONFIRM_MS 0
+
+// 可选：定时唤醒兜底（0 = 关闭）；单位 ms。
+#define CFG_AUTO_SLEEP_TIMER_WAKE_MS 0
+
 // 后端诊断日志；Drive 请求耗时最多记录前 10 次响应。
 #define CFG_DEBUG_LOG 1
 #if CFG_DEBUG_LOG

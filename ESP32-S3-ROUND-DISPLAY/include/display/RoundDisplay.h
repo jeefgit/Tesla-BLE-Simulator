@@ -26,6 +26,13 @@ class RoundDisplay : public IDisplay {
   void saveBrightness();
   uint8_t brightness() const { return m_brightness; }
 
+  // 直接写 CO5300 亮度寄存器，不做 10%~80% 钳制，也不改变 m_brightness。
+  // 供休眠熄屏使用。
+  void setBrightnessRaw(uint8_t brightness);
+
+  // 面板 sleep-in / sleep-out（CO5300 的 0x10 / 0x11 命令）。
+  void panelSleep(bool sleep);
+
   // 把触摸芯片报告的面板物理坐标换算成 LVGL 画面坐标（blitRotated 的逆变换）。
   // 无论画面被旋转到哪个角度，"屏幕上的上下"始终对应画面坐标的 y 轴。
   void mapTouchToScreen(int16_t& x, int16_t& y) const;

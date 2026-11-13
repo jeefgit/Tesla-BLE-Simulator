@@ -3,6 +3,8 @@
 #include "config.h"
 #include "core/UiModel.h"
 #include "input/Cst9217Touch.h"
+#include "input/Qmi8658.h"
+#include "power/PowerManager.h"
 
 #if !CFG_DEMO_MODE
 #include "data/TeslaUiSource.h"
@@ -47,6 +49,8 @@ class DashboardApp {
   bool m_pwrPressed = false;
   uint32_t m_pwrLastChangeMs = 0;
   uint32_t m_pwrPressStartMs = 0;
+  Qmi8658 m_imu;
+  PowerManager m_power;
   UiModel m_model;
   bool m_initialized = false;
   uint32_t m_lastRenderMs = 0;

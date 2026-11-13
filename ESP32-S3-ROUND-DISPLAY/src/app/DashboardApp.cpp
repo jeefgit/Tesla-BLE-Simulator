@@ -7,7 +7,9 @@
 #include "config.h"
 #include "display/RoundDisplay.h"
 #include "input/Cst9217Touch.h"
+#include "input/Qmi8658.h"
 #include "platform/boards/waveshare_esp32_s3_touch_amoled_175_b.h"
+#include "power/PowerManager.h"
 #include "ui/LvglDashboard.h"
 
 namespace {
@@ -80,6 +82,8 @@ bool sameModel(const UiModel& a, const UiModel& b) {
 }  // namespace
 
 void DashboardApp::begin() {
+  // 先读唤醒原因，供休眠/唤醒确认逻辑使用。
+  m_power.detectWakeReason();
   if (!display.begin()) {
     Serial.println("Display initialization failed.");
     return;
@@ -101,6 +105,7 @@ void DashboardApp::begin() {
   pinMode(kBootButtonPin, INPUT_PULLUP);
   beginPowerButton();
   beginTouch();
+  m_power.begin(&m_imu, &display);
 }
 
 void DashboardApp::beginTouch() {
@@ -116,6 +121,9 @@ void DashboardApp::beginTouch() {
 void DashboardApp::beginPowerButton() {
   Wire.begin(kPwrButtonSda, kPwrButtonScl);
   Wire.setClock(100000);
+
+  // QMI8658 与 TCA9554 共用 15/14，必须在 Wire.begin 之后初始化。
+  m_imu.begin(Wire, 0x6B);
 
   const int16_t config = readExpanderReg(kPwrExpanderConfigReg);
   if (config < 0) {
@@ -165,11 +173,13 @@ void DashboardApp::pollPowerButton() {
     m_pwrPressed = rawPressed;
     if (m_pwrPressed) {
       m_pwrPressStartMs = now;
+      m_power.notifyUserActivity();
       CFG_LOG("[BTN] PWR pressed (hold %ums to restart)",
               static_cast<unsigned>(kPwrLongPressMs));
     } else {
       // 松开后才允许下一次长按；这也让开机时按住的上电动作失效。
       m_pwrArmed = true;
+      m_power.notifyUserActivity();
       CFG_LOG("[BTN] PWR released");
     }
   }
@@ -194,6 +204,7 @@ void DashboardApp::pollBootButton() {
       now - m_bootLastChangeMs >= kBootDebounceMs) {
     m_bootPressed = rawPressed;
     if (m_bootPressed) {
+      m_power.notifyUserActivity();
       display.rotateClockwise();
     }
   }
@@ -223,6 +234,8 @@ void DashboardApp::pollTouch() {
 
   const int16_t rawTouchX = rawX;
   const int16_t rawTouchY = rawY;
+  // 触摸是用户活动，重置自动休眠的静止计时。
+  m_power.notifyUserActivity();
   // 触摸原始坐标跟画面旋转走：先换算成 LVGL 逻辑坐标，这样"屏幕上的上下"
   // 在任何旋转角度下都指向同一个手势方向，方向感与看到的画面一致。
   display.mapTouchToScreen(rawX, rawY);
@@ -296,6 +309,8 @@ void DashboardApp::loop() {
     m_model = m_source.model();
   }
 #endif
+  // 静止自动休眠：IMU 运动检测、触摸/按键活动与配钥/充电条件都在这里判断。
+  m_power.update(m_model, dashboard.bootAnimationRunning(), m_model.charging);
   const uint32_t now = millis();
   // The boot overlay hides everything, so redrawing the dashboard for its
   // duration would only compete with the ring animation and the BLE stack.
