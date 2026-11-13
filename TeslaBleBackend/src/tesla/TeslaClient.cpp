@@ -429,7 +429,7 @@ void TeslaClient::loop() {
             (unsigned)m_crypto.lastFault(), (unsigned)m_mtuFaults,
             (unsigned)m_crypto.responsesOk(),
             (unsigned)m_crypto.commandsSent(),
-            m_respOk, m_respTotal);
+            (unsigned)m_respOk, (unsigned)m_respTotal);
   }
 #else
   if (m_packets == 0 && !m_timeoutLogged) {
@@ -801,10 +801,10 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
     ++m_respOk;
     if (m_respOk == 1) {
       CFG_LOG("[CRYPTO] 第一条正常响应（本次连接共%u条，故障%u条）",
-              m_respOk, m_respTotal - m_respOk);
+              (unsigned)m_respOk, (unsigned)(m_respTotal - m_respOk));
     } else if (m_respOk <= 5) {
       CFG_LOG("[CRYPTO] 第%u条正常响应（总计%uB）",
-              m_respOk, (unsigned)len);
+              (unsigned)m_respOk, (unsigned)len);
     }
   }
 

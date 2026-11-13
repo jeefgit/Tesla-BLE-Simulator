@@ -216,38 +216,6 @@ void buildResponseMetadata(TlvBuilder& t, const char* vin, uint32_t counter,
 }
 
 // ── ECDH（NIST P-256）──────────────────────────────────────────────
-bool derivePublic(const uint8_t priv[32], uint8_t pub[65]) {
-  mbedtls_ecp_group grp;
-  mbedtls_mpi d;
-  mbedtls_ecp_point q;
-  mbedtls_ecp_group_init(&grp);
-  mbedtls_mpi_init(&d);
-  mbedtls_ecp_point_init(&q);
-
-  bool ok = false;
-  do {
-    if (mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1) != 0) break;
-    if (mbedtls_mpi_read_binary(&d, priv, 32) != 0) break;
-    if (mbedtls_ecp_check_privkey(&grp, &d) != 0) break;
-    if (mbedtls_ecp_mul(&grp, &q, &d, &grp.G, rngCallback, nullptr) != 0) {
-      break;
-    }
-    size_t olen = 0;
-    if (mbedtls_ecp_point_write_binary(&grp, &q,
-                                       MBEDTLS_ECP_PF_UNCOMPRESSED, &olen, pub,
-                                       65) != 0) {
-      break;
-    }
-    if (olen != 65) break;
-    ok = true;
-  } while (0);
-
-  mbedtls_ecp_point_free(&q);
-  mbedtls_mpi_free(&d);
-  mbedtls_ecp_group_free(&grp);
-  return ok;
-}
-
 bool ecdhSharedX(const uint8_t priv[32], const uint8_t peerPub[65],
                  uint8_t sharedX[32]) {
   mbedtls_ecp_group grp;
