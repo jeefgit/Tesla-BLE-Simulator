@@ -32,6 +32,19 @@ class RoundDisplay : public IDisplay {
 
  private:
   static constexpr uint8_t kDefaultBrightness = 160;
+  // 亮度限制在 10%~80%，避免调到最亮刺眼或最暗看不清。
+  static constexpr uint8_t kMinBrightness = 26;   // 255 * 10%
+  static constexpr uint8_t kMaxBrightness = 204;  // 255 * 80%
+
+  static uint8_t clampBrightness(uint8_t brightness) {
+    if (brightness < kMinBrightness) {
+      return kMinBrightness;
+    }
+    if (brightness > kMaxBrightness) {
+      return kMaxBrightness;
+    }
+    return brightness;
+  }
 
   static void flush(lv_display_t* display, const lv_area_t* area,
                     uint8_t* pixelMap);

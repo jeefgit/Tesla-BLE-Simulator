@@ -18,7 +18,8 @@ PlatformIO 固件工程。本目录与现有 `TESLA-DASHBOARD` 分开，后续�
 | 触摸引脚 | SDA: GPIO 15；SCL: GPIO 14；INT: GPIO 11；RESET: GPIO 40 |
 | 按键 | BOOT: GPIO0（按下为低）；PWR: 由 AXP2101 供电通路控制，经 TCA9554 EXIO4 读取 |
 
-AMOLED 亮度由 CO5300 面板命令控制，没有独立背光 PWM 引脚。
+AMOLED 亮度由 CO5300 面板命令控制，没有独立背光 PWM 引脚；固件支持在屏幕上
+上下滑动实时调节亮度（见“上下滑动调节亮度”一节）。
 板载 I²C 是共享总线；不要另建占用 GPIO14/15 的独立 I²C 总线。
 
 ## 目录结构
@@ -41,6 +42,8 @@ ESP32-S3-ROUND-DISPLAY/
 │   ├── display/
 │   │   ├── IDisplay.h
 │   │   └── RoundDisplay.h
+│   ├── input/
+│   │   └── Cst9217Touch.h       # CST9217 触摸轮询驱动
 │   ├── platform/
 │   │   ├── BoardProfile.h
 │   │   └── boards/
@@ -53,6 +56,8 @@ ESP32-S3-ROUND-DISPLAY/
     │   └── DashboardApp.cpp
     ├── display/
     │   └── RoundDisplay.cpp
+    ├── input/
+    │   └── Cst9217Touch.cpp
     ├── ui/
     │   └── LvglDashboard.cpp
     └── main.cpp
@@ -74,7 +79,7 @@ ESP32-S3-ROUND-DISPLAY/
 行驶、充电、断连/扫描和配钥页面。实时数据由 `TeslaBleBackend` 提供：
 `src/data/TeslaUiSource.cpp` 把 `VehicleState` / `SourceStatus` 映射成 `UiModel`，
 `DashboardApp` 每轮主循环刷新一次。`include/config.h` 中的 `CFG_DEMO_MODE`
-设为 `1` 可回到静态演示数据。CST9217 触摸输入尚未接入。
+设为 `1` 可回到静态演示数据。CST9217 触摸已接入，用于上下滑动调节亮度（见下文）。
 
 ### 按键与画面旋转
 
@@ -102,6 +107,66 @@ TCA9554（I2C `0x20`）的 EXIO4 读取（高电平 = 按下）：`DashboardApp`
 板载只有 BOOT 和 PWR 两个按键，没有独立 RESET 键；复位由 `CHIP_PU` 控制，
 程序无法把复位动作当成普通按键读取，所以旋转触发使用 BOOT 键，重启使用
 PWR 长按。
+
+### 上下滑动调节亮度
+
+单指在屏幕上**上滑调亮、下滑调暗**，亮度实时跟手变化，松手后保存。触摸只用于
+这个手势，**没有注册 LVGL indev**，因此不会与界面控件抢事件。
+
+手势判定（坐标均为 LVGL 画面坐标，已按当前旋转换算）：
+
+- 按住后纵向累计位移 `|dy| ≥ 24 px`，且 `|dy| > |dx| + 16 px` 才激活；
+- 一旦判定为横向拖动，本次按下不再触发亮度手势；
+- 激活后 `1 px ≈ 1 档`亮度，以激活点为锚点避免起始跳动；范围限制在
+  **10%–80%**（26–204）之间，防止过亮或过暗。
+
+三个阈值和灵敏度都在 `src/app/DashboardApp.cpp` 顶部：
+
+```cpp
+constexpr int32_t kSwipeActivatePx = 24;      // 激活所需纵向位移
+constexpr int32_t kSwipeDominancePx = 16;     // 纵向需领先横向的幅度
+constexpr int32_t kBrightnessStepPerPx = 1;   // 每像素对应亮度档位
+```
+
+**旋转感知**：触摸芯片报告的是面板物理坐标，而画面在 flush 时被软件旋转了
+`m_rotation` 个 90°。`RoundDisplay::mapTouchToScreen()` 对坐标做
+`blitRotated()` 的逆变换（0°/90°/180°/270° 分别对应不同的坐标映射），使
+"屏幕上的上下"在任何旋转角度下都指向同一个手势方向，与用户看到的画面一致。
+
+**亮度控制**：写 CO5300 的 0x51 寄存器（`Arduino_CO5300::setBrightness()`，
+0–255）。`RoundDisplay::setBrightness()` 会把亮度统一钳制在
+`kMinBrightness`–`kMaxBrightness`（26–204，即 10%–80%）之间，从 NVS 读回的
+旧值也会重新钳制。拖动过程中只写寄存器；松手时才由
+`RoundDisplay::saveBrightness()` 写回 NVS（namespace `display`，key `bri`），
+避免频繁擦写 flash。默认亮度 160，重启/断电后保持上次调节结果。
+
+**触摸驱动**（`src/input/Cst9217Touch.cpp`）：按 Waveshare 自带的 SensorLib
+`TouchDrvCST92xx` 流程实现，复用 PWR 键那条 I2C 总线（GPIO15/14，从地址
+`0x5A`）：
+
+1. 拉低触摸 RESET（GPIO40）10 ms 复位，等待固件启动；
+2. 写 `0xD1 0x01` 进命令模式，依次读固件校验码 `0xD1FC`（高 16 位应为
+   `0xCACA`）、分辨率 `0xD1F8`、芯片类型 `0xD204`（`0x9217`）；
+3. 主循环每 30 ms 轮询一次：写 `0xD000` 请求 15 字节报告帧，再写
+   `0xD0 0x00 0xAB` 应答；只解析第一点的坐标（`event == 0x06` 表示按下）。
+
+写寄存器地址与读数据之间发 **STOP**（`endTransmission()`）而不是 repeated
+start——CST9217 对后者不应答。
+
+调试时可看串口（115200）日志：
+
+```text
+[TOUCH] firmware info: .. .. CA CA
+[TOUCH] CST9217 ready (res 466x466)
+[TOUCH] press x=.. y=.. frame=......
+[GESTURE] press rot=0 raw=(..,..) screen=(..,..)
+[TOUCH] brightness swipe start (dx=.. dy=.. base 160)
+[TOUCH] brightness saved -> 200
+```
+
+`[TOUCH] press` 每按下/松开各出现一次（空闲不刷屏）；`[GESTURE] press`
+里的 `raw` 是面板原始坐标、`screen` 是旋转换算后的画面坐标，可用于核对触摸
+方向是否与画面一致。
 
 BLE 配置在 `include/config.h`：
 

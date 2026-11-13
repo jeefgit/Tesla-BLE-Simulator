@@ -97,7 +97,9 @@ bool RoundDisplay::begin() {
   Preferences prefs;
   if (prefs.begin(kPrefsNamespace, true)) {
     m_rotation = prefs.getUChar(kPrefsRotationKey, 0) & 0x03;
-    m_brightness = prefs.getUChar(kPrefsBrightnessKey, kDefaultBrightness);
+    // 旧固件可能存过超出 10%~80% 的值，读回时统一钳制。
+    m_brightness = clampBrightness(
+        prefs.getUChar(kPrefsBrightnessKey, kDefaultBrightness));
     prefs.end();
   }
   if (m_rotation != 0) {
@@ -236,6 +238,7 @@ void RoundDisplay::flushArea(lv_display_t* display, const lv_area_t* area,
 }
 
 void RoundDisplay::setBrightness(uint8_t brightness) {
+  brightness = clampBrightness(brightness);
   if (brightness == m_brightness) {
     return;
   }

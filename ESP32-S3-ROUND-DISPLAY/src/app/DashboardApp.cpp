@@ -31,7 +31,8 @@ constexpr uint32_t kPwrLongPressMs = 3000;
 
 // 上下滑动调亮度的手势参数，全部按 LVGL 画面坐标计算（已换算旋转）。
 // 纵向累计位移超过 kSwipeActivatePx、且明显大于横向位移才判定为滑动；
-// 激活后每像素对应 1 档亮度（0~255），上滑调亮、下滑调暗。
+// 激活后每像素对应 1 档亮度（实际范围由 RoundDisplay 限制在 10%~80%），
+// 上滑调亮、下滑调暗。
 constexpr int32_t kSwipeActivatePx = 24;
 constexpr int32_t kSwipeDominancePx = 16;
 constexpr int32_t kBrightnessStepPerPx = 1;
