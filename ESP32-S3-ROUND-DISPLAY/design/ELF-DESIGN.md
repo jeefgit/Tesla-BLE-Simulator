@@ -4,7 +4,7 @@
 
 一句话：**在仪表界面任意页面向左或向右滑动，浮出一只只有两只大眼睛的小精灵；不联网、不说话、不调大模型，纯本地动画。**
 
-- 状态：阶段 1、2 已实现（静态双眼 + 横滑显隐 + 重绘/轮询暂停 + 眨眼/注视/呼吸），待实机验证
+- 状态：阶段 1–3 已实现（显隐、眨眼/注视/呼吸、触摸追随、开心、困倦/入睡、自动隐藏），待实机验证
 - 关联文档：`design/UI-DESIGN.md`（仪表界面）、`README.md`（固件说明）
 - 本文所有坐标均为 LVGL 画面坐标（已按屏幕旋转换算后的坐标）
 
@@ -227,6 +227,7 @@ class ElfOverlay {
   void show();                     // 横滑呼出；Waking 动画
   void hide();                     // 横滑退出/超时；Hiding 动画
   void lookAt(int16_t screenX, int16_t screenY);  // 触摸移动
+  void touchEnd();                                 // 松手：600ms 后回到随机注视
   void poke(int16_t screenX, int16_t screenY);    // 轻点
   void tick(uint32_t nowMs);       // 可选：若不用内部 lv_timer
  private:
@@ -241,7 +242,7 @@ class ElfOverlay {
 | 文件 | 改动 |
 | --- | --- |
 | `include/app/DashboardApp.h` | 增加 `#include "ui/ElfOverlay.h"`、成员 `ElfOverlay m_elf;`、横向手势状态 `m_elfSwipeLatched`、`m_touchMaxTravel` |
-| `src/app/DashboardApp.cpp` | `begin()` 里 `dashboard.begin()` 之后调用 `m_elf.begin()`（保证浮层在开机图层之上）；`pollTouch()` 增加横向累计与显隐/轻点判定；`loop()` 里小精灵可见时**暂停 BLE 轮询与仪表重绘** |
+| `src/app/DashboardApp.cpp` | `begin()` 里 `dashboard.begin()` 之后调用 `m_elf.begin()`（保证浮层在开机图层之上）；`pollTouch()` 增加横向累计与显隐/轻点判定（按下/移动转发 `lookAt`、松手转发 `touchEnd`）；`loop()` 里小精灵可见时**暂停 BLE 轮询与仪表重绘**，并在可见性下降沿强制补画一帧 |
 | `include/config.h` | 新增 `CFG_ELF_*` 开关与阈值 |
 | `README.md` | 增加一节“离线小精灵”与本文链接（可选，建议加） |
 
@@ -390,12 +391,19 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 
 > 实现要点：眨眼用 `height + y`，中心固定在 y=208；所有动画只改眼睛/虹膜/根容器的几何属性。状态机 `Hidden → Waking → Idle → Blinking / Hiding`，由 50ms `lv_timer` 调度，`hide()` 期间 `visible()` 仍为 true，等闭眼动画结束才真正隐藏，避免硬切。
 
-### 阶段 3：有性格（0.5 天）
+### 阶段 3：有性格（已完成代码，待实机验证）
 
-- [ ] 触摸追随 + 轻点开心反应。
-- [ ] 困倦/入睡状态 + `z z z`。
-- [ ] 20s/30s/45s 计时与自动隐藏。
+- [x] 触摸追随 + 轻点开心反应。
+- [x] 困倦/入睡状态 + `z z z`。
+- [x] 20s/30s/45s 计时与自动隐藏。
 - [ ] 配钥页、断连页、充电页上的浮层回归测试。
+
+> 实现要点：
+> - 触摸移动直接改虹膜 `x/y`，不做动画；松手后 600ms 恢复随机注视。
+> - 轻点（位移 < 12px）触发 Happy：眼睛 150→10→150 快眨两次（`reverse` + `repeat_count=2`），瞳孔 74→82，腮红 12%→30%，600ms 后恢复。
+> - 20s 无交互 → Sleepy（眼高 86、瞳孔下移 8、呼吸周期 9s）；再过 10s → Sleeping（眼高 46，显示三个低亮度 `z`，透明度错峰呼吸）。
+> - 任何触摸/轻点都会重置交互计时，并从 Sleepy/Sleeping 唤醒回 Idle。
+> - 自动隐藏在 `ElfOverlay` 内部定时器触发；`DashboardApp` 检测可见性下降沿后强制补画一帧。
 
 ### 阶段 4：可选联动（后续）
 
@@ -442,7 +450,8 @@ lv_screen_active()
     │   └── ... 同左
     ├── m_blushL     (34×16 @ 103,298)
     ├── m_blushR     (34×16 @ 329,298)
-    └── m_mouth      (44×14 @ 211,342, 默认 hidden)
+    ├── m_mouth      (44×14 @ 211,342, 默认 hidden)
+    └── m_z[0..2]    ("z" ×3, 右上角错峰闪烁, 默认 hidden)
 ```
 
 > 高光挂在**虹膜**下而不是瞳孔下，这样瞳孔放大时高光位置稳定，不会跟着“漂”。

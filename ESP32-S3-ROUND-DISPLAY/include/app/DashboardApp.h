@@ -37,6 +37,7 @@ class DashboardApp {
   bool m_touchHorizontal = false;
   bool m_swipeActive = false;
   bool m_elfSwipeLatched = false;
+  bool m_elfWasVisible = false;
   int16_t m_touchStartX = 0;
   int16_t m_touchStartY = 0;
   int16_t m_touchStartRawX = 0;

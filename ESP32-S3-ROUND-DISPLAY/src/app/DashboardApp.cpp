@@ -223,12 +223,15 @@ void DashboardApp::pollTouch() {
       CFG_LOG("[GESTURE] release raw=(%d,%d)->(%d,%d) screen=(%d,%d)",
               m_touchStartRawX, m_touchStartRawY, rawX, rawY, m_touchLastX,
               m_touchLastY);
-      // 小精灵可见且几乎没移动 → 轻点，摸一下。
+      // 小精灵可见时：松手 600ms 后视线回到随机游走；几乎没移动则算轻点。
       const int32_t travel =
           max(abs(m_touchLastX - m_touchStartX),
               abs(m_touchLastY - m_touchStartY));
-      if (m_elf.visible() && travel < CFG_ELF_TAP_PX) {
-        m_elf.poke(m_touchLastX, m_touchLastY);
+      if (m_elf.visible()) {
+        m_elf.touchEnd();
+        if (travel < CFG_ELF_TAP_PX) {
+          m_elf.poke(m_touchLastX, m_touchLastY);
+        }
       }
       if (m_swipeActive) {
         m_swipeActive = false;
@@ -260,6 +263,10 @@ void DashboardApp::pollTouch() {
     m_touchStartY = rawY;
     m_touchStartRawX = rawTouchX;
     m_touchStartRawY = rawTouchY;
+    // 小精灵可见时，按下也算一次交互（并让眼睛立刻看向按下的位置）。
+    if (m_elf.visible()) {
+      m_elf.lookAt(rawX, rawY);
+    }
     CFG_LOG("[GESTURE] press rot=%u raw=(%d,%d) screen=(%d,%d)",
             static_cast<unsigned>(display.rotation()), rawTouchX, rawTouchY,
             rawX, rawY);
@@ -339,6 +346,12 @@ void DashboardApp::loop() {
   pollBootButton();
   pollPowerButton();
   pollTouch();
+  // 小精灵可能在内部计时器里自动隐藏：检测可见性下降沿，强制补画一帧。
+  const bool elfVisible = m_elf.visible();
+  if (m_elfWasVisible && !elfVisible) {
+    m_hasRenderedModel = false;
+  }
+  m_elfWasVisible = elfVisible;
 #if !CFG_DEMO_MODE
   if (!m_sourceStarted && !dashboard.bootAnimationRunning()) {
     m_source.begin();
