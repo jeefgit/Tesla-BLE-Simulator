@@ -5,6 +5,7 @@
 #include "input/Cst9217Touch.h"
 #include "input/Qmi8658.h"
 #include "power/PowerManager.h"
+#include "ui/ElfOverlay.h"
 
 #if !CFG_DEMO_MODE
 #include "data/TeslaUiSource.h"
@@ -35,6 +36,7 @@ class DashboardApp {
   bool m_touchDown = false;
   bool m_touchHorizontal = false;
   bool m_swipeActive = false;
+  bool m_elfSwipeLatched = false;
   int16_t m_touchStartX = 0;
   int16_t m_touchStartY = 0;
   int16_t m_touchStartRawX = 0;
@@ -56,6 +58,7 @@ class DashboardApp {
   uint32_t m_lastRenderMs = 0;
   UiModel m_lastRenderedModel;
   bool m_hasRenderedModel = false;
+  ElfOverlay m_elf;
   bool m_speedInitialized = false;
   float m_speedInputKmh = 0;
   float m_displaySpeedKmh = 0;

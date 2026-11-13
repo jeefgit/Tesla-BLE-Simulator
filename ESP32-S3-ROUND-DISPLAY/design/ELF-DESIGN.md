@@ -2,9 +2,9 @@
 
 目标硬件：**Waveshare ESP32-S3-Touch-AMOLED-1.75-B**（466×466 圆屏，CST9217 触摸，QMI8658 IMU）。
 
-一句话：**在仪表界面任意页面向左滑，浮出一只只有两只大眼睛的小精灵；不联网、不说话、不调大模型，纯本地动画。**
+一句话：**在仪表界面任意页面向左或向右滑动，浮出一只只有两只大眼睛的小精灵；不联网、不说话、不调大模型，纯本地动画。**
 
-- 状态：规划稿（本文只定方案，不代表已实现）
+- 状态：阶段 1 已实现（静态双眼 + 横滑显隐 + 重绘抑制），待实机验证
 - 关联文档：`design/UI-DESIGN.md`（仪表界面）、`README.md`（固件说明）
 - 本文所有坐标均为 LVGL 画面坐标（已按屏幕旋转换算后的坐标）
 
@@ -16,7 +16,7 @@
 
 1. **离线**：不依赖 Wi-Fi、BLE、云端、ASR/LLM/TTS，断网、无车、无手机都能玩。
 2. **可爱**：两只大眼睛会眨眼、会看人、会跟着手指转、会困；交互反馈在 100ms 内。
-3. **不打扰仪表**：默认隐藏，只有用户主动左滑才出现；随时右滑退出，超时自动回仪表。
+3. **不打扰仪表**：默认隐藏，只有用户主动横滑才出现；再横滑退出，超时自动回仪表。
 4. **成本可控**：新增对象 < 25 个，不新增全屏图层，不新增字体/图片资源，不改 `platformio.ini`。
 5. **可回退**：一个 `CFG_ELF_ENABLE` 就能整体关掉。
 
@@ -35,8 +35,7 @@
 
 | 手势 | 仪表页（小精灵隐藏） | 小精灵页（可见） |
 | --- | --- | --- |
-| **左滑**（手指从右往左，dx ≤ −60px） | **显示小精灵** | 无动作（已显示） |
-| **右滑**（dx ≥ +60px） | 无动作 | **退出，回到仪表** |
+| **横向滑动**（左或右，\|dx\| ≥ 60px） | **显示小精灵** | **退出，回到仪表** |
 | **上/下滑** | 调亮度（保持现状） | 调亮度（保持现状，不抢手势） |
 | **轻点**（位移 < 12px） | 无动作 | **摸一下**：开心反应 + 重置自动隐藏计时 |
 | **长按** | 无动作 | 无动作（保留给后续“抚摸”动效） |
@@ -46,17 +45,19 @@
 
 - 纵向领先 → 亮度手势（现有行为，不变）。
 - 横向领先（`|dx| > |dy| + 16`）→ 本次按下进入**横向手势**，累计 `dx`。
-  - 累计 `dx ≤ −60` 且小精灵隐藏 → 显示（每次按下只触发一次）。
-  - 累计 `dx ≥ +60` 且小精灵可见 → 退出（每次按下只触发一次）。
+  - 累计 `|dx| ≥ 60` 且小精灵隐藏 → 显示（每次按下只触发一次）。
+  - 累计 `|dx| ≥ 60` 且小精灵可见 → 退出（每次按下只触发一次）。
+- **方向不敏感**：左右滑都能呼出，也都能退出。早期实现按“左滑呼出、右滑退出”设计，但实机发现触摸 X 轴与画面方向存在镜像，导致实际是右滑呼出；改成双向后不受镜像影响，对旋转角度也更鲁棒。
+- 判定为横向后必须**继续累计 `dx`**，不能提前 `return`。否则慢速滑动永远到不了 60px，表现为“不灵敏、经常无效”（阶段 1 实机问题，已修复）。
 - 斜向滑动只归属一个手势，不会同时改亮度又弹出小精灵。
-- 坐标已由 `RoundDisplay::mapTouchToScreen()` 换算，所以屏幕转到 90°/180°/270° 时，“往左滑”始终是**用户看到的左**。
+- 坐标已由 `RoundDisplay::mapTouchToScreen()` 换算，所以屏幕转到 90°/180°/270° 时，横向手势始终以用户看到的方向为准。
 
 ### 2.2 状态机
 
 ```mermaid
 stateDiagram-v2
     [*] --> Hidden
-    Hidden --> Waking: 左滑
+    Hidden --> Waking: 横滑呼出
     Waking --> Idle: 睁眼动画结束 (220ms)
     Idle --> Idle: 眨眼 / 随机看四周 / 呼吸
     Idle --> Happy: 轻点
@@ -65,8 +66,8 @@ stateDiagram-v2
     Sleepy --> Idle: 轻点 / 触摸
     Sleepy --> Sleeping: 再 10s
     Sleeping --> Idle: 轻点 / 触摸
-    Idle --> Hiding: 右滑 / 45s 无交互
-    Sleepy --> Hiding: 右滑 / 45s 无交互
+    Idle --> Hiding: 横滑退出 / 45s 无交互
+    Sleepy --> Hiding: 横滑退出 / 45s 无交互
     Sleeping --> Hiding: 45s 无交互
     Hiding --> Hidden: 闭眼动画结束 (120ms)
     Hidden --> [*]
@@ -81,9 +82,9 @@ stateDiagram-v2
 
 | 场景 | 处理 |
 | --- | --- |
-| 开机动画未结束 | 忽略左滑，不显示 |
-| 配钥页 / 断连页 / 充电页 | 允许显示（浮层覆盖，退出后恢复原页） |
-| 小精灵可见时车辆数据变化 | 照常更新 `UiModel`，但**暂停仪表重绘**，退出时强制重绘一帧 |
+| 开机动画未结束 | 忽略横滑，不显示 |
+| 配钥页 / 断连页 / 充电页 | 允许显示（不透明纯黑浮层覆盖，退出后恢复原页） |
+| 小精灵可见时车辆数据变化 | 照常更新 `UiModel`，但**暂停仪表重绘**；不透明黑色根容器遮住仪表，退出时强制重绘一帧 |
 | 小精灵可见时到自动休眠时间 | 先隐藏小精灵，休眠逻辑照旧（触摸本身已重置静止计时） |
 | 触摸芯片初始化失败 | 手势不可用，小精灵永不显示，不影响仪表 |
 | 屏幕旋转 | 手势方向跟画面；小精灵本身居中，无需重排 |
@@ -116,7 +117,7 @@ stateDiagram-v2
 
 | 部件 | 尺寸 | 位置（左上角） | 说明 |
 | --- | --- | --- | --- |
-| 根容器 `m_root` | 466×466 @ (0,0) | — | 透明、不可点击、默认隐藏 |
+| 根容器 `m_root` | 466×466 @ (0,0) | — | 不透明纯黑、不可点击、默认隐藏；遮住仪表页 |
 | 左眼 `m_eyeL` | 128×150 | (90, 133) | 半径 64（胶囊），中心 (154, 208) |
 | 右眼 `m_eyeR` | 128×150 | (248, 133) | 中心 (312, 208) |
 | 虹膜 `m_irisL/R` | 92×92 | 眼球内居中 | 深青，随视线偏移 |
@@ -133,7 +134,7 @@ stateDiagram-v2
 
 | Token | HEX | 用途 |
 | --- | --- | --- |
-| `ELF_BG` | `#020406` | 与仪表一致的纯黑底（根容器透明，不额外铺底） |
+| `ELF_BG` | `#020406` | 根容器不透明底色（AMOLED 黑色像素不发光，同时遮住仪表） |
 | `ELF_SCLERA` | `#E8F7FF` | 眼球 |
 | `ELF_IRIS` | `#1C4E63` | 虹膜 |
 | `ELF_IRIS_RIM` | `#2B7A94` | 虹膜内圈（可选，1px 描边） |
@@ -181,8 +182,8 @@ stateDiagram-v2
 
 | 动画 | 触发 | 参数 | 实现 |
 | --- | --- | --- | --- |
-| **睁眼（Waking）** | 左滑 | 高度 10 → 150，220ms，ease_out | `lv_anim` 改 `height` + `y` |
-| **闭眼（Hiding）** | 右滑 / 超时 | 高度 150 → 10，120ms，ease_in | 同上，结束后 `lv_obj_add_flag(HIDDEN)` |
+| **睁眼（Waking）** | 横滑呼出 | 高度 10 → 150，220ms，ease_out | `lv_anim` 改 `height` + `y` |
+| **闭眼（Hiding）** | 横滑退出 / 超时 | 高度 150 → 10，120ms，ease_in | 同上，结束后 `lv_obj_add_flag(HIDDEN)` |
 | **眨眼** | 随机 2.4–6.0s | 闭 90ms / 停 40ms / 睁 140ms；20% 概率连眨两下 | 三段 `lv_anim` 或状态机计时 |
 | **随机注视** | 随机 2.5–5.0s | 目标 x ±22、y ±14，350ms ease_out | `lv_anim` 改瞳孔 `x/y` |
 | **追随手指** | 触摸移动 | 目标 = 手指位置换算的偏移，限幅；80ms 跟随 | 直接 `lv_obj_set_pos()`，不做动画 |
@@ -223,8 +224,8 @@ class ElfOverlay {
  public:
   void begin();                    // 在 active screen 上建对象，默认隐藏
   bool visible() const;
-  void show();                     // 左滑调用；Waking 动画
-  void hide();                     // 右滑/超时调用；Hiding 动画
+  void show();                     // 横滑呼出；Waking 动画
+  void hide();                     // 横滑退出/超时；Hiding 动画
   void lookAt(int16_t screenX, int16_t screenY);  // 触摸移动
   void poke(int16_t screenX, int16_t screenY);    // 轻点
   void tick(uint32_t nowMs);       // 可选：若不用内部 lv_timer
@@ -253,27 +254,39 @@ class ElfOverlay {
 const int32_t dx = rawX - m_touchStartX;
 const int32_t dy = rawY - m_touchStartY;
 
-if (!m_swipeActive) {
-  if (abs(dy) >= kSwipeActivatePx && abs(dy) > abs(dx) + kSwipeDominancePx) {
-    // 现有：亮度手势
-  } else if (abs(dx) > abs(dy) + kSwipeDominancePx) {
-    m_touchHorizontal = true;
-    if (!m_elfSwipeLatched) {
-      if (dx <= -CFG_ELF_SWIPE_PX && !m_elf.visible()) {
-        m_elf.show();
-        m_elfSwipeLatched = true;
-      } else if (dx >= CFG_ELF_SWIPE_PX && m_elf.visible()) {
-        m_elf.hide();
-        m_elfSwipeLatched = true;
-      }
-    }
-  }
+// 小精灵可见时：触摸移动 = 视线跟随
+if (m_elf.visible()) {
+  m_elf.lookAt(rawX, rawY);
+}
+
+// 已进入亮度手势
+if (m_swipeActive) { ...调亮度...; return; }
+
+// 纵向领先 → 亮度手势
+if (!m_touchHorizontal && abs(dy) >= kSwipeActivatePx &&
+    abs(dy) > abs(dx) + kSwipeDominancePx) {
+  m_swipeActive = true;
+  ...记录锚点...
   return;
 }
 
-// 小精灵可见时，触摸移动 = 视线跟随
-if (m_elf.visible()) {
-  m_elf.lookAt(rawX, rawY);
+// 横向领先 → 进入横向手势，但不要 return，后面还要继续累计 dx
+if (!m_touchHorizontal && abs(dx) > abs(dy) + kSwipeDominancePx) {
+  m_touchHorizontal = true;
+}
+if (!m_touchHorizontal || m_elfSwipeLatched) {
+  return;
+}
+
+// 方向不敏感：隐藏时左右滑都呼出，显示时左右滑都退出
+if (abs(dx) >= CFG_ELF_SWIPE_PX) {
+  if (!m_elf.visible()) {
+    if (!dashboard.bootAnimationRunning()) m_elf.show();
+  } else {
+    m_elf.hide();
+    m_hasRenderedModel = false;  // 退出后强制补画一帧
+  }
+  m_elfSwipeLatched = true;      // 每次按下只触发一次
 }
 ```
 
@@ -308,11 +321,13 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 1. **禁止整屏 `transform_scale` / `opa` 动画**：会为根对象分配 466×466 ARGB8888 图层（≈868KB），直接打爆 LVGL 堆（`makeScaledLabel` 注释里已记录过一次 `StoreProhibited`）。
 2. **眨眼不要用缩放**：LVGL 9 的 `transform_scale` 是等比缩放，压不扁眼睛；用 `height + y` 才能做出“合眼”。
 3. **不要用 `lv_obj_set_style_shadow_*` 做柔光**：软件阴影在 466 屏上很贵；用“大一圈、低透明度的同色圆”代替。
-4. **对象数控制在 25 个以内**，`m_root` 透明、无边框、不可点击、不可滚动。
+4. **对象数控制在 25 个以内**，`m_root` 不透明纯黑（`#020406`）、无边框、不可点击、不可滚动。
 5. **不新增字体/图片**：`z z z` 用内置 `montserrat_20`，眼睛全部用 `lv_obj` 几何图形。
 6. **防烧屏**：呼吸动画自带 ±2px 漂移；45s 自动隐藏；亮度上限仍由 `RoundDisplay` 钳在 80%。
 7. **浮层顺序**：`m_elf.begin()` 必须在 `dashboard.begin()` 之后，否则会被开机图层盖住；`show()` 里可再 `lv_obj_move_foreground(m_root)` 保险。
 8. **AMOLED 纯白**：眼球用 `#E8F7FF`，并把高光不透明度控制在 90% 以内。
+9. **横滑要持续累计位移**：判定为横向手势后仍要在每次 `pollTouch()` 里更新 `dx`，不能提前退出函数。阶段 1 实机出现过慢速横滑无效，就是这个原因。
+10. **不要依赖左右方向**：触摸 X 轴与画面存在镜像可能，横滑显隐按 `|dx|` 判断，左右都能呼出/退出。
 
 ### 5.6 配置项（`include/config.h`）
 
@@ -346,12 +361,15 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 
 ## 6. 实施计划
 
-### 阶段 1：能出来（0.5 天）
+### 阶段 1：能出来（已完成代码，待实机验证）
 
-- [ ] 新建 `ElfOverlay`，画静态双眼（眼球 + 虹膜 + 瞳孔 + 高光）。
-- [ ] `DashboardApp` 横向手势：左滑显示、右滑隐藏，串口打印 `[ELF] show/hide`。
-- [ ] 隐藏时跳过仪表重绘，退出时强制重绘一帧。
+- [x] 新建 `ElfOverlay`，画静态双眼（眼球 + 虹膜 + 瞳孔 + 高光）。
+- [x] `DashboardApp` 横向手势：左/右滑显示、再横滑隐藏，串口打印 `[ELF] show/hide`。
+- [x] 小精灵可见时跳过仪表重绘，退出时强制重绘一帧。
+- [x] 根容器改为不透明纯黑，呼出时完全盖住仪表页。
 - [ ] 验证 0°/90°/180°/270° 四个方向手势一致。
+
+> 阶段 1 实机反馈：① 原“左滑呼出/右滑退出”受触摸 X 轴镜像影响，实际表现为右滑呼出，已改为方向不敏感；② 横向判定后提前 `return` 导致 `dx` 不再累计，慢滑经常无效，已修复。
 
 ### 阶段 2：活起来（0.5 天）
 
@@ -377,8 +395,8 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 
 ## 7. 验收标准
 
-1. 任意仪表页左滑 60px 内必出小精灵；右滑必退；误触率低（斜滑不触发）。
-2. 四个旋转角度下，“左滑”都等于用户视角的向左。
+1. 任意仪表页横向滑动 60px 内必出小精灵；再横滑必退；误触率低（斜滑不触发）。左右方向均可，不受触摸轴镜像影响。
+2. 四个旋转角度下，横滑都能稳定呼出/退出，且亮度手势不被抢占。
 3. 小精灵可见时，上下滑仍能调亮度，互不抢占。
 4. 断网、未连接车辆、`CFG_DEMO_MODE=1` 时功能完全正常。
 5. 连续显示 45s 自动退出；退出后仪表数据是最新的。
@@ -388,7 +406,8 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 
 ## 8. 待确认
 
-1. **入口方向**：确认“左滑=呼出、右滑=退出”是否符合直觉；也可以做成左右滑循环切换。
+1. ~~**入口方向**：确认“左滑=呼出、右滑=退出”是否符合直觉；也可以做成左右滑循环切换。~~
+   已定：做成**方向不敏感**——隐藏时左右横滑都呼出，显示时左右横滑都退出。原因：实机触摸 X 轴与画面方向存在镜像，固定方向会导致文档与手感相反。
 2. **自动隐藏时长**：45s 是否合适？演示场景可能需要常亮（可设 0 = 不自动隐藏）。
 3. **是否需要身体**：当前只有眼睛；如果希望有“精灵耳朵/小披风”，建议放在阶段 4，避免第一版变复杂。
 4. **是否要声音**：本期静音；若后续加“摸头音效”，需要评估 I2S 与 BLE 的共存。
@@ -400,7 +419,7 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 
 ```text
 lv_screen_active()
-└── m_root (466×466, 透明, hidden)
+└── m_root (466×466, 不透明黑, hidden)
     ├── m_aura       (R210 弧, 8% 青)
     ├── m_eyeL       (128×150 @ 90,133, 胶囊)
     │   ├── m_irisL  (92×92, 居中)

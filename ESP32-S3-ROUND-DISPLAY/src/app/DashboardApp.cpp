@@ -91,6 +91,8 @@ void DashboardApp::begin() {
   Serial.printf("Display ready, free heap: %u bytes\n", ESP.getFreeHeap());
   dashboard.begin();
   Serial.printf("UI built, free heap: %u bytes\n", ESP.getFreeHeap());
+  // 浮层必须在仪表和开机动画之后建，才能盖在所有页面之上。
+  m_elf.begin();
 #if !CFG_DEMO_MODE
   m_sourceStarted = false;
   m_model.link = UiLinkState::Scanning;
@@ -221,6 +223,13 @@ void DashboardApp::pollTouch() {
       CFG_LOG("[GESTURE] release raw=(%d,%d)->(%d,%d) screen=(%d,%d)",
               m_touchStartRawX, m_touchStartRawY, rawX, rawY, m_touchLastX,
               m_touchLastY);
+      // 小精灵可见且几乎没移动 → 轻点，摸一下。
+      const int32_t travel =
+          max(abs(m_touchLastX - m_touchStartX),
+              abs(m_touchLastY - m_touchStartY));
+      if (m_elf.visible() && travel < CFG_ELF_TAP_PX) {
+        m_elf.poke(m_touchLastX, m_touchLastY);
+      }
       if (m_swipeActive) {
         m_swipeActive = false;
         // 拖动过程中只写面板寄存器，松手才把最终亮度存进 NVS。
@@ -246,6 +255,7 @@ void DashboardApp::pollTouch() {
     m_touchDown = true;
     m_touchHorizontal = false;
     m_swipeActive = false;
+    m_elfSwipeLatched = false;
     m_touchStartX = rawX;
     m_touchStartY = rawY;
     m_touchStartRawX = rawTouchX;
@@ -258,35 +268,65 @@ void DashboardApp::pollTouch() {
 
   const int32_t dx = rawX - m_touchStartX;
   const int32_t dy = rawY - m_touchStartY;
-  if (!m_swipeActive) {
-    if (m_touchHorizontal) {
-      return;
+  // 小精灵可见时，手指移动 → 眼睛追随；不影响亮度手势。
+  if (m_elf.visible()) {
+    m_elf.lookAt(rawX, rawY);
+  }
+  // 已进入亮度手势：跟手调节亮度。
+  if (m_swipeActive) {
+    // 上滑（画面坐标 y 减小）调亮，下滑调暗；亮度实时跟手变化。
+    const int32_t delta = (m_swipeAnchorY - rawY) * kBrightnessStepPerPx;
+    int32_t target = m_swipeBaseBrightness + delta;
+    if (target < 0) {
+      target = 0;
+    } else if (target > 255) {
+      target = 255;
     }
-    if (abs(dy) >= kSwipeActivatePx && abs(dy) > abs(dx) + kSwipeDominancePx) {
-      m_swipeActive = true;
-      m_swipeAnchorY = rawY;
-      m_swipeBaseBrightness = display.brightness();
-      CFG_LOG("[TOUCH] brightness swipe start (dx=%d dy=%d base %u)",
-              static_cast<int>(dx), static_cast<int>(dy),
-              static_cast<unsigned>(m_swipeBaseBrightness));
-    } else if (abs(dx) > abs(dy) + kSwipeDominancePx) {
-      // 横向拖动不是亮度手势，本次按下不再触发。
-      m_touchHorizontal = true;
-      CFG_LOG("[GESTURE] horizontal drag ignored (dx=%d dy=%d)",
-              static_cast<int>(dx), static_cast<int>(dy));
-    }
+    display.setBrightness(static_cast<uint8_t>(target));
     return;
   }
 
-  // 上滑（画面坐标 y 减小）调亮，下滑调暗；亮度实时跟手变化。
-  const int32_t delta = (m_swipeAnchorY - rawY) * kBrightnessStepPerPx;
-  int32_t target = m_swipeBaseBrightness + delta;
-  if (target < 0) {
-    target = 0;
-  } else if (target > 255) {
-    target = 255;
+  // 纵向领先 → 亮度手势。
+  if (!m_touchHorizontal && abs(dy) >= kSwipeActivatePx &&
+      abs(dy) > abs(dx) + kSwipeDominancePx) {
+    m_swipeActive = true;
+    m_swipeAnchorY = rawY;
+    m_swipeBaseBrightness = display.brightness();
+    CFG_LOG("[TOUCH] brightness swipe start (dx=%d dy=%d base %u)",
+            static_cast<int>(dx), static_cast<int>(dy),
+            static_cast<unsigned>(m_swipeBaseBrightness));
+    return;
   }
-  display.setBrightness(static_cast<uint8_t>(target));
+
+  // 横向领先 → 小精灵显隐。
+  // 注意：判定为横向后仍要继续累计 dx；以前在这里直接 return，导致慢速
+  // 滑动永远到不了 60px 阈值，表现为“不灵敏、经常无效”。
+  if (!m_touchHorizontal && abs(dx) > abs(dy) + kSwipeDominancePx) {
+    m_touchHorizontal = true;
+    CFG_LOG("[GESTURE] horizontal drag start (dx=%d dy=%d)",
+            static_cast<int>(dx), static_cast<int>(dy));
+  }
+  if (!m_touchHorizontal || m_elfSwipeLatched) {
+    return;
+  }
+
+  // 方向不敏感：隐藏时左右滑都能呼出，显示时左右滑都能退出。
+  // 这样不受触摸 X 轴与画面方向是否镜像的影响。
+  if (abs(dx) >= CFG_ELF_SWIPE_PX) {
+    if (!m_elf.visible()) {
+      if (dashboard.bootAnimationRunning()) {
+        return;
+      }
+      m_elf.show();
+    } else {
+      m_elf.hide();
+      // 浮层关闭后强制下一轮重画一帧，避免显示期间的旧数据。
+      m_hasRenderedModel = false;
+    }
+    m_elfSwipeLatched = true;
+    CFG_LOG("[GESTURE] elf swipe dx=%d -> %s", static_cast<int>(dx),
+            m_elf.visible() ? "shown" : "hidden");
+  }
 }
 
 void DashboardApp::setModel(const UiModel& model) { m_model = model; }
@@ -314,7 +354,9 @@ void DashboardApp::loop() {
   const uint32_t now = millis();
   // The boot overlay hides everything, so redrawing the dashboard for its
   // duration would only compete with the ring animation and the BLE stack.
-  if (!dashboard.bootAnimationRunning() && now - m_lastRenderMs >= 50) {
+  // 小精灵可见时同样暂停仪表重绘（数据照常更新，退出时补一帧）。
+  if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
+      now - m_lastRenderMs >= 50) {
     const float speedInputKmh =
         m_model.speedValid ? m_model.speedKmh : 0.0f;
     if (!m_speedInitialized) {

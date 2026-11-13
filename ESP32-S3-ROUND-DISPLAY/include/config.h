@@ -95,3 +95,19 @@
 #define CFG_LOG_ALWAYS(fmt, ...) \
   Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f, ##__VA_ARGS__)
 #endif
+
+// ---------------------------------------------------------------------------
+// 离线小精灵（design/ELF-DESIGN.md）
+//   纯本地浮层：仪表任意页左滑呼出、右滑退出，不联网、不出声。
+// ---------------------------------------------------------------------------
+#define CFG_ELF_ENABLE 1             // 0 = 完全关闭（不建对象、不响应手势）
+#define CFG_ELF_SWIPE_PX 60          // 横向滑动触发距离
+#define CFG_ELF_DOMINANCE_PX 16      // 横向需领先纵向的幅度（与亮度手势共用）
+#define CFG_ELF_TAP_PX 12            // 位移小于此值算轻点
+#define CFG_ELF_AUTO_HIDE_MS 45000UL // 无交互自动隐藏
+#define CFG_ELF_SLEEP_MS 20000UL     // 进入困倦
+#define CFG_ELF_SLEEP_DEEP_MS 30000UL
+#define CFG_ELF_BLINK_MIN_MS 2400UL
+#define CFG_ELF_BLINK_MAX_MS 6000UL
+#define CFG_ELF_GAZE_MIN_MS 2500UL
+#define CFG_ELF_GAZE_MAX_MS 5000UL
