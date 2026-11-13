@@ -347,6 +347,7 @@ void DashboardApp::loop() {
   pollPowerButton();
   pollTouch();
   // 小精灵可能在内部计时器里自动隐藏：检测可见性下降沿，强制补画一帧。
+  // （自动隐藏默认关闭，这里也覆盖横滑退出后的补画。）
   const bool elfVisible = m_elf.visible();
   if (m_elfWasVisible && !elfVisible) {
     m_hasRenderedModel = false;
@@ -358,14 +359,15 @@ void DashboardApp::loop() {
     m_sourceStarted = true;
   }
   if (m_sourceStarted) {
-    // 小精灵显示期间暂停数据轮询：不访问 BLE、不更新模型，避免后台
-    // 请求和动画抢资源；退出后下一轮立即恢复，仪表显示最新的缓存值。
-    if (!m_elf.visible()) {
-      m_source.loop();
-      m_model = m_source.model();
-    }
+    // 小精灵显示期间不再暂停 BLE 轮询：阶段 4 的充电打哈欠、车速瞳孔和
+    // 急减速眯眼都需要实时数据。仪表重绘仍然暂停，退出后补画一帧。
+    m_source.loop();
+    m_model = m_source.model();
   }
 #endif
+  // 车辆状态实时快照（阶段 4）：充电打哈欠、车速瞳孔放大、急减速眯眼。
+  // BLE 轮询在小精灵显示期间照常进行，因此这些联动是实时的。
+  m_elf.setVehicleState(m_model.speedKmh, m_model.speedValid, m_model.charging);
   // 静止自动休眠：IMU 运动检测、触摸/按键活动与配钥/充电条件都在这里判断。
   m_power.update(m_model, dashboard.bootAnimationRunning(), m_model.charging);
   const uint32_t now = millis();

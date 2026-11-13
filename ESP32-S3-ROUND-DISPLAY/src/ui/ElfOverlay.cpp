@@ -19,6 +19,14 @@ const lv_color_t kPupil = lv_color_hex(0x04070A);
 const lv_color_t kGlow = lv_color_hex(0x43D9F5);
 const lv_color_t kBlush = lv_color_hex(0xFF8A80);
 const lv_color_t kSleep = lv_color_hex(0x5A6377);
+// 嘴巴常态可见；开心/打哈欠时更亮。
+const lv_color_t kMouthColor = lv_color_hex(0x9FB4C4);
+constexpr uint8_t kMouthIdleOpa = 120;
+constexpr uint8_t kMouthHappyOpa = 235;
+constexpr uint8_t kMouthYawnOpa = 235;
+
+// 耳朵/尾巴轮廓：中暗青色，在纯黑背景上可见但不抢眼睛。
+const lv_color_t kSilhouette = lv_color_hex(0x2A5A68);
 
 constexpr int32_t kEyeW = 128;
 constexpr int32_t kEyeH = 150;
@@ -32,6 +40,39 @@ constexpr int32_t kIrisY = (kEyeH - kIrisSize) / 2;      // 29
 constexpr int32_t kPupilSize = 74;
 constexpr int32_t kPupilHappySize = 82;
 constexpr int32_t kPupilInset = (kIrisSize - kPupilSize) / 2;  // 9
+
+// 阶段 4：车速越快瞳孔越大，60 km/h 开始、140 km/h 到顶（74 → 84）。
+constexpr int32_t kPupilSpeedMaxSize = 84;
+constexpr float kPupilSpeedStartKmh = 60.0f;
+constexpr float kPupilSpeedFullKmh = 140.0f;
+constexpr uint32_t kPupilAnimMs = 400;
+
+// 急减速眯眼：一次采样内降幅 ≥ 10 km/h 触发，眯 600ms，2s 冷却。
+constexpr int32_t kEyeSquintH = 62;
+constexpr uint32_t kSquintInMs = 120;
+constexpr uint32_t kSquintHoldMs = 600;
+constexpr uint32_t kSquintOutMs = 240;
+constexpr uint32_t kSquintCooldownMs = 2000;
+constexpr float kDecelDropKmh = 10.0f;
+constexpr uint32_t kDecelWindowMs = 450;
+
+// 充电打哈欠：慢闭 500ms / 停 400ms / 慢睁 500ms。
+constexpr uint32_t kYawnCloseMs = 500;
+constexpr uint32_t kYawnHoldMs = 400;
+constexpr uint32_t kYawnOpenMs = 500;
+constexpr uint32_t kYawnFirstMinMs = 3000;
+constexpr uint32_t kYawnFirstMaxMs = 6000;
+constexpr uint32_t kYawnNextMinMs = 12000;
+constexpr uint32_t kYawnNextMaxMs = 20000;
+
+// 耳朵 / 尾巴剪影（挂在 m_body、眼睛之前，呼吸时一起漂移）。
+constexpr int32_t kEarX[2] = {64, 350};
+constexpr int32_t kEarY = 92;
+constexpr int32_t kEarSize = 52;
+constexpr int32_t kTailX[3] = {374, 392, 406};
+constexpr int32_t kTailY[3] = {306, 282, 254};
+constexpr int32_t kTailSize[3] = {18, 22, 26};
+constexpr uint8_t kSilhouetteOpa = 200;
 
 // 困倦 / 入睡时的眼睛高度与瞳孔下垂量。
 constexpr int32_t kEyeSleepyH = 86;
@@ -53,8 +94,9 @@ constexpr uint32_t kWakeMs = 220;
 constexpr uint32_t kHideMs = 120;
 constexpr uint32_t kGazeMs = 350;
 constexpr uint32_t kHappyMs = 600;
-// 呼吸：身体整体 +5 → -5px，3s 单程（6s 周期）；困倦 4.5s 单程（9s 周期）。
-constexpr int32_t kBreathOffsetPx = 5;
+// 呼吸：身体整体 +12 → -12px（24px 行程），3s 单程（6s 周期）；
+// 困倦 4.5s 单程（9s 周期）。根容器黑底足够大，移动不会露出仪表。
+constexpr int32_t kBreathOffsetPx = 12;
 constexpr uint32_t kBreathHalfMs = 3000;
 constexpr uint32_t kBreathSleepyHalfMs = 4500;
 
@@ -146,6 +188,7 @@ void ElfOverlay::begin() {
     return;
   }
   buildObjects();
+  m_pupilBaseSize = kPupilSize;
   m_timer = lv_timer_create(timerCallback, 50, this);
   m_built = true;
   CFG_LOG("[ELF] overlay built, heap %u", ESP.getFreeHeap());
@@ -172,6 +215,17 @@ void ElfOverlay::buildObjects() {
   m_body = makeBlock(m_root, 0, 0, kScreenSize, kScreenSize, 0,
                      lv_color_black(), LV_OPA_TRANSP);
 
+  // 阶段 4：低对比度耳朵 + 尾巴剪影，放在眼睛之前，只做轮廓。
+  for (int i = 0; i < 2; ++i) {
+    m_ear[i] = makeBlock(m_body, kEarX[i], kEarY, kEarSize, kEarSize,
+                         LV_RADIUS_CIRCLE, kSilhouette, kSilhouetteOpa);
+  }
+  for (int i = 0; i < 3; ++i) {
+    m_tail[i] = makeBlock(m_body, kTailX[i], kTailY[i], kTailSize[i],
+                          kTailSize[i], LV_RADIUS_CIRCLE, kSilhouette,
+                          kSilhouetteOpa);
+  }
+
   for (int i = 0; i < 2; ++i) {
     // 眼球：胶囊形，子对象随高度压缩被裁掉，形成“合眼”。
     m_eye[i] = makeBlock(m_body, kEyeX[i], kEyeY, kEyeW, kEyeH, 64, kSclera,
@@ -192,9 +246,9 @@ void ElfOverlay::buildObjects() {
                            kBlushOpa);
   }
 
-  // 嘴：默认隐藏，开心时再出现。
-  m_mouth = makeBlock(m_body, 211, 342, 44, 14, 7, kSleep, 77);
-  lv_obj_add_flag(m_mouth, LV_OBJ_FLAG_HIDDEN);
+  // 嘴：常态可见；开心/打哈欠时提高不透明度。
+  m_mouth = makeBlock(m_body, 211, 342, 44, 14, 7, kMouthColor,
+                      kMouthIdleOpa);
 
   // 入睡时出现的 ASCII "z z z"。
   for (int i = 0; i < 3; ++i) {
@@ -231,7 +285,14 @@ void ElfOverlay::show() {
   m_state = State::Waking;
   m_blinkPhase = BlinkPhase::None;
   m_blinkIsSecond = false;
+  m_yawnHolding = false;
+  m_squintUntil = 0;
   m_lastInteractionAt = millis();
+  // 呼出时重新排一次哈欠，避免用掉“上次隐藏前”的过期时间立即打哈欠。
+  if (m_charging) {
+    m_nextYawnAt = m_lastInteractionAt +
+                   randomBetween(kYawnFirstMinMs, kYawnFirstMaxMs);
+  }
 
   int32_t currentH = lv_obj_get_height(m_eye[0]);
   if (currentH < kEyeClosedH) {
@@ -254,6 +315,8 @@ void ElfOverlay::hide() {
   resetHappyVisuals();
   m_state = State::Hiding;
   m_blinkPhase = BlinkPhase::None;
+  m_yawnHolding = false;
+  m_squintUntil = 0;
 
   int32_t currentH = lv_obj_get_height(m_eye[0]);
   if (currentH < kEyeClosedH) {
@@ -380,6 +443,64 @@ void ElfOverlay::notifyInteraction() {
   }
 }
 
+void ElfOverlay::setVehicleState(float speedKmh, bool speedValid,
+                                 bool charging) {
+  if (!m_built) {
+    return;
+  }
+  const uint32_t now = millis();
+
+  // 充电上升沿：几秒后第一次打哈欠；拔出充电则取消排期。
+  if (charging != m_charging) {
+    m_charging = charging;
+    m_nextYawnAt =
+        charging ? now + randomBetween(kYawnFirstMinMs, kYawnFirstMaxMs) : 0;
+    CFG_LOG("[ELF] charging %s", charging ? "on" : "off");
+  }
+
+  // 车速瞳孔：60 km/h 起随速度平滑放大，140 km/h 到 84。
+  int32_t target = kPupilSize;
+  if (speedValid) {
+    float t = (speedKmh - kPupilSpeedStartKmh) /
+              (kPupilSpeedFullKmh - kPupilSpeedStartKmh);
+    if (t < 0.0f) {
+      t = 0.0f;
+    } else if (t > 1.0f) {
+      t = 1.0f;
+    }
+    target = kPupilSize + static_cast<int32_t>(
+                              t * (kPupilSpeedMaxSize - kPupilSize) + 0.5f);
+  }
+  if (target != m_pupilBaseSize) {
+    m_pupilBaseSize = target;
+    lv_anim_delete(this, setPupilSize);
+    if (m_state == State::Hidden) {
+      setPupilSize(this, target);
+    } else if (m_state != State::Hiding && m_state != State::Happy) {
+      // Happy 期间不抢瞳孔动画，结束时自然回到新的基准值。
+      startAnim(this, setPupilSize, lv_obj_get_width(m_pupil[0]), target,
+                kPupilAnimMs, lv_anim_path_ease_out, nullptr);
+    }
+  }
+
+  // 急减速：一次采样内降幅 ≥ 10 km/h，且当前空闲 → 眯眼 600ms。
+  if (speedValid) {
+    if (m_haveSpeedSample) {
+      const uint32_t dt = now - m_lastSpeedAt;
+      const float drop = m_lastSpeedKmh - speedKmh;
+      if (dt > 0 && dt <= kDecelWindowMs && drop >= kDecelDropKmh &&
+          m_state == State::Idle && due(m_squintCooldownUntil)) {
+        startSquint();
+      }
+    }
+    m_lastSpeedKmh = speedKmh;
+    m_lastSpeedAt = now;
+    m_haveSpeedSample = true;
+  } else {
+    m_haveSpeedSample = false;
+  }
+}
+
 void ElfOverlay::enterSleepy() {
   if (m_state != State::Idle) {
     return;
@@ -448,7 +569,9 @@ void ElfOverlay::startHappy() {
   m_state = State::Happy;
   m_blinkPhase = BlinkPhase::None;
   m_happyUntil = millis() + kHappyMs;
-  lv_obj_clear_flag(m_mouth, LV_OBJ_FLAG_HIDDEN);
+  lv_anim_delete(this, setMouthOpa);
+  startAnim(this, setMouthOpa, lv_obj_get_style_bg_opa(m_mouth, 0),
+            kMouthHappyOpa, 200, lv_anim_path_ease_out, nullptr);
 
   // 快速眨两下：150 → 10（90ms），10 → 150（140ms），重复 2 次。
   setEyeOpen(this, kEyeH);  // 先回到全开，保证双眨完整
@@ -463,8 +586,8 @@ void ElfOverlay::startHappy() {
   lv_anim_set_path_cb(&blink, lv_anim_path_ease_in);
   lv_anim_start(&blink);
 
-  startAnim(this, setPupilSize, kPupilSize, kPupilHappySize, 200,
-            lv_anim_path_ease_out, nullptr);
+  startAnim(this, setPupilSize, lv_obj_get_width(m_pupil[0]), kPupilHappySize,
+            200, lv_anim_path_ease_out, nullptr);
   startAnim(this, setBlushOpa, kBlushOpa, kBlushHappyOpa, 200,
             lv_anim_path_ease_out, nullptr);
   CFG_LOG("[ELF] happy");
@@ -474,11 +597,13 @@ void ElfOverlay::endHappy() {
   if (m_state != State::Happy) {
     return;
   }
-  startAnim(this, setPupilSize, kPupilHappySize, kPupilSize, 200,
+  startAnim(this, setPupilSize, kPupilHappySize, m_pupilBaseSize, 200,
             lv_anim_path_ease_out, nullptr);
   startAnim(this, setBlushOpa, kBlushHappyOpa, kBlushOpa, 300,
             lv_anim_path_ease_out, nullptr);
-  lv_obj_add_flag(m_mouth, LV_OBJ_FLAG_HIDDEN);
+  lv_anim_delete(this, setMouthOpa);
+  startAnim(this, setMouthOpa, kMouthHappyOpa, kMouthIdleOpa, 300,
+            lv_anim_path_ease_out, nullptr);
   m_state = State::Idle;
 
   const uint32_t now = millis();
@@ -492,9 +617,45 @@ void ElfOverlay::endHappy() {
 void ElfOverlay::resetHappyVisuals() {
   lv_anim_delete(this, setPupilSize);
   lv_anim_delete(this, setBlushOpa);
-  setPupilSize(this, kPupilSize);
+  lv_anim_delete(this, setMouthOpa);
+  setPupilSize(this, m_pupilBaseSize);
   setBlushOpa(this, kBlushOpa);
-  lv_obj_add_flag(m_mouth, LV_OBJ_FLAG_HIDDEN);
+  setMouthOpa(this, kMouthIdleOpa);
+}
+
+void ElfOverlay::startYawn() {
+  if (m_state != State::Idle) {
+    return;
+  }
+  lv_anim_delete(this, setEyeOpen);
+  lv_anim_delete(this, setGazeX);
+  lv_anim_delete(this, setGazeY);
+  lv_anim_delete(this, setMouthOpa);
+  setMouthOpa(this, kMouthYawnOpa);
+  m_state = State::Yawning;
+  m_blinkPhase = BlinkPhase::None;
+  m_yawnHolding = false;
+
+  const int32_t currentH = lv_obj_get_height(m_eye[0]);
+  animateEyes(currentH, kEyeClosedH, kYawnCloseMs, lv_anim_path_ease_in_out,
+              onYawnClosed);
+  CFG_LOG("[ELF] yawn");
+}
+
+void ElfOverlay::startSquint() {
+  if (m_state != State::Idle) {
+    return;
+  }
+  lv_anim_delete(this, setEyeOpen);
+  m_state = State::Squint;
+  m_blinkPhase = BlinkPhase::None;
+  m_squintUntil = millis() + kSquintHoldMs;
+  m_squintCooldownUntil = millis() + kSquintCooldownMs;
+
+  const int32_t currentH = lv_obj_get_height(m_eye[0]);
+  animateEyes(currentH, kEyeSquintH, kSquintInMs, lv_anim_path_ease_out,
+              nullptr);
+  CFG_LOG("[ELF] squint");
 }
 
 void ElfOverlay::startZzz() {
@@ -537,6 +698,26 @@ void ElfOverlay::onTimer() {
     return;
   }
 
+  // 打哈欠：慢闭 → 停 400ms → 慢睁。
+  if (m_state == State::Yawning) {
+    if (m_yawnHolding && now - m_yawnClosedAt >= kYawnHoldMs) {
+      m_yawnHolding = false;
+      animateEyes(kEyeClosedH, kEyeH, kYawnOpenMs, lv_anim_path_ease_out,
+                  onYawnOpened);
+    }
+    return;
+  }
+
+  // 急减速眯眼：眯 600ms 后睁开。
+  if (m_state == State::Squint) {
+    if (m_squintUntil != 0 && due(m_squintUntil)) {
+      m_squintUntil = 0;
+      animateEyes(lv_obj_get_height(m_eye[0]), kEyeH, kSquintOutMs,
+                  lv_anim_path_ease_out, onSquintDone);
+    }
+    return;
+  }
+
   // 眨眼“停 40ms”阶段结束后睁眼。
   if (m_state == State::Blinking && m_blinkPhase == BlinkPhase::Holding &&
       now - m_blinkClosedAt >= kBlinkHoldMs) {
@@ -546,7 +727,8 @@ void ElfOverlay::onTimer() {
     return;
   }
 
-  // 所有可见状态都要检查自动隐藏（45s）。
+#if CFG_ELF_AUTO_HIDE_MS > 0
+  // 自动隐藏默认关闭（CFG_ELF_AUTO_HIDE_MS = 0）。
   if (m_state == State::Idle || m_state == State::Sleepy ||
       m_state == State::Sleeping) {
     if (due(m_lastInteractionAt + CFG_ELF_AUTO_HIDE_MS)) {
@@ -555,10 +737,13 @@ void ElfOverlay::onTimer() {
       return;
     }
   }
+#endif
 
   if (m_state == State::Idle) {
     if (due(m_lastInteractionAt + CFG_ELF_SLEEP_MS)) {
       enterSleepy();
+    } else if (m_charging && m_nextYawnAt != 0 && due(m_nextYawnAt)) {
+      startYawn();
     } else if (due(m_nextBlinkAt)) {
       startBlink();
     } else if (due(m_nextGazeAt)) {
@@ -647,6 +832,14 @@ void ElfOverlay::setBlushOpa(void* var, int32_t opacity) {
   }
 }
 
+void ElfOverlay::setMouthOpa(void* var, int32_t opacity) {
+  auto* self = static_cast<ElfOverlay*>(var);
+  if (self == nullptr || self->m_mouth == nullptr) {
+    return;
+  }
+  lv_obj_set_style_bg_opa(self->m_mouth, static_cast<lv_opa_t>(opacity), 0);
+}
+
 void ElfOverlay::setZOpacity(void* var, int32_t progress) {
   auto* self = static_cast<ElfOverlay*>(var);
   if (self == nullptr) {
@@ -717,6 +910,49 @@ void ElfOverlay::onBlinkOpened(lv_anim_t* anim) {
       now + randomBetween(CFG_ELF_GAZE_MIN_MS, CFG_ELF_GAZE_MAX_MS);
 }
 
+void ElfOverlay::onYawnClosed(lv_anim_t* anim) {
+  auto* self = static_cast<ElfOverlay*>(anim->var);
+  if (self == nullptr || self->m_state != State::Yawning) {
+    return;
+  }
+  self->m_yawnClosedAt = millis();
+  self->m_yawnHolding = true;
+}
+
+void ElfOverlay::onYawnOpened(lv_anim_t* anim) {
+  auto* self = static_cast<ElfOverlay*>(anim->var);
+  if (self == nullptr || self->m_state != State::Yawning) {
+    return;
+  }
+  self->m_state = State::Idle;
+  self->m_yawnHolding = false;
+  startAnim(self, setMouthOpa, kMouthYawnOpa, kMouthIdleOpa, 300,
+            lv_anim_path_ease_out, nullptr);
+
+  const uint32_t now = millis();
+  self->m_nextYawnAt =
+      self->m_charging ? now + randomBetween(kYawnNextMinMs, kYawnNextMaxMs) : 0;
+  self->m_nextBlinkAt =
+      now + randomBetween(CFG_ELF_BLINK_MIN_MS, CFG_ELF_BLINK_MAX_MS);
+  self->m_nextGazeAt =
+      now + randomBetween(CFG_ELF_GAZE_MIN_MS, CFG_ELF_GAZE_MAX_MS);
+  CFG_LOG("[ELF] yawn end");
+}
+
+void ElfOverlay::onSquintDone(lv_anim_t* anim) {
+  auto* self = static_cast<ElfOverlay*>(anim->var);
+  if (self == nullptr || self->m_state != State::Squint) {
+    return;
+  }
+  self->m_state = State::Idle;
+  const uint32_t now = millis();
+  self->m_nextBlinkAt =
+      now + randomBetween(CFG_ELF_BLINK_MIN_MS, CFG_ELF_BLINK_MAX_MS);
+  self->m_nextGazeAt =
+      now + randomBetween(CFG_ELF_GAZE_MIN_MS, CFG_ELF_GAZE_MAX_MS);
+  CFG_LOG("[ELF] squint end");
+}
+
 #else  // CFG_ELF_ENABLE == 0
 
 void ElfOverlay::begin() {}
@@ -726,5 +962,6 @@ void ElfOverlay::hide() {}
 void ElfOverlay::lookAt(int16_t, int16_t) {}
 void ElfOverlay::touchEnd() {}
 void ElfOverlay::poke(int16_t, int16_t) {}
+void ElfOverlay::setVehicleState(float, bool, bool) {}
 
 #endif  // CFG_ELF_ENABLE

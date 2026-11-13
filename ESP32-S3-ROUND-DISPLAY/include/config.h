@@ -104,7 +104,7 @@
 #define CFG_ELF_SWIPE_PX 60          // 横向滑动触发距离
 #define CFG_ELF_DOMINANCE_PX 16      // 横向需领先纵向的幅度（与亮度手势共用）
 #define CFG_ELF_TAP_PX 12            // 位移小于此值算轻点
-#define CFG_ELF_AUTO_HIDE_MS 45000UL // 无交互自动隐藏
+#define CFG_ELF_AUTO_HIDE_MS 0UL     // 无交互自动隐藏；0 = 常亮不自动退出
 #define CFG_ELF_SLEEP_MS 20000UL     // 进入困倦
 #define CFG_ELF_SLEEP_DEEP_MS 30000UL
 #define CFG_ELF_BLINK_MIN_MS 2400UL
