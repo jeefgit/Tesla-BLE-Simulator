@@ -66,7 +66,7 @@ stateDiagram-v2
     Yawning --> Idle: 慢闭 500ms + 停 400ms + 慢睁 500ms
     Idle --> Squint: 急减速（一次采样降 ≥10 km/h）
     Squint --> Idle: 600ms
-    Idle --> Sleepy: 20s 无交互
+    Idle --> Sleepy: 20s 无交互（行驶中不进入）
     Sleepy --> Idle: 轻点 / 触摸
     Sleepy --> Sleeping: 再 10s
     Sleeping --> Idle: 轻点 / 触摸
@@ -197,10 +197,10 @@ stateDiagram-v2
 | **追随手指** | 触摸移动 | 目标 = 手指位置换算的偏移，限幅；80ms 跟随 | 直接 `lv_obj_set_pos()`，不做动画 |
 | **呼吸** | 常驻（可见时） | 身体容器 y ±12px，周期 6s，ease_in_out | `lv_anim` repeat_infinite，兼做防烧屏漂移；黑底与装饰弧不动 |
 | **开心（Happy）** | 轻点 | 连眨 2 次 + 瞳孔 74→82 + 腮红 12%→30%，600ms | 组合动画 |
-| **困倦（Sleepy）** | 20s 无交互 | 眼高 150 → 86，瞳孔下移 +8，呼吸周期 6s→9s | 状态切换 + 慢动画 |
+| **困倦（Sleepy）** | 20s 无交互且未行驶 | 眼高 150 → 86，瞳孔下移 +8，呼吸周期 6s→9s | 状态切换 + 慢动画 |
 | **入睡（Sleeping）** | 再 10s | 眼高 → 46，显示 `z z z` 呼吸闪烁 | `lv_label` 三个字符，250ms 周期 |
 | **打哈欠（Yawning）** | 充电中每 12–20s | 慢闭 500ms / 停 400ms / 慢睁 500ms，露出嘴 | 状态切换 + 三段 `lv_anim` |
-| **车速瞳孔** | 车速 60–140 km/h | 瞳孔 74 → 84，400ms ease_out | `lv_anim` 改瞳孔尺寸；Happy 结束后回到当前基准 |
+| **车速瞳孔** | 车速 20–100 km/h | 瞳孔 74 → 86，300ms ease_out | `lv_anim` 改瞳孔尺寸；Happy 结束后回到当前基准 |
 | **急减速眯眼（Squint）** | 一次采样降 ≥10 km/h | 眼高 → 62，眯 600ms，2s 冷却 | 状态切换 + `lv_anim` |
 | **自动隐藏** | 默认关闭（`CFG_ELF_AUTO_HIDE_MS=0`） | 走 Hiding | 内部 `lv_timer` 计时；设为 45000 可恢复 |
 
@@ -427,7 +427,8 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 > 实现要点：
 > - `DashboardApp::loop()` 每轮调用 `setVehicleState(m_model.speedKmh, m_model.speedValid, m_model.charging)`；BLE 轮询在显示期间保持，因此充电/车速联动是实时的。
 > - 充电上升沿后 3–6s 第一次打哈欠，之后每 12–20s 一次；慢闭 500ms、停 400ms、慢睁 500ms，嘴变亮，结束回 Idle。拔掉充电立即取消排期。
-> - 车速瞳孔：60 km/h 起从 74 线性放大，140 km/h 到 84，400ms 平滑过渡；Happy 临时放大到 82，结束后回到当前车速基准。
+> - 车速瞳孔：20 km/h 起从 74 线性放大，100 km/h 到 86，300ms 平滑过渡；Happy 临时放大到 82，结束后回到当前车速基准。
+> - 行驶中（车速 ≥5 km/h）持续刷新交互计时，不会进入 Sleepy/Sleeping；已在睡眠中的会立即唤醒。
 > - 急减速：同一次采样（≤450ms）降幅 ≥10 km/h 且处于 Idle → 眯眼（眼高 62）600ms，2s 冷却。
 > - 耳朵/尾巴：2 个 52px 圆 + 3 个 18/22/26px 圆，颜色 `#2A5A68`、不透明度约 78%，挂在 `m_body` 且位于眼睛之前，随呼吸一起漂移。
 > - 嘴：`#9FB4C4`，常态 120、Happy/哈欠 235，不再隐藏。
@@ -452,7 +453,7 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 2. **自动隐藏时长**：已改为默认关闭（`CFG_ELF_AUTO_HIDE_MS = 0`），需要时设 45000。
 3. **是否需要身体**：已定——只加低对比度耳朵/尾巴剪影，不做完整身体，避免抢眼睛。
 4. **是否要声音**：本期静音；若后续加“摸头音效”，需要评估 I2S 与 BLE 的共存。
-5. **是否联动车辆状态**：已实现充电打哈欠、车速瞳孔、急减速眯眼（本地实时数据，不联网）。
+5. **是否联动车辆状态**：已实现充电打哈欠、车速瞳孔、急减速眯眼、行驶中保持清醒（本地实时数据，不联网）。
 
 ---
 

@@ -41,11 +41,15 @@ constexpr int32_t kPupilSize = 74;
 constexpr int32_t kPupilHappySize = 82;
 constexpr int32_t kPupilInset = (kIrisSize - kPupilSize) / 2;  // 9
 
-// 阶段 4：车速越快瞳孔越大，60 km/h 开始、140 km/h 到顶（74 → 84）。
-constexpr int32_t kPupilSpeedMaxSize = 84;
-constexpr float kPupilSpeedStartKmh = 60.0f;
-constexpr float kPupilSpeedFullKmh = 140.0f;
-constexpr uint32_t kPupilAnimMs = 400;
+// 阶段 4：车速越快瞳孔越大。20 km/h 起、100 km/h 到顶（74 → 86），
+// 覆盖市区常用速度区间，变化更容易看出来。
+constexpr int32_t kPupilSpeedMaxSize = 86;
+constexpr float kPupilSpeedStartKmh = 20.0f;
+constexpr float kPupilSpeedFullKmh = 100.0f;
+constexpr uint32_t kPupilAnimMs = 300;
+
+// 车速高于此值视为“正在驾驶”：保持清醒，不进入困倦/睡眠。
+constexpr float kDrivingSpeedKmh = 5.0f;
 
 // 急减速眯眼：一次采样内降幅 ≥ 10 km/h 触发，眯 600ms，2s 冷却。
 constexpr int32_t kEyeSquintH = 62;
@@ -459,7 +463,7 @@ void ElfOverlay::setVehicleState(float speedKmh, bool speedValid,
     CFG_LOG("[ELF] charging %s", charging ? "on" : "off");
   }
 
-  // 车速瞳孔：60 km/h 起随速度平滑放大，140 km/h 到 84。
+  // 车速瞳孔：20 km/h 起随速度平滑放大，100 km/h 到 86。
   int32_t target = kPupilSize;
   if (speedValid) {
     float t = (speedKmh - kPupilSpeedStartKmh) /
@@ -473,14 +477,27 @@ void ElfOverlay::setVehicleState(float speedKmh, bool speedValid,
                               t * (kPupilSpeedMaxSize - kPupilSize) + 0.5f);
   }
   if (target != m_pupilBaseSize) {
+    const int32_t fromSize = lv_obj_get_width(m_pupil[0]);
     m_pupilBaseSize = target;
     lv_anim_delete(this, setPupilSize);
     if (m_state == State::Hidden) {
       setPupilSize(this, target);
     } else if (m_state != State::Hiding && m_state != State::Happy) {
       // Happy 期间不抢瞳孔动画，结束时自然回到新的基准值。
-      startAnim(this, setPupilSize, lv_obj_get_width(m_pupil[0]), target,
-                kPupilAnimMs, lv_anim_path_ease_out, nullptr);
+      startAnim(this, setPupilSize, fromSize, target, kPupilAnimMs,
+                lv_anim_path_ease_out, nullptr);
+    }
+    CFG_LOG("[ELF] pupil %d (speed %.0f)", static_cast<int>(target),
+            static_cast<double>(speedKmh));
+  }
+
+  // 行驶中保持清醒：车速只要超过阈值就视作持续交互，并唤醒已睡着的精灵。
+  if (speedValid && speedKmh >= kDrivingSpeedKmh) {
+    const bool wasAsleep =
+        m_state == State::Sleepy || m_state == State::Sleeping;
+    m_lastInteractionAt = now;
+    if (wasAsleep) {
+      wakeFromSleep();
     }
   }
 
