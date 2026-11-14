@@ -76,6 +76,7 @@ class ElfOverlay {
   static void setGazeX(void* var, int32_t x);
   static void setGazeY(void* var, int32_t y);
   static void setBodyY(void* var, int32_t y);
+  static void setBodyX(void* var, int32_t x);
   static void setPupilSize(void* var, int32_t size);
   static void setBlushOpa(void* var, int32_t opacity);
   static void setMouthOpa(void* var, int32_t opacity);

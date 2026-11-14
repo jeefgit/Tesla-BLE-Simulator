@@ -104,8 +104,11 @@ constexpr int32_t kBreathOffsetPx = 12;
 constexpr uint32_t kBreathHalfMs = 3000;
 constexpr uint32_t kBreathSleepyHalfMs = 4500;
 
-constexpr int32_t kGazeRangeX = 22;
-constexpr int32_t kGazeRangeY = 14;
+// 视线范围：左右 ±30、上下 ±22（虹膜会被眼球边缘自然裁切，形成“瞟”的感觉）。
+// 左右注视时身体额外平移 ±kGazeLeanX，放大整体位置变化。
+constexpr int32_t kGazeRangeX = 30;
+constexpr int32_t kGazeRangeY = 22;
+constexpr int32_t kGazeLeanX = 10;
 
 // "z z z" 三个字母的位置（挂在根容器上）。
 constexpr int32_t kZX[3] = {300, 330, 356};
@@ -283,6 +286,7 @@ void ElfOverlay::show() {
   lv_anim_delete(this, setEyeOpen);
   lv_anim_delete(this, setGazeX);
   lv_anim_delete(this, setGazeY);
+  lv_anim_delete(m_body, setBodyX);
   stopZzz();
   resetHappyVisuals();
   lv_obj_set_hidden(m_root, false);
@@ -303,6 +307,7 @@ void ElfOverlay::show() {
   if (currentH < kEyeClosedH) {
     currentH = kEyeClosedH;
   }
+  lv_obj_set_x(m_body, 0);
   setEyeOpen(this, currentH);
   startBreathing(kBreathHalfMs);
   animateEyes(currentH, kEyeH, kWakeMs, lv_anim_path_ease_out, onWakeDone);
@@ -385,6 +390,10 @@ void ElfOverlay::startGaze() {
             nullptr);
   startAnim(this, setGazeY, fromY, targetY, kGazeMs, lv_anim_path_ease_out,
             nullptr);
+  // 整个身体跟着视线轻晃，放大可见的左右位移。
+  const int32_t leanX = offsetX * kGazeLeanX / kGazeRangeX;
+  startAnim(m_body, setBodyX, lv_obj_get_x(m_body), leanX, kGazeMs,
+            lv_anim_path_ease_out, nullptr);
 
   m_nextGazeAt = millis() + randomBetween(CFG_ELF_GAZE_MIN_MS,
                                           CFG_ELF_GAZE_MAX_MS);
@@ -415,6 +424,11 @@ void ElfOverlay::lookAt(int16_t screenX, int16_t screenY) {
   lv_anim_delete(this, setGazeY);
   setGazeX(this, kIrisInset + offsetX);
   setGazeY(this, kIrisY + offsetY);
+
+  lv_anim_delete(m_body, setBodyX);
+  setBodyX(m_body,
+           clampInt(dx * kGazeLeanX / (kScreenSize / 2), -kGazeLeanX,
+                    kGazeLeanX));
 }
 
 void ElfOverlay::touchEnd() {
@@ -533,6 +547,9 @@ void ElfOverlay::enterSleepy() {
   animateEyes(currentH, kEyeSleepyH, 400, lv_anim_path_ease_in_out, nullptr);
   startAnim(this, setGazeY, lv_obj_get_y(m_iris[0]),
             kIrisY + kSleepyIrisDrop, 500, lv_anim_path_ease_out, nullptr);
+  lv_anim_delete(m_body, setBodyX);
+  startAnim(m_body, setBodyX, lv_obj_get_x(m_body), 0, 400,
+            lv_anim_path_ease_out, nullptr);
   startBreathing(kBreathSleepyHalfMs);
   CFG_LOG("[ELF] sleepy");
 }
@@ -564,6 +581,9 @@ void ElfOverlay::wakeFromSleep() {
   const int32_t currentH = lv_obj_get_height(m_eye[0]);
   animateEyes(currentH, kEyeH, 300, lv_anim_path_ease_out, nullptr);
   startAnim(this, setGazeY, lv_obj_get_y(m_iris[0]), kIrisY, 300,
+            lv_anim_path_ease_out, nullptr);
+  lv_anim_delete(m_body, setBodyX);
+  startAnim(m_body, setBodyX, lv_obj_get_x(m_body), 0, 300,
             lv_anim_path_ease_out, nullptr);
   startBreathing(kBreathHalfMs);
 
@@ -827,6 +847,10 @@ void ElfOverlay::setBodyY(void* var, int32_t y) {
   lv_obj_set_y(static_cast<lv_obj_t*>(var), y);
 }
 
+void ElfOverlay::setBodyX(void* var, int32_t x) {
+  lv_obj_set_x(static_cast<lv_obj_t*>(var), x);
+}
+
 void ElfOverlay::setPupilSize(void* var, int32_t size) {
   auto* self = static_cast<ElfOverlay*>(var);
   if (self == nullptr) {
@@ -893,6 +917,8 @@ void ElfOverlay::onHideDone(lv_anim_t* anim) {
   self->m_state = State::Hidden;
   self->m_blinkPhase = BlinkPhase::None;
   self->stopBreathing();
+  lv_anim_delete(self->m_body, setBodyX);
+  lv_obj_set_x(self->m_body, 0);
   lv_obj_set_hidden(self->m_root, true);
 }
 
