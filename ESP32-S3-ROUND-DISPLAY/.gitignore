@@ -1,7 +1,8 @@
 .pio/
 .vscode/
 .idea/
-include/secrets/
+include/secrets/*
+!include/secrets/tesla_client_key.h
 *.log
 *.elf
 *.bin
