@@ -169,8 +169,9 @@ constexpr uint8_t kAuraSoundMaxOpa = 77;   // 上限 30%
 constexpr uint32_t kAuraAmbientPeriodMs = 3200;
 constexpr int32_t kAuraAmbientPulseOpa = 8;
 constexpr uint8_t kMusicBubblesPerBeat = 4;
-constexpr int32_t kMusicBubbleMinSize = 7;
-constexpr int32_t kMusicBubbleMaxSize = 15;
+constexpr int32_t kMusicBubbleMinSize = 14;
+constexpr int32_t kMusicBubbleMaxSize = 30;
+constexpr int32_t kMusicBubbleGrowthPx = 8;
 
 int32_t randomBetween(int32_t low, int32_t high) {
   if (high <= low) {
@@ -409,7 +410,7 @@ void ElfOverlay::updateMusicBubbles(uint32_t now) {
         sinf(progress * 6.2831853f + i * 0.7f) * 12.0f;
     const int32_t size =
         m_bubbleBaseSize[i] +
-        static_cast<int32_t>(4.0f * rise + 0.5f);
+        static_cast<int32_t>(kMusicBubbleGrowthPx * rise + 0.5f);
     const int32_t x = m_bubbleStartX[i] +
                       static_cast<int32_t>(lroundf(drift)) - size / 2;
     const int32_t y = m_bubbleStartY[i] -
