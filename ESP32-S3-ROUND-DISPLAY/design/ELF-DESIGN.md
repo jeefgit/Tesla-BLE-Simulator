@@ -370,7 +370,7 @@ class SoundSensor {
 | `include/audio/SoundSensor.h` | 新增：I2S/ES7210 初始化、采集任务、节拍/BPM 特征输出 |
 | `src/audio/SoundSensor.cpp` | 新增：ES7210 寄存器初始化 + `driver/i2s_tdm.h` 接收 + 能量/鼓点分析 |
 | `include/ui/ElfOverlay.h` | 新增 `setSoundFrame(const SoundFrame&)`、声音子状态、包络变量、`updatePupilTarget()` |
-| `src/ui/ElfOverlay.cpp` | 新增 `applySound()`，30ms 声音动画 tick；Grooving 时停呼吸、接管 body/pupil；退出后恢复 |
+| `src/ui/ElfOverlay.cpp` | 新增 `applySoundVisuals()`，30ms 声音动画 tick；Grooving 时平滑接管呼吸、驱动 body/pupil；退出后恢复 |
 | `include/config.h` | 新增 `CFG_ELF_*` 开关与阈值、`CFG_ELF_SOUND_*` 参数 |
 | `README.md` | 增加一节“离线小精灵”与本文链接（可选，建议加） |
 
@@ -510,6 +510,7 @@ if (m_elf.visible()) {
 #define CFG_ELF_SOUND_BEAT_MAX_BPM 200
 #define CFG_ELF_SOUND_BEAT_REFRACTORY_MS 200UL  // 两拍最小间隔
 #define CFG_ELF_SOUND_BEAT_CONFIRM 2     // 1.2s 内至少几拍才进 Grooving
+#define CFG_ELF_SOUND_MIN_CONFIDENCE 80  // 进入 Grooving 的最低节拍置信度（0–255）
 #define CFG_ELF_SOUND_GROOVE_HOLD_MS 1600UL     // 无拍后保持律动的时间
 #define CFG_ELF_SOUND_BOUNCE_PX 12       // 弹跳最大行程
 #define CFG_ELF_SOUND_SWAY_PX 9          // 摇摆最大行程

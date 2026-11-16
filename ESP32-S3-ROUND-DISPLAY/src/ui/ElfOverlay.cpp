@@ -1040,10 +1040,13 @@ void ElfOverlay::handleSoundBeat(uint32_t now) {
         static_cast<int32_t>(now - m_soundYieldUntil) >= 0) {
       m_nextBlinkAt = now;
     }
-    // 每 8 拍或快歌：本拍 g 临时 ×1.3，并让下一拍眨眼连眨两下。
-    if ((m_beatInGroove % 8) == 0 || m_bpm > 150) {
+    const bool everyEighthBeat = (m_beatInGroove % 8) == 0;
+    // 每 8 拍或快歌：本拍 g 临时 ×1.3；快歌每 4 拍最多强制连眨一次。
+    if (everyEighthBeat || m_bpm > 150) {
       m_grooveBoostUntil = now + kGrooveBoostMs;
-      m_forceDoubleBlink = true;
+      if (everyEighthBeat || (m_beatInGroove % 4) == 0) {
+        m_forceDoubleBlink = true;
+      }
     }
   }
 #endif
@@ -1061,15 +1064,10 @@ void ElfOverlay::enterGroove(uint32_t now) {
   m_soundGazeX = static_cast<float>(lv_obj_get_x(m_iris[0]));
   m_soundGazeY = static_cast<float>(lv_obj_get_y(m_iris[0]));
   m_soundSwayDir = 1;
-  // 接管 m_body.y：停掉呼吸和随机注视，防止两套动画同写。
+  // 删除随机注视动画；呼吸由 applySoundVisuals() 首次接管时平滑收尾。
   lv_anim_delete(this, setGazeX);
   lv_anim_delete(this, setGazeY);
   lv_anim_delete(m_body, setBodyX);
-  if (!m_soundBreathStopped &&
-      (m_state == State::Idle || m_state == State::Blinking)) {
-    stopBreathing();
-    m_soundBreathStopped = true;
-  }
   CFG_LOG("[ELF] sound groove (bpm=%u level=%u)",
           static_cast<unsigned>(m_bpm), static_cast<unsigned>(m_level));
 #endif
@@ -1081,6 +1079,7 @@ void ElfOverlay::resetSoundState() {
   m_pendingBeat = false;
   m_forceDoubleBlink = false;
   m_pulse = 0.0f;
+  m_soundYOffset = 0.0f;
   m_g = 0.0f;
   m_grooveW = 0.0f;
   m_soundBodyX = 0.0f;
@@ -1131,6 +1130,7 @@ void ElfOverlay::resetSoundVisuals(bool animate) {
       static_cast<int32_t>(millis() - m_soundYieldUntil) < 0;
   m_grooveW = 0.0f;
   m_soundBodyX = 0.0f;
+  m_soundYOffset = 0.0f;
   m_soundVisApplied = false;
 
   // 腮红 / 瞳孔 / 光环无论当前主状态如何都恢复基准，避免残留声音亮度。
@@ -1245,7 +1245,8 @@ void ElfOverlay::updateSoundState(uint32_t now) {
                 static_cast<unsigned>(m_level));
         break;
       }
-      if (m_beatsInWindow >= CFG_ELF_SOUND_BEAT_CONFIRM && bpmOk) {
+      if (m_beatsInWindow >= CFG_ELF_SOUND_BEAT_CONFIRM && bpmOk &&
+          m_confidence >= CFG_ELF_SOUND_MIN_CONFIDENCE) {
         enterGroove(now);
       }
       break;
@@ -1276,6 +1277,7 @@ void ElfOverlay::applySoundVisuals(uint32_t now, uint32_t dt) {
     m_soundVisApplied = false;
     m_soundTintApplied = false;
     m_soundBreathStopped = false;
+    m_soundYOffset = 0.0f;
     return;
   }
 
@@ -1331,9 +1333,16 @@ void ElfOverlay::applySoundVisuals(uint32_t now, uint32_t dt) {
   if (grooveOwns) {
     m_soundVisApplied = true;
     if (!m_soundBreathStopped) {
+      m_soundYOffset = static_cast<float>(lv_obj_get_y(m_body));
       stopBreathing();
       m_soundBreathStopped = true;
-      m_lastBodyY = 0;
+      m_lastBodyY = -10000;
+    }
+  }
+  if (m_soundYOffset != 0.0f) {
+    m_soundYOffset *= expf(-static_cast<float>(dt) / 95.0f);
+    if (fabsf(m_soundYOffset) < 0.5f) {
+      m_soundYOffset = 0.0f;
     }
   }
 
@@ -1343,27 +1352,37 @@ void ElfOverlay::applySoundVisuals(uint32_t now, uint32_t dt) {
   }
 
   // 身体：y = 呼吸基准(0) − 弹跳；x = 拍点换向的摇摆。
-  if (grooveOwns && !yield) {
-    const int32_t wantY = -static_cast<int32_t>(
-        (4.0f + static_cast<float>(CFG_ELF_SOUND_BOUNCE_PX - 4) * m_g) *
-            m_pulse * m_grooveW + 0.5f);
+  if (grooveOwns) {
+    const int32_t bounce =
+        yield ? 0 : static_cast<int32_t>(
+                         (4.0f +
+                          static_cast<float>(CFG_ELF_SOUND_BOUNCE_PX - 4) *
+                              m_g) *
+                             m_pulse * m_grooveW +
+                         0.5f);
+    const int32_t wantY =
+        -bounce + static_cast<int32_t>(lroundf(m_soundYOffset));
     if (wantY != m_lastBodyY) {
       setBodyY(m_body, wantY);
       m_lastBodyY = wantY;
     }
-    const float targetX = static_cast<float>(m_soundSwayDir) *
-                          (4.0f + static_cast<float>(CFG_ELF_SOUND_SWAY_PX - 4) *
-                                      m_g) *
-                          m_grooveW;
-    m_soundBodyX += (targetX - m_soundBodyX) * sx;
-    const int32_t wantX =
-        static_cast<int32_t>(m_soundBodyX >= 0.0f ? m_soundBodyX + 0.5f
-                                                  : m_soundBodyX - 0.5f);
-    if (wantX != m_lastBodyX) {
-      setBodyX(m_body, wantX);
-      m_lastBodyX = wantX;
+    if (!yield) {
+      const float targetX = static_cast<float>(m_soundSwayDir) *
+                            (4.0f +
+                             static_cast<float>(CFG_ELF_SOUND_SWAY_PX - 4) *
+                                 m_g) *
+                            m_grooveW;
+      m_soundBodyX += (targetX - m_soundBodyX) * sx;
+      const int32_t wantX =
+          static_cast<int32_t>(m_soundBodyX >= 0.0f ? m_soundBodyX + 0.5f
+                                                    : m_soundBodyX - 0.5f);
+      if (wantX != m_lastBodyX) {
+        setBodyX(m_body, wantX);
+        m_lastBodyX = wantX;
+      }
     }
-  } else if (yield) {
+  }
+  if (yield) {
     // 让位期间跟随触摸写入的实际值，600ms 后恢复时不跳变。
     m_soundBodyX = static_cast<float>(lv_obj_get_x(m_body));
     m_lastBodyX = lv_obj_get_x(m_body);

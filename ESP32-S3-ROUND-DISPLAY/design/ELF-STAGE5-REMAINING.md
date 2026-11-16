@@ -1,19 +1,19 @@
 # 阶段 5「声音律动」遗留问题清单
 
 > 生成时间：2026-11-16
-> 来源：阶段 5 代码整合后的主 agent 静态审查
-> 目标：交给另一个 agent 继续处理。**先读本文再动手**，不要回滚已有实现。
+> 来源：阶段 5 代码整合后的静态审查，后续代码处理状态已更新
+> 目标：跟踪代码修复与实机验收；不要回滚已有实现。
 > 相关设计：`design/ELF-DESIGN.md`（阶段 5 章节）
 
 ---
 
 ## 0. 当前状态
 
-- 阶段 5 代码已全部写入工作区，**未提交 git**。
+- 阶段 5 初版已提交（`bf123cd 阶段5`）；本次遗留项修复在工作区，**未提交 git**。
 - **未编译、未烧录**（工程约定：不要运行 `pio run`）。
 - `design/ELF-DESIGN.md` 已更新：5.1–5.4、5.6 打勾；**5.0（麦克风点亮）、5.5（调参与回归）待实机**。
-- 本次审查未发现明确的编译级错误（宏、I2S TDM API、头文件声明均已核对）。
-- 已知存在一个**尚未接线**的成员：`include/ui/ElfOverlay.h` 中的 `float m_soundYOffset = 0.0f;`，见 P1-1。
+- P1 的 9 项代码改进和 P2 文档修正已完成，仍需按下方验收条件验证。
+- `CFG_ELF_SOUND_MIN_CONFIDENCE` 已同步加入配置与设计文档。
 
 ### 涉及文件
 
@@ -54,91 +54,26 @@
 
 ---
 
-## P1：代码层面待改进（本次重点）
+## P1：代码层面改进（已实现，待验收）
 
-### P1-1 进入 Grooving 时 `body.y` 瞬跳
-
-- 位置：`src/ui/ElfOverlay.cpp`
-  - `ElfOverlay::enterGroove()`（约 1052–1076 行）
-  - `ElfOverlay::applySoundVisuals()` 的 `grooveOwns` 分支（约 1330–1374 行）
-- 现象：`stopBreathing()` 内部 `lv_obj_set_y(m_body, 0)`，而呼吸在 `+22 ↔ −22` 之间；进入律动时 `grooveW` 从 0 开始，等效于最多约 **44px 的瞬时跳变**。
-- 已做的准备：`include/ui/ElfOverlay.h` 已加入 `float m_soundYOffset = 0.0f;`，**尚未使用**。
-- 建议实现（不改结构、不加动画对象）：
-  1. `enterGroove()` 里不再直接 `stopBreathing()`，交给 `applySoundVisuals()` 在同一 tick 统一接管。
-  2. 在 `applySoundVisuals()` 首次发现 `!m_soundBreathStopped` 时：
-     - `m_soundYOffset = lv_obj_get_y(m_body);`
-     - `stopBreathing(); m_soundBreathStopped = true; m_lastBodyY = -10000;`
-  3. 每次 tick 对 `m_soundYOffset` 做指数衰减（时间常数约 90–100ms，`expf(-dt/90)`，< 0.5px 归零）。
-  4. `wantY = 弹跳值 + lroundf(m_soundYOffset)`，再走现有 `m_lastBodyY` 缓存写入。
-  5. `resetSoundState()`、`resetSoundVisuals()`、`applySoundVisuals()` 的 `!allowed` 分支里把 `m_soundYOffset = 0.0f`。
-- 验收：进入律动时眼睛/身体无可见跳动；退出律动仍由 `resumeBreathing()` 350ms 平滑回 `+22`。
-
-### P1-2 触摸让位期间身体 y 冻结
-
-- 位置：`src/ui/ElfOverlay.cpp` `applySoundVisuals()` 的 `yield` 分支（约 1366–1374 行）。
-- 现象：`m_soundYieldUntil` 期间呼吸已停、声音层又跳过 y 写入，身体停在最后一帧弹跳位置（可到 −12px），松手后突然继续。
-- 建议：让位期间让 `m_soundYOffset` 继续衰减（并把弹跳 `m_pulse` 也按 `dt` 衰减），或在 `yield` 分支里把 y 平滑回 0；触摸仍保持最高优先级（不写 `m_body.x`、不写虹膜）。
-- 验收：按住小精灵 1s 再松手，身体无冻结/突跳，600ms 后律动自然恢复。
-
-### P1-3 `SoundSensor::stop()` 最坏阻塞约 300ms
-
-- 位置：`src/audio/SoundSensor.cpp` `SoundSensor::stop()`（约 614–648 行）。
-- 现象：200ms 等任务 + 100ms 收尾，都在 `DashboardApp::loop()` 主任务里 `vTaskDelay`；偶发会让 LVGL/BLE 卡一下。
-- 建议（二选一，保持简单）：
-  - 缩短第一段等待（例如 40×2ms），并在超时后直接 `i2s_channel_disable()` 让阻塞 read 立刻返回；
-  - 或把「停止音频」放到独立的一次性收尾流程，`loop()` 只发起、不等待（不要新增长期任务）。
-- 验收：反复呼出/隐藏小精灵 20 次，隐藏动画无卡顿，下一次呼出仍能起声音。
-
-### P1-4 音频任务退出/重启竞态
-
-- 位置：`src/audio/SoundSensor.cpp` `start()`（约 572–612 行）、`audioTask()`（约 502–534 行）。
-- 现象：
-  - `start()` 发现 `s.task != nullptr` 直接返回 false，而 `DashboardApp` 的 `m_soundStartFailed` 要等隐藏再显示才清零 → 本次呼出可能一直没声音。
-  - `audioTask()` 末尾 `s.task = nullptr; vTaskDelete(nullptr);` 与 `start()` 的检查存在极窄窗口。
-- 建议：`start()` 在发现残留任务时，先 `i2s_channel_disable()` 再短暂等待（复用 P1-3 的短等待），确认退出后再创建；仍失败则允许下一次可见性上升沿重试（例如把 `m_soundStartFailed` 改为「本次可见期间最多重试 N 次」）。
-- 验收：快速开关小精灵（1s 内多次），声音能稳定恢复，不出现双任务/日志 "previous task still running" 持续刷。
-
-### P1-5 快歌连眨过密
-
-- 位置：`src/ui/ElfOverlay.cpp` `handleSoundBeat()`（约 1022–1050 行）。
-- 现象：`bpm > 150` 时每一拍都 `m_forceDoubleBlink = true`，眨眼显得抽搐。
-- 建议：改成「连眨冷却」——记录上次强制连眨时间，例如 1.2s 内最多一次；或只在 `m_beatInGroove % 4 == 0` 时允许。
-- 验收：150 BPM 以上音乐，眨眼节奏自然，不连成一片。
-
-### P1-6 `confidence` 未参与判定
-
-- 位置：`src/ui/ElfOverlay.cpp` `updateSoundState()`（约 1192–1262 行）；`m_confidence` 仅存值未用。
-- 现象：Grooving 只看 `m_beatsInWindow >= 2` 且 BPM 在 60–200，环境噪声/拍手可能误进律动。
-- 建议：在进入 Grooving 的条件里加上 `m_confidence >= 阈值`（例如 80/255，写成宏或常量），或至少用它压制「BPM 刚出现但极不稳定」的情况。注意 `SoundSensor` 在 `ioiCount < 3` 时固定给 60，阈值要兼容。
-- 验收：静音/噪声下不误进 Grooving；稳定节拍器仍能进。
-
-### P1-7 `begin()` 的 `static attempted` 不可重试
-
-- 位置：`src/audio/SoundSensor.cpp` `SoundSensor::begin()`（约 538–570 行）。
-- 现象：首次 ES7210 初始化失败后，本次开机永久不重试。若 ES7210 上电晚于 MCU（供电时序）则只能重启。
-- 建议：保留「不反复刷日志」，但允许间隔重试（例如失败后记时间戳，≥5s 才允许再试一次，最多 N 次），或在 `DashboardApp` 里明确「本次开机不再重试」的行为与日志。
-- 验收：模拟首次失败（可临时改 0x40）后不刷屏；真实成功后能恢复。
-
-### P1-8 隐藏后旧任务可能补写一帧
-
-- 位置：`src/audio/SoundSensor.cpp` `SoundSensor::stop()` 末尾与 `analyzeTick()` 发布快照。
-- 现象：`stop()` 清空 frame 后，未退出的任务理论上还能再写一帧；因 `ElfOverlay::setSoundFrame()` 在 Hidden/Hiding 直接 return，无视觉影响。
-- 建议：低优先级。可在 `SoundSensor::read()`/`stop()` 后加 `m_running` 判断或 generation 计数；若 P1-3/P1-4 修好可忽略。
-
-### P1-9 I2S 读超时与 16ms 节拍
-
-- 位置：`src/audio/SoundSensor.cpp` `audioTask()`（`i2s_channel_read(..., 30)`）。
-- 现象：偶发 30ms 超时会丢弃一个 tick，使 onset/BPM 抖动。
-- 建议：超时时不要直接 `continue` 丢弃整块，可累计统计并打日志（限频）；确认 DMA `dma_desc_num=4 × dma_frame_num=256` 足够。
+- [x] **P1-1 呼吸接管平滑**：`enterGroove()` 不再直接停呼吸；声音层捕获当前 y 并以约 95ms 时间常数衰减残余偏移，退出时仍平滑恢复呼吸。验证进入/退出 Grooving 时眼睛与身体无可见跳变。
+- [x] **P1-2 触摸让位平滑**：让位期间弹跳归零、y 偏移继续衰减；仍不写 `body.x` 和虹膜。按住小精灵 1s 再松开，检查无冻结/突跳且律动恢复自然。
+- [x] **P1-3 停止阻塞缩短**：先禁用 I2S 解除阻塞读取，再最多等待 40×2ms；反复呼出/隐藏 20 次，检查动画/BLE 无卡顿且可再次采集。
+- [x] **P1-4 任务退出/重启处理**：发现残留任务时禁用 I2S 并等待其退出，避免创建并行采集任务；快速开关小精灵，确认恢复稳定且无持续的旧任务日志。
+- [x] **P1-5 快歌连眨节流**：快歌每 4 拍最多强制连眨一次；用 150 BPM 以上节拍验证眨眼自然。
+- [x] **P1-6 置信度门限**：进入 Grooving 需达到 `CFG_ELF_SOUND_MIN_CONFIDENCE=80`；验证静音/噪声不误触发、稳定节拍可进入。
+- [x] **P1-7 ES7210 初始化重试**：失败后间隔 5s，最多 5 次；初始化仅在失败时有限重试，确认启动无重试刷屏且供电就绪后可恢复。
+- [x] **P1-8 停止后的快照保护**：以 generation 校验阻止旧任务在 stop 清空后补写快照；快速停止/重启时检查读取数据不串代。
+- [x] **P1-9 I2S 短读/超时处理**：对帧对齐的部分数据仍做本 tick 分析；读错误累计并限频记录。实机验证 16ms 分析节拍与 DMA 缓冲稳定性。
 
 ---
 
 ## P2：文档 / 注释小瑕疵
 
-- [ ] `design/ELF-DESIGN.md` §5.2 写的是 `applySound()`，实现名为 `applySoundVisuals()`，统一命名。
-- [ ] `include/ui/ElfOverlay.h` 顶部注释仍写「阶段 4」，补一句阶段 5 声音层。
-- [ ] `design/ELF-DESIGN.md` 阶段 5 清单中 **5.0 / 5.5 保持未勾**（等实机），不要提前打勾。
-- [ ] 确认 `CFG_ELF_SOUND_*` 在 `config.h` 与文档 §5.6 完全一致（当前一致，改参数时两处同步）。
+- [x] `design/ELF-DESIGN.md` §5.2 已统一为 `applySoundVisuals()`。
+- [x] `include/ui/ElfOverlay.h` 顶部注释已注明阶段 5 声音层。
+- [x] `design/ELF-DESIGN.md` 阶段 5 清单中的 **5.0 / 5.5 仍未勾**（需实机验收）。
+- [x] `CFG_ELF_SOUND_*` 参数已在 `config.h` 与设计文档 §5.6 同步。
 
 ---
 

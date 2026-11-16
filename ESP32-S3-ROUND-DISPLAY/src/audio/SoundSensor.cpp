@@ -50,6 +50,8 @@ constexpr float kOnsetThreshold = 0.6f;
 constexpr uint32_t kWarmupMs = 3000UL;
 constexpr uint32_t kDiscardTicks = 8;  // 约 130ms，等偏置/高通稳定
 constexpr uint32_t kBpmSwitchMs = 1000UL;
+constexpr uint32_t kBeginRetryMs = 5000UL;
+constexpr uint8_t kMaxBeginAttempts = 5;
 constexpr uint16_t kIoiMinMs = 200;   // 与不应期一致，再靠折叠落到 60–200
 constexpr uint16_t kIoiMaxMs = 1200;
 
@@ -108,6 +110,11 @@ struct Impl {
   i2s_chan_handle_t rx = nullptr;
   TaskHandle_t task = nullptr;
   volatile bool taskRun = false;
+  uint32_t generation = 0;
+  uint32_t lastBeginAttemptMs = 0;
+  uint32_t readFailureCount = 0;
+  uint32_t lastReadFailureLogMs = 0;
+  uint8_t beginAttempts = 0;
   uint8_t discardTicks = 0;
 
   // i2s_channel_read 要求缓冲 4 字节对齐。
@@ -382,7 +389,8 @@ void logSlots(const TickStats& t, uint32_t now, Impl& s) {
 }
 #endif
 
-void analyzeTick(Impl& s, const TickStats& t, uint32_t now) {
+void analyzeTick(Impl& s, const TickStats& t, uint32_t now,
+                 uint32_t generation) {
 #if CFG_ELF_SOUND_LOG
   logSlots(t, now, s);
 #endif
@@ -483,8 +491,10 @@ void analyzeTick(Impl& s, const TickStats& t, uint32_t now) {
 
   // 快照发布：只在临界区里写 8 字节，<10µs。
   portENTER_CRITICAL(&s.mux);
-  f.beat = newBeat || s.frame.beat;
-  s.frame = f;
+  if (generation == s.generation) {
+    f.beat = newBeat || s.frame.beat;
+    s.frame = f;
+  }
   portEXIT_CRITICAL(&s.mux);
 
 #if CFG_ELF_SOUND_LOG
@@ -503,30 +513,51 @@ void audioTask(void* arg) {
   (void)arg;
   Impl& s = g_impl;
   TickType_t lastWake = xTaskGetTickCount();
+  uint32_t generation;
+  portENTER_CRITICAL(&s.mux);
+  generation = s.generation;
+  portEXIT_CRITICAL(&s.mux);
 
   while (s.taskRun) {
     vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(CFG_ELF_SOUND_HOP_MS));
 
     TickStats tick;
-    bool readOk = true;
     for (size_t i = 0; i < kReadsPerTick; ++i) {
       size_t bytesRead = 0;
       const esp_err_t err = i2s_channel_read(s.rx, s.block, kBlockBytes,
                                              &bytesRead, 30);
+      constexpr size_t kFrameBytes = 4 * sizeof(int16_t);
+      if (bytesRead > 0 && bytesRead <= kBlockBytes &&
+          bytesRead % kFrameBytes == 0) {
+        accumulate(s, s.block, bytesRead / kFrameBytes, tick);
+      }
       if (err != ESP_OK || bytesRead != kBlockBytes) {
-        readOk = false;
+        ++s.readFailureCount;
+        const uint32_t now = millis();
+        if (now - s.lastReadFailureLogMs >= 5000UL) {
+          s.lastReadFailureLogMs = now;
+          if (err != ESP_OK) {
+            CFG_LOG("[AUDIO] i2s read failed: %s (%u total)",
+                    esp_err_to_name(err),
+                    static_cast<unsigned>(s.readFailureCount));
+          } else {
+            CFG_LOG("[AUDIO] i2s short read: %u/%u bytes (%u total)",
+                    static_cast<unsigned>(bytesRead),
+                    static_cast<unsigned>(kBlockBytes),
+                    static_cast<unsigned>(s.readFailureCount));
+          }
+        }
         break;
       }
-      accumulate(s, s.block, kFramesPerRead, tick);
     }
-    if (!readOk) continue;
+    if (tick.count == 0) continue;
 
     // 丢掉开头 8 帧，等 ES7210 偏置/高通稳定后再发布特征。
     if (s.discardTicks > 0) {
       --s.discardTicks;
       continue;
     }
-    analyzeTick(s, tick, millis());
+    analyzeTick(s, tick, millis(), generation);
   }
 
   s.task = nullptr;
@@ -537,10 +568,15 @@ void audioTask(void* arg) {
 
 bool SoundSensor::begin() {
   if (m_available) return true;
-  // 失败只打印一次、不重试；重新上电才会再试。
-  static bool attempted = false;
-  if (attempted) return false;
-  attempted = true;
+  Impl& s = g_impl;
+  const uint32_t now = millis();
+  if (s.beginAttempts >= kMaxBeginAttempts ||
+      (s.beginAttempts > 0 &&
+       now - s.lastBeginAttemptMs < kBeginRetryMs)) {
+    return false;
+  }
+  s.lastBeginAttemptMs = now;
+  ++s.beginAttempts;
 
   m_impl = &g_impl;
 
@@ -559,7 +595,12 @@ bool SoundSensor::begin() {
 
   i2s_chan_handle_t rx = ok ? initI2s() : nullptr;
   if (rx == nullptr) {
-    CFG_LOG("[AUDIO] init failed");
+    CFG_LOG("[AUDIO] init failed (attempt %u/%u)",
+            static_cast<unsigned>(s.beginAttempts),
+            static_cast<unsigned>(kMaxBeginAttempts));
+    if (s.beginAttempts == kMaxBeginAttempts) {
+      CFG_LOG("[AUDIO] init retry limit reached");
+    }
     return false;
   }
 
@@ -574,10 +615,22 @@ bool SoundSensor::start() {
   Impl& s = *static_cast<Impl*>(m_impl);
   if (m_running) return true;
   if (s.rx == nullptr) return false;
-  // 上一次 stop 超时、旧任务还没退干净时不要再建第二个任务。
+  // 上次 stop 超时后先关 I2S 并等待旧任务退出，不能并行启动第二个任务。
   if (s.task != nullptr) {
-    CFG_LOG("[AUDIO] previous task still running");
-    return false;
+    s.taskRun = false;
+    const esp_err_t disableErr = i2s_channel_disable(s.rx);
+    if (disableErr != ESP_OK && disableErr != ESP_ERR_INVALID_STATE) {
+      CFG_LOG("[AUDIO] i2s disable failed: %s",
+              esp_err_to_name(disableErr));
+    }
+    m_running = false;
+    for (int i = 0; i < 40 && s.task != nullptr; ++i) {
+      vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    if (s.task != nullptr) {
+      CFG_LOG("[AUDIO] previous task still running");
+      return false;
+    }
   }
 
   esp_err_t err = i2s_channel_enable(s.rx);
@@ -589,9 +642,12 @@ bool SoundSensor::start() {
   resetAnalysis(s);
   s.startMs = millis();
   s.lastNonZeroMs = s.startMs;
+  s.readFailureCount = 0;
+  s.lastReadFailureLogMs = s.startMs;
   s.discardTicks = static_cast<uint8_t>(kDiscardTicks);
 
   portENTER_CRITICAL(&s.mux);
+  ++s.generation;
   s.frame = SoundFrame{};
   portEXIT_CRITICAL(&s.mux);
 
@@ -615,17 +671,7 @@ void SoundSensor::stop() {
   if (m_impl == nullptr) return;
   Impl& s = *static_cast<Impl*>(m_impl);
 
-  // 先停任务（读阻塞最多 ~30ms），再关 I2S。
   s.taskRun = false;
-  for (int i = 0; i < 40 && s.task != nullptr; ++i) {
-    vTaskDelay(pdMS_TO_TICKS(5));
-  }
-  // 正常都会在几十 ms 内自己退出；超时也不强删（避免和任务自删竞争），
-  // 下一轮 disable I2S 会让阻塞的 read 立刻返回，任务随即退出。
-  if (s.task != nullptr) {
-    CFG_LOG("[AUDIO] task stop timeout");
-  }
-
   if (m_running && s.rx != nullptr) {
     const esp_err_t err = i2s_channel_disable(s.rx);
     if (err != ESP_OK) {
@@ -633,17 +679,17 @@ void SoundSensor::stop() {
     }
   }
   m_running = false;
-  // disable 后阻塞的 read 会返回，给任务最后 100ms 收尾。
-  for (int i = 0; i < 20 && s.task != nullptr; ++i) {
-    vTaskDelay(pdMS_TO_TICKS(5));
+  // 先禁用 I2S 释放阻塞 read，再短暂等待任务自删，避免主循环长时间卡住。
+  for (int i = 0; i < 40 && s.task != nullptr; ++i) {
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+  if (s.task != nullptr) {
+    CFG_LOG("[AUDIO] task stop timeout");
   }
 
   portENTER_CRITICAL(&s.mux);
-  s.frame.beat = false;
-  s.frame.level = 0;
-  s.frame.low = 0;
-  s.frame.bpm = 0;
-  s.frame.confidence = 0;
+  ++s.generation;
+  s.frame = SoundFrame{};
   portEXIT_CRITICAL(&s.mux);
 }
 

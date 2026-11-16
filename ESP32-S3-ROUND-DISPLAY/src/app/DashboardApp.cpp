@@ -111,8 +111,7 @@ void DashboardApp::begin() {
 
 #if CFG_ELF_SOUND_ENABLE
   // 麦克风放在最后：ES7210 挂在 15/14 的 Wire 总线上，必须等
-  // beginPowerButton() 的 Wire.begin() 之后才能初始化。失败只关闭声音
-  // 子状态，不重试、不阻塞启动流程，小精灵其余功能与仪表照常工作。
+  // beginPowerButton() 的 Wire.begin() 之后才能初始化。
   m_soundReady = m_sound.begin();
 #endif
 }
@@ -376,6 +375,10 @@ void DashboardApp::loop() {
   // BLE 轮询在小精灵显示期间照常进行，因此这些联动是实时的。
   m_elf.setVehicleState(m_model.speedKmh, m_model.speedValid, m_model.charging);
 #if CFG_ELF_SOUND_ENABLE
+  // 初始化失败时 SoundSensor 内部按 5s 间隔最多重试 5 次。
+  if (!m_soundReady) {
+    m_soundReady = m_sound.begin();
+  }
   // 声音采集只跟随可见性：上升沿启动一次，可见期间每轮读一帧快照
   // （read() 只拷贝，不清 beat 之外的状态，不阻塞 BLE 轮询），
   // 下降沿立即停 I2S 并喂空帧，让浮层马上回到 Off/静音视觉。

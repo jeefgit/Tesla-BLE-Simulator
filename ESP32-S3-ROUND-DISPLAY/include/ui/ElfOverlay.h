@@ -10,7 +10,7 @@
 // 对象树在 begin() 时一次性建好，之后只改属性；默认隐藏。
 // 由 DashboardApp 负责手势识别，本类内部用 50ms lv_timer 驱动状态机：
 // 眨眼、随机注视、呼吸漂移、触摸追随、开心反应、困倦/入睡、充电打哈欠、
-// 车速瞳孔/急减速眯眼（阶段 4）。
+// 车速瞳孔/急减速眯眼（阶段 4），声音律动层（阶段 5）。
 class ElfOverlay {
  public:
   // 在 active screen 上建对象；必须在 LvglDashboard::begin() 之后调用，

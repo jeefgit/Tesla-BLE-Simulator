@@ -64,10 +64,10 @@ class DashboardApp {
 #if CFG_ELF_SOUND_ENABLE
   // 声音采集只在小精灵可见时工作（阶段 5，见 ELF-DESIGN.md 5.10）。
   SoundSensor m_sound;
-  // begin() 是否成功：失败时声音子状态保持 Off，不尝试采集。
+  // begin() 是否成功：失败时按间隔有限重试，声音子状态保持 Off。
   bool m_soundReady = false;
   bool m_soundStarted = false;
-  // 本次可见期间 start() 已失败：不再每轮重试，避免反复申请/释放 I2S。
+  // 本次可见期间 start() 已失败：等隐藏后再试，避免反复申请/释放 I2S。
   bool m_soundStartFailed = false;
 #endif
   bool m_speedInitialized = false;
