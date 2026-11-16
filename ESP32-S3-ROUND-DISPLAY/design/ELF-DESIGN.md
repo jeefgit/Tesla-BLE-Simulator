@@ -504,17 +504,18 @@ if (m_elf.visible()) {
 #define CFG_ELF_SOUND_ENABLE 1           // 0 = 不初始化麦克风，完全沿用阶段 1–4
 #define CFG_ELF_SOUND_SAMPLE_RATE 16000  // ES7210 采样率
 #define CFG_ELF_SOUND_HOP_MS 16          // 特征帧移（分析窗口 32ms）
-#define CFG_ELF_SOUND_NOISE_GATE 10      // level 低于此值视为静音（0–255）
+#define CFG_ELF_SOUND_NOISE_GATE 8       // level 低于此值视为静音（0–255）
 #define CFG_ELF_SOUND_QUIET_MS 2000UL    // 静音多久回 Quiet
 #define CFG_ELF_SOUND_BEAT_MIN_BPM 60    // 有效节拍范围
 #define CFG_ELF_SOUND_BEAT_MAX_BPM 200
 #define CFG_ELF_SOUND_BEAT_REFRACTORY_MS 200UL  // 两拍最小间隔
 #define CFG_ELF_SOUND_BEAT_CONFIRM 2     // 1.2s 内至少几拍才进 Grooving
 #define CFG_ELF_SOUND_MIN_CONFIDENCE 80  // 进入 Grooving 的最低节拍置信度（0–255）
+#define CFG_ELF_SOUND_ONSET_THRESHOLD 0.45f  // 节拍起音阈值；越低越灵敏
 #define CFG_ELF_SOUND_GROOVE_HOLD_MS 1600UL     // 无拍后保持律动的时间
 #define CFG_ELF_SOUND_BOUNCE_PX 12       // 弹跳最大行程
 #define CFG_ELF_SOUND_SWAY_PX 9          // 摇摆最大行程
-#define CFG_ELF_SOUND_LEVEL_GAIN 4       // ES7210 输入增益档位（按实机调）
+#define CFG_ELF_SOUND_LEVEL_GAIN 6       // ES7210 输入增益档位（比原设置提高约 6dB）
 #define CFG_ELF_SOUND_LOG 0              // 1 = 每 500ms 打印 level/bpm/conf
 ```
 
@@ -589,7 +590,7 @@ onset 序列 ──► 局部峰值 + 200ms 不应期 ──► 拍点
 4. **Onset**：
    - 基线 `baseline` 用 1.5s 慢速 EMA；
    - `onset = max(0, lowEnergy / (baseline + ε) - 1)`；
-   - 只有 `level > 噪声门` 且 `onset > 0.6`（可调）才候选。
+   - 只有 `level > 噪声门` 且 `onset > CFG_ELF_SOUND_ONSET_THRESHOLD` 才候选。
 5. **峰值确认 + 不应期**：
    - 候选值必须大于前一帧与后一帧（延迟 1 帧确认，16ms）；
    - 距上一拍 < 200ms 的候选丢弃（对应最高 300 BPM，覆盖快歌）；

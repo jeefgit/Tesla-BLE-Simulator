@@ -46,7 +46,6 @@ constexpr float kLevelSmoothAlpha = 0.08f;
 constexpr float kBaselineAlpha = 0.011f;
 // 基线不为 0，避免静音时 onset 被放大器底噪拉爆。
 constexpr float kOnsetEps = 60.0f;
-constexpr float kOnsetThreshold = 0.6f;
 constexpr uint32_t kWarmupMs = 3000UL;
 constexpr uint32_t kDiscardTicks = 8;  // 约 130ms，等偏置/高通稳定
 constexpr uint32_t kBpmSwitchMs = 1000UL;
@@ -439,7 +438,8 @@ void analyzeTick(Impl& s, const TickStats& t, uint32_t now,
   bool newBeat = false;
 
   // 延迟 1 帧峰值确认：前一帧大于更前一帧，且不小于当前帧。
-  if (!warmup && s.haveOnset && s.onsetPrev > kOnsetThreshold &&
+  if (!warmup && s.haveOnset &&
+      s.onsetPrev > CFG_ELF_SOUND_ONSET_THRESHOLD &&
       s.onsetPrev > s.onsetPrev2 && s.onsetPrev >= onset &&
       s.levelPrev > static_cast<float>(CFG_ELF_SOUND_NOISE_GATE)) {
     const uint32_t beatMs = now - CFG_ELF_SOUND_HOP_MS;

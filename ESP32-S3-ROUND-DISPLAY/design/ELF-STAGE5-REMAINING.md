@@ -40,14 +40,14 @@
 
 这些是「无法通过改代码直接确认」的项，agent 可做的是：保留日志、把可疑点做成易调参数、在代码注释/文档中写明排查顺序。
 
-- [ ] **ES7210 是否出数据**
-  - 把 `CFG_ELF_SOUND_LOG` 设为 1，观察启动 2s 内 `[AUDIO] slot0..3` 的 RMS。
+- [x] **ES7210 是否出数据**：用户已确认现在能听到声音，基础采集已验证。
+  - 后续仍建议把 `CFG_ELF_SOUND_LOG` 设为 1，观察启动 2s 内 `[AUDIO] slot0..3` 的 RMS，确认 MIC1/MIC2 槽序及两路数据。
   - 全 0 → 先查 AXP2101 **ALDO1 (A3V3)** 是否给麦供电（当前工程无 AXP2101 驱动）、`MCLK=GPIO42`。
   - NACK → 查 `Wire` 15/14 上 `0x40` 与触摸 `0x5A` / IMU `0x6B` / TCA9554 `0x20` 是否冲突。
 - [ ] **ES7210 `0x40` 取值**：当前 `0xC3`（微雪旧例程）；若底噪大/失真，改 `0x43`（新版 esp_codec_dev）再试。
 - [ ] **TDM 槽序**：确认 `slot0 = MIC1`、`slot2 = MIC2`。
   - 若 slot0 有声音而 slot2 恒 0：优先检查 ES7210 `0x12`（当前 `0x02`）与 `0x47/0x48`。
-- [ ] **增益 / 门限标定**：`CFG_ELF_SOUND_LEVEL_GAIN=4`（12dB）、`CFG_ELF_SOUND_NOISE_GATE=10`、onset 阈值，均需按真实环境调整。
+- [ ] **增益 / 门限标定**：当前为 `CFG_ELF_SOUND_LEVEL_GAIN=6`、`CFG_ELF_SOUND_NOISE_GATE=8`、`CFG_ELF_SOUND_ONSET_THRESHOLD=0.45`；需按真实环境确认灵敏度与误触发平衡。
 - [ ] **BPM / 拍点参数**：用 60/90/120/150 BPM 节拍器验证 `bpm`、`beat`；再测拍手、音乐、静音、环境噪声。
 - [ ] **性能回归**：律动时无 LVGL 堆报错、无掉帧、BLE 轮询正常、无看门狗、无 `StoreProhibited`。
 - [ ] **`CFG_ELF_SOUND_ENABLE=0` 回归**：编译 + 运行完全回到阶段 4（目前仅静态检查 `#if`）。
