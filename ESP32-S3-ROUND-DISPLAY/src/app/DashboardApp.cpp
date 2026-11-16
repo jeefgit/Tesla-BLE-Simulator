@@ -108,6 +108,13 @@ void DashboardApp::begin() {
   beginPowerButton();
   beginTouch();
   m_power.begin(&m_imu, &display);
+
+#if CFG_ELF_SOUND_ENABLE
+  // 麦克风放在最后：ES7210 挂在 15/14 的 Wire 总线上，必须等
+  // beginPowerButton() 的 Wire.begin() 之后才能初始化。失败只关闭声音
+  // 子状态，不重试、不阻塞启动流程，小精灵其余功能与仪表照常工作。
+  m_soundReady = m_sound.begin();
+#endif
 }
 
 void DashboardApp::beginTouch() {
@@ -368,6 +375,28 @@ void DashboardApp::loop() {
   // 车辆状态实时快照（阶段 4）：充电打哈欠、车速瞳孔放大、急减速眯眼。
   // BLE 轮询在小精灵显示期间照常进行，因此这些联动是实时的。
   m_elf.setVehicleState(m_model.speedKmh, m_model.speedValid, m_model.charging);
+#if CFG_ELF_SOUND_ENABLE
+  // 声音采集只跟随可见性：上升沿启动一次，可见期间每轮读一帧快照
+  // （read() 只拷贝，不清 beat 之外的状态，不阻塞 BLE 轮询），
+  // 下降沿立即停 I2S 并喂空帧，让浮层马上回到 Off/静音视觉。
+  if (elfVisible) {
+    if (!m_soundStarted && m_soundReady && !m_soundStartFailed) {
+      m_soundStarted = m_sound.start();
+      m_soundStartFailed = !m_soundStarted;
+    }
+    if (m_soundStarted) {
+      m_elf.setSoundFrame(m_sound.read());
+    }
+  } else {
+    if (m_soundStarted) {
+      m_sound.stop();
+      m_soundStarted = false;
+      m_elf.setSoundFrame(SoundFrame{});
+    }
+    // 下次呼出重新尝试启动（例如上次 DMA 内存临时不足）。
+    m_soundStartFailed = false;
+  }
+#endif
   // 静止自动休眠：IMU 运动检测、触摸/按键活动与配钥/充电条件都在这里判断。
   m_power.update(m_model, dashboard.bootAnimationRunning(), m_model.charging);
   const uint32_t now = millis();

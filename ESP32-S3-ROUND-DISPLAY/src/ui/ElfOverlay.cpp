@@ -2,8 +2,39 @@
 
 #include <Arduino.h>
 #include <esp_system.h>
+#include <math.h>
 
 #include "config.h"
+
+// 声音配置由并行改动写入 config.h（design/ELF-DESIGN.md §5.6）。
+// 这里只做缺省兜底，避免引用到未定义的宏；已定义时不会覆盖。
+#ifndef CFG_ELF_SOUND_ENABLE
+#define CFG_ELF_SOUND_ENABLE 0
+#endif
+#ifndef CFG_ELF_SOUND_NOISE_GATE
+#define CFG_ELF_SOUND_NOISE_GATE 10
+#endif
+#ifndef CFG_ELF_SOUND_QUIET_MS
+#define CFG_ELF_SOUND_QUIET_MS 2000UL
+#endif
+#ifndef CFG_ELF_SOUND_BEAT_MIN_BPM
+#define CFG_ELF_SOUND_BEAT_MIN_BPM 60
+#endif
+#ifndef CFG_ELF_SOUND_BEAT_MAX_BPM
+#define CFG_ELF_SOUND_BEAT_MAX_BPM 200
+#endif
+#ifndef CFG_ELF_SOUND_BEAT_CONFIRM
+#define CFG_ELF_SOUND_BEAT_CONFIRM 2
+#endif
+#ifndef CFG_ELF_SOUND_GROOVE_HOLD_MS
+#define CFG_ELF_SOUND_GROOVE_HOLD_MS 1600UL
+#endif
+#ifndef CFG_ELF_SOUND_BOUNCE_PX
+#define CFG_ELF_SOUND_BOUNCE_PX 12
+#endif
+#ifndef CFG_ELF_SOUND_SWAY_PX
+#define CFG_ELF_SOUND_SWAY_PX 9
+#endif
 
 #if CFG_ELF_ENABLE
 
@@ -114,6 +145,26 @@ constexpr int32_t kGazeLeanX = 10;
 constexpr int32_t kZX[3] = {300, 330, 356};
 constexpr int32_t kZY[3] = {118, 90, 62};
 
+// 嘴 / 光环的基准几何（阶段 5 张嘴动画需要中心不变）。
+constexpr int32_t kMouthW = 44;
+constexpr int32_t kMouthH = 14;
+constexpr int32_t kMouthCenterY = 342 + kMouthH / 2;  // 349
+constexpr int32_t kAuraBaseOpa = 20;                   // 约 8%
+
+// 阶段 5：声音律动（见 design/ELF-DESIGN.md §4.3）。
+constexpr uint32_t kSoundTimerMs = 30;
+constexpr uint32_t kPulseDecayMs = 120;    // pulse 按 exp(-t/120ms) 衰减
+constexpr uint32_t kBeatWindowMs = 1200;   // 进入 Grooving 的拍点统计窗口
+constexpr uint32_t kGrooveFadeInMs = 150;  // 进入 Grooving 的偏移升入时间
+constexpr uint32_t kGrooveFadeOutMs = 500; // 退出 Grooving 的平滑归零
+constexpr uint32_t kGrooveBoostMs = 180;   // 高潮拍：g 临时 ×1.3 的持续
+constexpr uint32_t kSoundYieldMs = 600;    // 触摸后声音层让位时间
+constexpr int32_t kPupilSoundMaxSize = 90; // 声音/车速/Happy 叠加后的瞳孔上限
+constexpr int32_t kMouthMaxH = 24;
+constexpr int32_t kSoundGazeX = 24;        // Grooving 拍点换向的视线摆幅
+constexpr uint8_t kBlushSoundMaxOpa = 77;  // 和 Happy 上限一致，避免抢
+constexpr uint8_t kAuraSoundMaxOpa = 77;   // 上限 30%
+
 int32_t randomBetween(int32_t low, int32_t high) {
   if (high <= low) {
     return low;
@@ -197,6 +248,12 @@ void ElfOverlay::begin() {
   buildObjects();
   m_pupilBaseSize = kPupilSize;
   m_timer = lv_timer_create(timerCallback, 50, this);
+#if CFG_ELF_SOUND_ENABLE
+  // 声音层独立 30ms 定时器：不改变既有 50ms 状态机节奏。
+  m_soundLastTick = millis();
+  m_soundTimer = lv_timer_create(soundTimerCallback, kSoundTimerMs, this);
+  resetSoundState();
+#endif
   m_built = true;
   CFG_LOG("[ELF] overlay built, heap %lu",
           static_cast<unsigned long>(ESP.getFreeHeap()));
@@ -289,6 +346,11 @@ void ElfOverlay::show() {
   lv_anim_delete(m_body, setBodyX);
   stopZzz();
   resetHappyVisuals();
+#if CFG_ELF_SOUND_ENABLE
+  // 重新呼出：声音子状态从 Off 开始，等第一帧再进 Quiet。
+  resetSoundState();
+  resetSoundVisuals(false);
+#endif
   lv_obj_set_hidden(m_root, false);
   lv_obj_move_foreground(m_root);
   m_state = State::Waking;
@@ -323,6 +385,11 @@ void ElfOverlay::hide() {
   lv_anim_delete(this, setGazeY);
   stopZzz();
   resetHappyVisuals();
+#if CFG_ELF_SOUND_ENABLE
+  // 隐藏时立即复位声音偏移，并让子状态回到 Off。
+  resetSoundVisuals(false);
+  resetSoundState();
+#endif
   m_state = State::Hiding;
   m_blinkPhase = BlinkPhase::None;
   m_yawnHolding = false;
@@ -346,6 +413,7 @@ void ElfOverlay::animateEyes(int32_t fromHeight, int32_t toHeight,
 
 void ElfOverlay::startBreathing(uint32_t halfPeriodMs) {
   lv_anim_delete(m_body, setBodyY);
+  lv_anim_delete(this, setBodyYOnSelf);
   lv_obj_set_y(m_body, kBreathOffsetPx);
   lv_anim_t anim;
   lv_anim_init(&anim);
@@ -361,8 +429,46 @@ void ElfOverlay::startBreathing(uint32_t halfPeriodMs) {
 
 void ElfOverlay::stopBreathing() {
   lv_anim_delete(m_body, setBodyY);
+  lv_anim_delete(this, setBodyYOnSelf);
   lv_obj_set_y(m_body, 0);
 }
+
+void ElfOverlay::setBodyYOnSelf(void* var, int32_t y) {
+  auto* self = static_cast<ElfOverlay*>(var);
+  if (self != nullptr) {
+    lv_obj_set_y(self->m_body, y);
+  }
+}
+
+#if CFG_ELF_SOUND_ENABLE
+// 声音层退出 / 主状态接管时，从当前的律动 y 位置平滑回到呼吸起点。
+// 否则 startBreathing() 会把 m_body.y 直接设成 +22，产生一次可见跳变。
+void ElfOverlay::resumeBreathing() {
+  const int32_t from = lv_obj_get_y(m_body);
+  if (from == kBreathOffsetPx) {
+    startBreathing(kBreathHalfMs);
+    return;
+  }
+  lv_anim_delete(m_body, setBodyY);
+  lv_anim_delete(this, setBodyYOnSelf);
+  startAnim(this, setBodyYOnSelf, from, kBreathOffsetPx, 350,
+            lv_anim_path_ease_out, onResumeBreathDone);
+}
+
+void ElfOverlay::onResumeBreathDone(lv_anim_t* anim) {
+  auto* self = static_cast<ElfOverlay*>(anim->var);
+  if (self == nullptr || self->m_soundVisApplied ||
+      self->m_soundBreathStopped) {
+    return;
+  }
+  // Happy/Yawning/Squint 也保持呼吸；Sleepy/Sleeping 会用自己的周期并
+  // 在此之前删除本动画，所以这里只需避开隐藏态。
+  if (self->m_state == State::Hidden || self->m_state == State::Hiding) {
+    return;
+  }
+  self->startBreathing(kBreathHalfMs);
+}
+#endif  // CFG_ELF_SOUND_ENABLE
 
 void ElfOverlay::startBlink() {
   if (m_state != State::Idle) {
@@ -370,7 +476,12 @@ void ElfOverlay::startBlink() {
   }
   m_state = State::Blinking;
   m_blinkPhase = BlinkPhase::Closing;
-  animateEyes(kEyeH, kEyeClosedH, kBlinkCloseMs, lv_anim_path_ease_in,
+  // 从当前高度开始：Grooving 的“开心眼”可能把眼睛撑高了几像素。
+  int32_t currentH = lv_obj_get_height(m_eye[0]);
+  if (currentH < kEyeClosedH) {
+    currentH = kEyeClosedH;
+  }
+  animateEyes(currentH, kEyeClosedH, kBlinkCloseMs, lv_anim_path_ease_in,
               onBlinkClosed);
   CFG_LOG("[ELF] blink%s", m_blinkIsSecond ? " x2" : "");
 }
@@ -379,6 +490,14 @@ void ElfOverlay::startGaze() {
   if (m_state != State::Idle) {
     return;
   }
+#if CFG_ELF_SOUND_ENABLE
+  // Grooving（含退出淡出）由拍点换向接管视线；Listening 允许随机注视。
+  if (m_soundLevel == SoundLevel::Grooving || m_grooveW > 0.001f) {
+    m_nextGazeAt = millis() + randomBetween(CFG_ELF_GAZE_MIN_MS,
+                                            CFG_ELF_GAZE_MAX_MS);
+    return;
+  }
+#endif
   const int32_t offsetX = randomBetween(-kGazeRangeX, kGazeRangeX);
   const int32_t offsetY = randomBetween(-kGazeRangeY, kGazeRangeY);
   const int32_t targetX = kIrisInset + offsetX;
@@ -410,6 +529,10 @@ void ElfOverlay::lookAt(int16_t screenX, int16_t screenY) {
     wakeFromSleep();
   }
   notifyInteraction();
+#if CFG_ELF_SOUND_ENABLE
+  // 触摸优先级最高：声音层让位 600ms，期间不写身体 x/y 与虹膜。
+  m_soundYieldUntil = millis() + kSoundYieldMs;
+#endif
 
   // 手指位置换算成虹膜偏移：屏幕中心 → 0，边缘 → 最大偏移。
   const int32_t dx = static_cast<int32_t>(screenX) - kScreenSize / 2;
@@ -436,6 +559,10 @@ void ElfOverlay::touchEnd() {
     return;
   }
   m_lastInteractionAt = millis();
+#if CFG_ELF_SOUND_ENABLE
+  // 松手后再让声音层等 600ms，和随机注视的恢复时间一致。
+  m_soundYieldUntil = m_lastInteractionAt + kSoundYieldMs;
+#endif
   // 松手 600ms 后回到随机游走；Happy 自己会在结束时重新排期。
   if (m_state == State::Idle) {
     m_nextGazeAt = m_lastInteractionAt + 600;
@@ -493,13 +620,21 @@ void ElfOverlay::setVehicleState(float speedKmh, bool speedValid,
   if (target != m_pupilBaseSize) {
     const int32_t fromSize = lv_obj_get_width(m_pupil[0]);
     m_pupilBaseSize = target;
-    lv_anim_delete(this, setPupilSize);
-    if (m_state == State::Hidden) {
-      setPupilSize(this, target);
-    } else if (m_state != State::Hiding && m_state != State::Happy) {
-      // Happy 期间不抢瞳孔动画，结束时自然回到新的基准值。
-      startAnim(this, setPupilSize, fromSize, target, kPupilAnimMs,
-                lv_anim_path_ease_out, nullptr);
+#if CFG_ELF_SOUND_ENABLE
+    // 声音层活跃时瞳孔只有一个写入者：只更新基准，交给 updatePupilTarget()。
+    if (soundTintActive()) {
+      updatePupilTarget();
+    } else
+#endif
+    {
+      lv_anim_delete(this, setPupilSize);
+      if (m_state == State::Hidden) {
+        setPupilSize(this, target);
+      } else if (m_state != State::Hiding && m_state != State::Happy) {
+        // Happy 期间不抢瞳孔动画，结束时自然回到新的基准值。
+        startAnim(this, setPupilSize, fromSize, target, kPupilAnimMs,
+                  lv_anim_path_ease_out, nullptr);
+      }
     }
     CFG_LOG("[ELF] pupil %d (speed %.0f)", static_cast<int>(target),
             static_cast<double>(speedKmh));
@@ -537,6 +672,10 @@ void ElfOverlay::enterSleepy() {
   if (m_state != State::Idle) {
     return;
   }
+#if CFG_ELF_SOUND_ENABLE
+  // 睡眠接管：先归还声音层占用的属性，避免两套动画同写 m_body.y。
+  resetSoundVisuals(false);
+#endif
   m_state = State::Sleepy;
   m_blinkPhase = BlinkPhase::None;
   lv_anim_delete(this, setEyeOpen);
@@ -600,6 +739,9 @@ void ElfOverlay::startHappy() {
       m_state == State::Hiding) {
     return;
   }
+#if CFG_ELF_SOUND_ENABLE
+  resetSoundVisuals(false);
+#endif
   lv_anim_delete(this, setEyeOpen);
   lv_anim_delete(this, setPupilSize);
   lv_anim_delete(this, setBlushOpa);
@@ -665,6 +807,9 @@ void ElfOverlay::startYawn() {
   if (m_state != State::Idle) {
     return;
   }
+#if CFG_ELF_SOUND_ENABLE
+  resetSoundVisuals(false);
+#endif
   lv_anim_delete(this, setEyeOpen);
   lv_anim_delete(this, setGazeX);
   lv_anim_delete(this, setGazeY);
@@ -684,6 +829,9 @@ void ElfOverlay::startSquint() {
   if (m_state != State::Idle) {
     return;
   }
+#if CFG_ELF_SOUND_ENABLE
+  resetSoundVisuals(false);
+#endif
   lv_anim_delete(this, setEyeOpen);
   m_state = State::Squint;
   m_blinkPhase = BlinkPhase::None;
@@ -785,7 +933,16 @@ void ElfOverlay::onTimer() {
     } else if (due(m_nextBlinkAt)) {
       startBlink();
     } else if (due(m_nextGazeAt)) {
-      startGaze();
+#if CFG_ELF_SOUND_ENABLE
+      if (m_soundLevel == SoundLevel::Grooving || m_grooveW > 0.001f) {
+        // 律动（含淡出）期间暂停随机注视，改用拍点换向的视线。
+        m_nextGazeAt = now + randomBetween(CFG_ELF_GAZE_MIN_MS,
+                                           CFG_ELF_GAZE_MAX_MS);
+      } else
+#endif
+      {
+        startGaze();
+      }
     }
     return;
   }
@@ -797,6 +954,605 @@ void ElfOverlay::onTimer() {
 }
 
 // ---------------------------------------------------------------------------
+// 阶段 5：声音层（30ms tick）
+// ---------------------------------------------------------------------------
+
+void ElfOverlay::setSoundFrame(const SoundFrame& frame) {
+#if CFG_ELF_SOUND_ENABLE
+  if (!m_built || m_state == State::Hidden || m_state == State::Hiding) {
+    return;
+  }
+  const uint32_t now = millis();
+  m_level = frame.level;
+  m_low = frame.low;
+  m_bpm = frame.bpm;
+  m_confidence = frame.confidence;
+  m_loudFlag = frame.loud;
+  m_soundHadFrame = true;
+  m_soundFrameAt = now;
+  // 主循环可能快于 30ms：先把拍点挂起，交给 tick 统一消费。
+  if (frame.beat) {
+    m_pendingBeat = true;
+  }
+#else
+  (void)frame;
+#endif
+}
+
+bool ElfOverlay::soundTintActive() const {
+#if CFG_ELF_SOUND_ENABLE
+  return m_soundTintApplied &&
+         (m_soundLevel == SoundLevel::Listening ||
+          m_soundLevel == SoundLevel::Grooving) &&
+         (m_state == State::Idle || m_state == State::Blinking);
+#else
+  return false;
+#endif
+}
+
+// 瞳孔的唯一写入者：车速/Happy 基准 + 声音偏移，统一钳制上限。
+void ElfOverlay::updatePupilTarget() {
+#if CFG_ELF_SOUND_ENABLE
+  if (!m_built) {
+    return;
+  }
+  int32_t base = m_pupilBaseSize;
+  if (m_state == State::Happy && base < kPupilHappySize) {
+    base = kPupilHappySize;
+  }
+  int32_t offset = 0;
+  if (m_soundLevel == SoundLevel::Grooving) {
+    offset = static_cast<int32_t>(6.0f * m_g + 4.0f * m_pulse + 0.5f);
+  } else if (m_soundLevel == SoundLevel::Listening) {
+    offset = 4 + 2 * static_cast<int32_t>(m_level) / 255;
+  }
+  int32_t target = base + offset;
+  if (target > kPupilSoundMaxSize) {
+    target = kPupilSoundMaxSize;
+  }
+  // 声音层活跃时直接写，避免和车速/Happy 的 lv_anim 抢同一属性。
+  lv_anim_delete(this, setPupilSize);
+  if (target != m_lastPupilSize) {
+    setPupilSize(this, target);
+    m_lastPupilSize = target;
+  }
+#endif
+}
+
+void ElfOverlay::handleSoundBeat(uint32_t now) {
+#if CFG_ELF_SOUND_ENABLE
+  m_lastBeatAt = now;
+  m_pulse = 1.0f;
+  if (now - m_beatWindowStart > kBeatWindowMs) {
+    m_beatWindowStart = now;
+    m_beatsInWindow = 0;
+  }
+  if (m_beatsInWindow < 1000) {
+    ++m_beatsInWindow;
+  }
+  // 每拍换向：身体摇摆与 Grooving 视线共用同一个方向。
+  m_soundSwayDir = (m_soundSwayDir >= 0) ? -1 : 1;
+
+  if (m_soundLevel == SoundLevel::Grooving) {
+    ++m_beatInGroove;
+    // 每 4 拍快速单眨一次（复用现有眨眼状态机）。
+    if ((m_beatInGroove % 4) == 0 && m_state == State::Idle &&
+        static_cast<int32_t>(now - m_soundYieldUntil) >= 0) {
+      m_nextBlinkAt = now;
+    }
+    // 每 8 拍或快歌：本拍 g 临时 ×1.3，并让下一拍眨眼连眨两下。
+    if ((m_beatInGroove % 8) == 0 || m_bpm > 150) {
+      m_grooveBoostUntil = now + kGrooveBoostMs;
+      m_forceDoubleBlink = true;
+    }
+  }
+#endif
+}
+
+void ElfOverlay::enterGroove(uint32_t now) {
+#if CFG_ELF_SOUND_ENABLE
+  m_soundLevel = SoundLevel::Grooving;
+  m_lastBeatAt = now;
+  m_beatInGroove = 0;
+  m_grooveW = 0.0f;
+  // 从当前实际位置接上，避免接管瞬间跳变。
+  m_soundBodyX = static_cast<float>(lv_obj_get_x(m_body));
+  m_lastBodyX = lv_obj_get_x(m_body);
+  m_soundGazeX = static_cast<float>(lv_obj_get_x(m_iris[0]));
+  m_soundGazeY = static_cast<float>(lv_obj_get_y(m_iris[0]));
+  m_soundSwayDir = 1;
+  // 接管 m_body.y：停掉呼吸和随机注视，防止两套动画同写。
+  lv_anim_delete(this, setGazeX);
+  lv_anim_delete(this, setGazeY);
+  lv_anim_delete(m_body, setBodyX);
+  if (!m_soundBreathStopped &&
+      (m_state == State::Idle || m_state == State::Blinking)) {
+    stopBreathing();
+    m_soundBreathStopped = true;
+  }
+  CFG_LOG("[ELF] sound groove (bpm=%u level=%u)",
+          static_cast<unsigned>(m_bpm), static_cast<unsigned>(m_level));
+#endif
+}
+
+void ElfOverlay::resetSoundState() {
+#if CFG_ELF_SOUND_ENABLE
+  m_soundLevel = SoundLevel::Off;
+  m_pendingBeat = false;
+  m_forceDoubleBlink = false;
+  m_pulse = 0.0f;
+  m_g = 0.0f;
+  m_grooveW = 0.0f;
+  m_soundBodyX = 0.0f;
+  m_soundGazeX = -10000.0f;
+  m_soundGazeY = -10000.0f;
+  m_soundSwayDir = 1;
+  m_beatsInWindow = 0;
+  m_beatInGroove = 0;
+  m_beatWindowStart = 0;
+  m_lastBeatAt = 0;
+  m_lastSoundLoudAt = 0;
+  m_grooveBoostUntil = 0;
+  m_soundYieldUntil = 0;
+  m_soundHadFrame = false;
+  m_soundFrameAt = 0;
+  m_level = 0;
+  m_low = 0;
+  m_bpm = 0;
+  m_confidence = 0;
+  m_loudFlag = false;
+  m_soundTintApplied = false;
+  m_soundVisApplied = false;
+  m_soundBreathStopped = false;
+  m_lastBodyX = -10000;
+  m_lastBodyY = -10000;
+  m_lastEyeH = -10000;
+  m_lastMouthH = -10000;
+  m_lastEarY = -10000;
+  m_lastTailSize[0] = -10000;
+  m_lastTailSize[1] = -10000;
+  m_lastTailSize[2] = -10000;
+  m_lastPupilSize = -10000;
+  m_lastBlushOpa = -10000;
+  m_lastAuraOpa = -10000;
+  m_lastGazeX = -10000;
+  m_lastGazeY = -10000;
+#endif
+}
+
+// 把所有声音偏移恢复到阶段 4 基准；hide()/进入其它主状态时立即调用。
+// 退出 Grooving 的柔和过渡由 applySoundVisuals() 的 grooveW 负责。
+void ElfOverlay::resetSoundVisuals(bool animate) {
+#if CFG_ELF_SOUND_ENABLE
+  (void)animate;
+  const bool allowed =
+      (m_state == State::Idle || m_state == State::Blinking);
+  const bool yield =
+      static_cast<int32_t>(millis() - m_soundYieldUntil) < 0;
+  m_grooveW = 0.0f;
+  m_soundBodyX = 0.0f;
+  m_soundVisApplied = false;
+
+  // 腮红 / 瞳孔 / 光环无论当前主状态如何都恢复基准，避免残留声音亮度。
+  lv_anim_delete(this, setPupilSize);
+  setPupilSize(this, m_pupilBaseSize);
+  m_lastPupilSize = m_pupilBaseSize;
+  lv_anim_delete(this, setBlushOpa);
+  setBlushOpa(this, kBlushOpa);
+  m_lastBlushOpa = kBlushOpa;
+  lv_obj_set_style_border_opa(m_aura, kAuraBaseOpa, 0);
+  m_lastAuraOpa = kAuraBaseOpa;
+  m_soundTintApplied = false;
+
+  if (!allowed) {
+    return;
+  }
+
+  if (m_soundBreathStopped) {
+    m_soundBreathStopped = false;
+    resumeBreathing();
+  }
+  if (!yield) {
+    lv_anim_delete(m_body, setBodyX);
+    setBodyX(m_body, 0);
+    m_lastBodyX = 0;
+  }
+
+  if (m_state == State::Idle) {
+    setEyeOpen(this, kEyeH);
+    m_lastEyeH = kEyeH;
+  }
+
+  lv_obj_set_size(m_mouth, kMouthW, kMouthH);
+  lv_obj_set_y(m_mouth, kMouthCenterY - kMouthH / 2);
+  m_lastMouthH = kMouthH;
+
+  for (int i = 0; i < 2; ++i) {
+    lv_obj_set_y(m_ear[i], kEarY);
+  }
+  m_lastEarY = kEarY;
+  for (int i = 0; i < 3; ++i) {
+    lv_obj_set_pos(m_tail[i], kTailX[i], kTailY[i]);
+    lv_obj_set_size(m_tail[i], kTailSize[i], kTailSize[i]);
+    m_lastTailSize[i] = kTailSize[i];
+  }
+
+  // 触摸让位期间不写虹膜，避免抢 lookAt() 的追随位置。
+  if (!yield) {
+    lv_anim_delete(this, setGazeX);
+    lv_anim_delete(this, setGazeY);
+    setGazeX(this, kIrisInset);
+    setGazeY(this, kIrisY);
+    m_lastGazeX = kIrisInset;
+    m_lastGazeY = kIrisY;
+  }
+#endif
+}
+
+void ElfOverlay::updateSoundState(uint32_t now) {
+#if CFG_ELF_SOUND_ENABLE
+  if (m_state == State::Hidden || m_state == State::Hiding) {
+    if (m_soundLevel != SoundLevel::Off) {
+      m_soundLevel = SoundLevel::Off;
+    }
+    return;
+  }
+
+  const bool fresh = (now - m_soundFrameAt) <= 1000;
+  const uint8_t level = fresh ? m_level : 0;
+  const bool loud = fresh &&
+                    (level >= CFG_ELF_SOUND_NOISE_GATE || m_loudFlag);
+  if (loud) {
+    m_lastSoundLoudAt = now;
+  }
+
+  // 拍点窗口过期，避免陈旧计数误进 Grooving。
+  if (now - m_beatWindowStart > kBeatWindowMs) {
+    m_beatWindowStart = now;
+    m_beatsInWindow = 0;
+  }
+
+  const bool bpmOk = (m_bpm >= CFG_ELF_SOUND_BEAT_MIN_BPM &&
+                      m_bpm <= CFG_ELF_SOUND_BEAT_MAX_BPM);
+
+  switch (m_soundLevel) {
+    case SoundLevel::Off:
+      if (m_soundHadFrame && fresh) {
+        m_soundLevel = SoundLevel::Quiet;
+        if (m_lastSoundLoudAt == 0) {
+          m_lastSoundLoudAt = now;
+        }
+        CFG_LOG("[ELF] sound quiet (bpm=%u level=%u)",
+                static_cast<unsigned>(m_bpm),
+                static_cast<unsigned>(m_level));
+      }
+      break;
+    case SoundLevel::Quiet:
+      if (loud) {
+        m_soundLevel = SoundLevel::Listening;
+        m_lastSoundLoudAt = now;
+        CFG_LOG("[ELF] sound listening (bpm=%u level=%u)",
+                static_cast<unsigned>(m_bpm),
+                static_cast<unsigned>(m_level));
+      }
+      break;
+    case SoundLevel::Listening:
+      if (!loud &&
+          now - m_lastSoundLoudAt >= CFG_ELF_SOUND_QUIET_MS) {
+        m_soundLevel = SoundLevel::Quiet;
+        CFG_LOG("[ELF] sound quiet (bpm=%u level=%u)",
+                static_cast<unsigned>(m_bpm),
+                static_cast<unsigned>(m_level));
+        break;
+      }
+      if (m_beatsInWindow >= CFG_ELF_SOUND_BEAT_CONFIRM && bpmOk) {
+        enterGroove(now);
+      }
+      break;
+    case SoundLevel::Grooving:
+      if (now - m_lastBeatAt >= CFG_ELF_SOUND_GROOVE_HOLD_MS) {
+        m_soundLevel = SoundLevel::Listening;
+        CFG_LOG("[ELF] sound groove end (bpm=%u level=%u)",
+                static_cast<unsigned>(m_bpm),
+                static_cast<unsigned>(m_level));
+      }
+      break;
+  }
+#endif
+}
+
+void ElfOverlay::applySoundVisuals(uint32_t now, uint32_t dt) {
+#if CFG_ELF_SOUND_ENABLE
+  if (!m_built) {
+    return;
+  }
+  const bool allowed =
+      (m_state == State::Idle || m_state == State::Blinking);
+  if (!allowed) {
+    // 主状态（Happy/哈欠/眯眼/困倦/入睡/隐藏）接管画面：
+    // 只清声音层的“所有权”，不写属性，避免和主状态动画互相抢。
+    m_grooveW = 0.0f;
+    m_soundBodyX = 0.0f;
+    m_soundVisApplied = false;
+    m_soundTintApplied = false;
+    m_soundBreathStopped = false;
+    return;
+  }
+
+  if (dt > 200) {
+    dt = 200;
+  }
+  const bool grooving = (m_soundLevel == SoundLevel::Grooving);
+  const bool listening = (m_soundLevel == SoundLevel::Listening);
+  const bool tint = grooving || listening;
+  const bool yield =
+      static_cast<int32_t>(now - m_soundYieldUntil) < 0;
+  const uint8_t level =
+      (now - m_soundFrameAt <= 1000) ? m_level : 0;
+
+  // g = max(level/255, bpm 权重)，平滑后驱动幅度。
+  float targetG = static_cast<float>(level) / 255.0f;
+  float bpmG = 0.0f;
+  if (m_bpm >= 140) {
+    bpmG = 0.7f;
+  } else if (m_bpm > 60) {
+    bpmG = 0.7f * static_cast<float>(m_bpm - 60) / 80.0f;
+  }
+  if (bpmG > targetG) {
+    targetG = bpmG;
+  }
+  if (static_cast<int32_t>(now - m_grooveBoostUntil) < 0) {
+    targetG *= 1.3f;
+  }
+  if (targetG > 1.0f) {
+    targetG = 1.0f;
+  }
+  float gk = static_cast<float>(dt) / 120.0f;
+  if (gk > 1.0f) {
+    gk = 1.0f;
+  }
+  m_g += (targetG - m_g) * gk;
+
+  // groove 权重：进入 150ms 升到 1，退出 500ms 平滑归零。
+  if (grooving) {
+    m_grooveW += static_cast<float>(dt) /
+                 static_cast<float>(kGrooveFadeInMs);
+    if (m_grooveW > 1.0f) {
+      m_grooveW = 1.0f;
+    }
+  } else if (m_grooveW > 0.0f) {
+    m_grooveW -= static_cast<float>(dt) /
+                 static_cast<float>(kGrooveFadeOutMs);
+    if (m_grooveW < 0.0f) {
+      m_grooveW = 0.0f;
+    }
+  }
+  const bool grooveOwns = (m_grooveW > 0.0f);
+  if (grooveOwns) {
+    m_soundVisApplied = true;
+    if (!m_soundBreathStopped) {
+      stopBreathing();
+      m_soundBreathStopped = true;
+      m_lastBodyY = 0;
+    }
+  }
+
+  float sx = static_cast<float>(dt) / 50.0f;
+  if (sx > 1.0f) {
+    sx = 1.0f;
+  }
+
+  // 身体：y = 呼吸基准(0) − 弹跳；x = 拍点换向的摇摆。
+  if (grooveOwns && !yield) {
+    const int32_t wantY = -static_cast<int32_t>(
+        (4.0f + static_cast<float>(CFG_ELF_SOUND_BOUNCE_PX - 4) * m_g) *
+            m_pulse * m_grooveW + 0.5f);
+    if (wantY != m_lastBodyY) {
+      setBodyY(m_body, wantY);
+      m_lastBodyY = wantY;
+    }
+    const float targetX = static_cast<float>(m_soundSwayDir) *
+                          (4.0f + static_cast<float>(CFG_ELF_SOUND_SWAY_PX - 4) *
+                                      m_g) *
+                          m_grooveW;
+    m_soundBodyX += (targetX - m_soundBodyX) * sx;
+    const int32_t wantX =
+        static_cast<int32_t>(m_soundBodyX >= 0.0f ? m_soundBodyX + 0.5f
+                                                  : m_soundBodyX - 0.5f);
+    if (wantX != m_lastBodyX) {
+      setBodyX(m_body, wantX);
+      m_lastBodyX = wantX;
+    }
+  } else if (yield) {
+    // 让位期间跟随触摸写入的实际值，600ms 后恢复时不跳变。
+    m_soundBodyX = static_cast<float>(lv_obj_get_x(m_body));
+    m_lastBodyX = lv_obj_get_x(m_body);
+    m_soundGazeX = static_cast<float>(lv_obj_get_x(m_iris[0]));
+    m_soundGazeY = static_cast<float>(lv_obj_get_y(m_iris[0]));
+    m_lastGazeX = lv_obj_get_x(m_iris[0]);
+    m_lastGazeY = lv_obj_get_y(m_iris[0]);
+  }
+
+  // 开心眼：中心不变；Blinking 期间跳过，避免和眨眼动画抢高度。
+  if (m_state == State::Idle) {
+    int32_t off = 0;
+    if (grooveOwns) {
+      off = static_cast<int32_t>(
+          (4.0f + 6.0f * m_g) * m_pulse * m_grooveW + 0.5f);
+    }
+    const int32_t wantH = kEyeH + off;
+    if (wantH != m_lastEyeH) {
+      setEyeOpen(this, wantH);
+      m_lastEyeH = wantH;
+    }
+  }
+
+  // 嘴高：14 + 10 * level/255，最大 24；中心不变。
+  int32_t mouthH = kMouthH;
+  if (grooveOwns) {
+    mouthH += static_cast<int32_t>(
+        10.0f * static_cast<float>(level) / 255.0f * m_grooveW + 0.5f);
+  }
+  if (mouthH > kMouthMaxH) {
+    mouthH = kMouthMaxH;
+  }
+  if (mouthH != m_lastMouthH) {
+    lv_obj_set_size(m_mouth, kMouthW, mouthH);
+    lv_obj_set_y(m_mouth, kMouthCenterY - mouthH / 2);
+    m_lastMouthH = mouthH;
+  }
+
+  // 耳朵：每拍 −4 * pulse。
+  const int32_t earY =
+      kEarY - (grooveOwns
+                   ? static_cast<int32_t>(4.0f * m_pulse * m_grooveW + 0.5f)
+                   : 0);
+  if (earY != m_lastEarY) {
+    for (int i = 0; i < 2; ++i) {
+      lv_obj_set_y(m_ear[i], earY);
+    }
+    m_lastEarY = earY;
+  }
+
+  // 尾巴三颗按 low 能量做三格电平表（只改尺寸/位置，不增对象）。
+  for (int i = 0; i < 3; ++i) {
+    int32_t size = kTailSize[i];
+    if (grooveOwns && m_low > i * 80) {
+      size += static_cast<int32_t>(
+          (2.0f + 4.0f * m_g) * m_grooveW + 0.5f);
+    }
+    if (size != m_lastTailSize[i]) {
+      const int32_t cx = kTailX[i] + kTailSize[i] / 2;
+      const int32_t cy = kTailY[i] + kTailSize[i] / 2;
+      lv_obj_set_pos(m_tail[i], cx - size / 2, cy - size / 2);
+      lv_obj_set_size(m_tail[i], size, size);
+      m_lastTailSize[i] = size;
+    }
+  }
+
+  // Grooving 视线：拍点换向，±24 轻微摆动；触摸优先时完全不写。
+  if (grooveOwns) {
+    if (!yield) {
+      const int32_t targetX = kIrisInset + m_soundSwayDir * kSoundGazeX;
+      float gx = static_cast<float>(dt) / 150.0f;
+      if (gx > 1.0f) {
+        gx = 1.0f;
+      }
+      m_soundGazeX += (static_cast<float>(targetX) - m_soundGazeX) * gx;
+      m_soundGazeY += (static_cast<float>(kIrisY) - m_soundGazeY) * gx;
+      const int32_t ix = static_cast<int32_t>(
+          m_soundGazeX >= 0.0f ? m_soundGazeX + 0.5f : m_soundGazeX - 0.5f);
+      const int32_t iy = static_cast<int32_t>(
+          m_soundGazeY >= 0.0f ? m_soundGazeY + 0.5f : m_soundGazeY - 0.5f);
+      if (ix != m_lastGazeX) {
+        setGazeX(this, ix);
+        m_lastGazeX = ix;
+      }
+      if (iy != m_lastGazeY) {
+        setGazeY(this, iy);
+        m_lastGazeY = iy;
+      }
+    }
+  } else if (m_soundVisApplied) {
+    // 500ms 归零完成：交还呼吸与随机注视。
+    m_soundVisApplied = false;
+    if (m_soundBreathStopped) {
+      m_soundBreathStopped = false;
+      resumeBreathing();
+    }
+    if (!yield) {
+      setBodyX(m_body, 0);
+      m_lastBodyX = 0;
+      setGazeX(this, kIrisInset);
+      setGazeY(this, kIrisY);
+      m_lastGazeX = kIrisInset;
+      m_lastGazeY = kIrisY;
+    }
+  }
+
+  // 腮红 / 光环 / 瞳孔：Listening 和 Grooving 都有轻微反应。
+  if (tint) {
+    m_soundTintApplied = true;
+    int32_t blush = kBlushOpa + static_cast<int32_t>(
+                                    51.0f * static_cast<float>(level) /
+                                        255.0f + 0.5f);
+    if (blush > kBlushSoundMaxOpa) {
+      blush = kBlushSoundMaxOpa;
+    }
+    if (blush != m_lastBlushOpa) {
+      lv_anim_delete(this, setBlushOpa);
+      setBlushOpa(this, blush);
+      m_lastBlushOpa = blush;
+    }
+
+    int32_t aura = kAuraBaseOpa;
+    if (grooving) {
+      aura += static_cast<int32_t>(31.0f * m_g + 20.0f * m_pulse + 0.5f);
+    } else {
+      aura += static_cast<int32_t>(
+          10.0f * static_cast<float>(level) / 255.0f + 0.5f);
+    }
+    if (aura > kAuraSoundMaxOpa) {
+      aura = kAuraSoundMaxOpa;
+    }
+    if (aura != m_lastAuraOpa) {
+      lv_obj_set_style_border_opa(m_aura, static_cast<lv_opa_t>(aura), 0);
+      m_lastAuraOpa = aura;
+    }
+
+    updatePupilTarget();
+  } else if (m_soundTintApplied) {
+    // 回到 Quiet/Off：一次性恢复阶段 4 基准。
+    m_soundTintApplied = false;
+    lv_anim_delete(this, setPupilSize);
+    setPupilSize(this, m_pupilBaseSize);
+    m_lastPupilSize = m_pupilBaseSize;
+    lv_anim_delete(this, setBlushOpa);
+    setBlushOpa(this, kBlushOpa);
+    m_lastBlushOpa = kBlushOpa;
+    lv_obj_set_style_border_opa(m_aura, static_cast<lv_opa_t>(kAuraBaseOpa),
+                                0);
+    m_lastAuraOpa = kAuraBaseOpa;
+  }
+#endif
+}
+
+void ElfOverlay::onSoundTimer() {
+#if CFG_ELF_SOUND_ENABLE
+  if (!m_built) {
+    return;
+  }
+  if (m_state == State::Hidden || m_state == State::Hiding) {
+    return;
+  }
+  const uint32_t now = millis();
+  if (m_soundLastTick == 0) {
+    m_soundLastTick = now;
+  }
+  uint32_t dt = now - m_soundLastTick;
+  m_soundLastTick = now;
+  if (dt > 250) {
+    dt = 250;  // 长时间挂起后不要一次跳完包络
+  }
+
+  if (m_pendingBeat) {
+    m_pendingBeat = false;
+    handleSoundBeat(now);
+  }
+  if (m_pulse > 0.0f) {
+    m_pulse *= expf(-static_cast<float>(dt) /
+                    static_cast<float>(kPulseDecayMs));
+    if (m_pulse < 0.005f) {
+      m_pulse = 0.0f;
+    }
+  }
+
+  updateSoundState(now);
+  applySoundVisuals(now, dt);
+#endif
+}
+
+// ---------------------------------------------------------------------------
 // 静态回调
 // ---------------------------------------------------------------------------
 
@@ -804,6 +1560,13 @@ void ElfOverlay::timerCallback(lv_timer_t* timer) {
   auto* self = static_cast<ElfOverlay*>(lv_timer_get_user_data(timer));
   if (self != nullptr) {
     self->onTimer();
+  }
+}
+
+void ElfOverlay::soundTimerCallback(lv_timer_t* timer) {
+  auto* self = static_cast<ElfOverlay*>(lv_timer_get_user_data(timer));
+  if (self != nullptr) {
+    self->onSoundTimer();
   }
 }
 
@@ -920,6 +1683,10 @@ void ElfOverlay::onHideDone(lv_anim_t* anim) {
   lv_anim_delete(self->m_body, setBodyX);
   lv_obj_set_x(self->m_body, 0);
   lv_obj_set_hidden(self->m_root, true);
+#if CFG_ELF_SOUND_ENABLE
+  // 完全隐藏后声音子状态归 Off；下次 show() 等第一帧再进 Quiet。
+  self->resetSoundState();
+#endif
 }
 
 void ElfOverlay::onBlinkClosed(lv_anim_t* anim) {
@@ -939,14 +1706,17 @@ void ElfOverlay::onBlinkOpened(lv_anim_t* anim) {
   self->m_state = State::Idle;
   self->m_blinkPhase = BlinkPhase::None;
   const uint32_t now = millis();
-  // 20% 概率立刻再眨一下；第二下之后一定回到正常间隔，避免无限连眨。
-  if (!self->m_blinkIsSecond && randomBetween(0, 99) < 20) {
+  // 声音 8 拍/快歌要求连眨；否则保持阶段 3 的 20% 随机连眨。
+  if (!self->m_blinkIsSecond &&
+      (self->m_forceDoubleBlink || randomBetween(0, 99) < 20)) {
+    self->m_forceDoubleBlink = false;
     self->m_blinkIsSecond = true;
     self->m_nextBlinkAt = now + kBlinkSecondGapMs;
     self->m_nextGazeAt =
         now + randomBetween(CFG_ELF_GAZE_MIN_MS, CFG_ELF_GAZE_MAX_MS);
     return;
   }
+  self->m_forceDoubleBlink = false;
   self->m_blinkIsSecond = false;
   self->m_nextBlinkAt =
       now + randomBetween(CFG_ELF_BLINK_MIN_MS, CFG_ELF_BLINK_MAX_MS);
@@ -1007,5 +1777,6 @@ void ElfOverlay::lookAt(int16_t, int16_t) {}
 void ElfOverlay::touchEnd() {}
 void ElfOverlay::poke(int16_t, int16_t) {}
 void ElfOverlay::setVehicleState(float, bool, bool) {}
+void ElfOverlay::setSoundFrame(const SoundFrame&) {}
 
 #endif  // CFG_ELF_ENABLE

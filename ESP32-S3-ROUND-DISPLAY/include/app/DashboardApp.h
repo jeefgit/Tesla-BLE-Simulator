@@ -1,5 +1,6 @@
 #pragma once
 
+#include "audio/SoundSensor.h"
 #include "config.h"
 #include "core/UiModel.h"
 #include "input/Cst9217Touch.h"
@@ -60,6 +61,15 @@ class DashboardApp {
   UiModel m_lastRenderedModel;
   bool m_hasRenderedModel = false;
   ElfOverlay m_elf;
+#if CFG_ELF_SOUND_ENABLE
+  // 声音采集只在小精灵可见时工作（阶段 5，见 ELF-DESIGN.md 5.10）。
+  SoundSensor m_sound;
+  // begin() 是否成功：失败时声音子状态保持 Off，不尝试采集。
+  bool m_soundReady = false;
+  bool m_soundStarted = false;
+  // 本次可见期间 start() 已失败：不再每轮重试，避免反复申请/释放 I2S。
+  bool m_soundStartFailed = false;
+#endif
   bool m_speedInitialized = false;
   float m_speedInputKmh = 0;
   float m_displaySpeedKmh = 0;

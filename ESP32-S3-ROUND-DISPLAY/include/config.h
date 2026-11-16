@@ -111,3 +111,22 @@
 #define CFG_ELF_BLINK_MAX_MS 6000UL
 #define CFG_ELF_GAZE_MIN_MS 2500UL
 #define CFG_ELF_GAZE_MAX_MS 5000UL
+
+// ---------------------------------------------------------------------------
+// 阶段 5：声音律动（design/ELF-DESIGN.md §5.6）
+//   只收不放：小精灵可见时用 ES7210 双麦感知音量/节拍，不录音、不上传。
+// ---------------------------------------------------------------------------
+#define CFG_ELF_SOUND_ENABLE 1           // 0 = 不初始化麦克风，完全沿用阶段 1–4
+#define CFG_ELF_SOUND_SAMPLE_RATE 16000  // ES7210 采样率
+#define CFG_ELF_SOUND_HOP_MS 16          // 特征帧移（分析窗口 32ms）
+#define CFG_ELF_SOUND_NOISE_GATE 10      // level 低于此值视为静音（0–255）
+#define CFG_ELF_SOUND_QUIET_MS 2000UL    // 静音多久回 Quiet
+#define CFG_ELF_SOUND_BEAT_MIN_BPM 60    // 有效节拍下限
+#define CFG_ELF_SOUND_BEAT_MAX_BPM 200   // 有效节拍上限
+#define CFG_ELF_SOUND_BEAT_REFRACTORY_MS 200UL  // 两拍最小间隔
+#define CFG_ELF_SOUND_BEAT_CONFIRM 2     // 1.2s 内至少几拍才进 Grooving
+#define CFG_ELF_SOUND_GROOVE_HOLD_MS 1600UL     // 无拍后保持律动的时间
+#define CFG_ELF_SOUND_BOUNCE_PX 12       // 弹跳最大行程
+#define CFG_ELF_SOUND_SWAY_PX 9          // 摇摆最大行程
+#define CFG_ELF_SOUND_LEVEL_GAIN 4       // ES7210 输入增益档位（按实机调）
+#define CFG_ELF_SOUND_LOG 0              // 1 = 每 500ms 打印 level/bpm/conf

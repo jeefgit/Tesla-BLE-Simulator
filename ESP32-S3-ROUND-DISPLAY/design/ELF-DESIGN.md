@@ -2,9 +2,9 @@
 
 目标硬件：**Waveshare ESP32-S3-Touch-AMOLED-1.75-B**（466×466 圆屏，CST9217 触摸，QMI8658 IMU）。
 
-一句话：**在仪表界面任意页面向左或向右滑动，浮出一只只有两只大眼睛的小精灵；不联网、不说话、不调大模型，纯本地动画。**
+一句话：**在仪表界面任意页面向左或向右滑动，浮出一只只有两只大眼睛的小精灵；不联网、不说话、不调大模型，纯本地动画；可选开启麦克风，听见环境里的音乐/拍手就跟着律动。**
 
-- 状态：阶段 1–4 已实现（显隐、眨眼/注视/呼吸、触摸追随、开心、困倦/入睡、充电打哈欠、车速瞳孔/急减速眯眼、耳朵/尾巴），待实机验证
+- 状态：阶段 1–4 已实现（显隐、眨眼/注视/呼吸、触摸追随、开心、困倦/入睡、充电打哈欠、车速瞳孔/急减速眯眼、耳朵/尾巴）；阶段 5「声音律动」已实现，待实机验证
 - 关联文档：`design/UI-DESIGN.md`（仪表界面）、`README.md`（固件说明）
 - 本文所有坐标均为 LVGL 画面坐标（已按屏幕旋转换算后的坐标）
 
@@ -18,14 +18,18 @@
 2. **可爱**：两只大眼睛会眨眼、会看人、会跟着手指转、会困；交互反馈在 100ms 内。
 3. **不打扰仪表**：默认隐藏，只有用户主动横滑才出现；再横滑退出（默认不超时自动退出）。
 4. **成本可控**：新增对象 < 25 个，不新增全屏图层，不新增字体/图片资源，不改 `platformio.ini`。
-5. **可回退**：一个 `CFG_ELF_ENABLE` 就能整体关掉。
+5. **可回退**：一个 `CFG_ELF_ENABLE` 就能整体关掉；声音功能再用一个 `CFG_ELF_SOUND_ENABLE` 单独关掉。
+6. **能听节拍**：小精灵可见时，用板载双麦感知环境音乐/拍手，提取“有没有声音、有多响、节拍多快”，驱动眼睛和身体律动。只做特征提取，不录音、不缓存音频、不上传、不播放声音。
+7. **不打扰**：没有声音时完全回到现有行为；睡眠状态下不被环境噪声吵醒；动画幅度有上限，不做全屏闪烁。
 
 ### 1.2 非目标（本期不做）
 
 - 语音唤醒、语音对话、联网、大模型（这是“小智”路线，不是本期）。
 - 复杂 3D / 精灵身体 / 场景 / 游戏。
 - 中文文案：固件没有中文字体，所有界面文字保持 ASCII。
-- 音效：板子有音频硬件，但本期不出声，避免和 BLE/显示抢资源。
+- 音频输出/音效：本期只做麦克风输入，不驱动 ES8311/扬声器，避免 PA 开关、I2S 播放和 BLE/显示抢资源。
+- 声源方位识别：双麦可以做到达时间差，但 466 屏上做“转头看声源”收益低、误判多，本期只做节拍与强度。
+- 云端曲库/歌曲识别/BPM 标签：没有任何联网路径。
 
 ---
 
@@ -96,6 +100,39 @@ stateDiagram-v2
 | 小精灵可见时到自动休眠时间 | 先隐藏小精灵，休眠逻辑照旧（触摸本身已重置静止计时） |
 | 触摸芯片初始化失败 | 手势不可用，小精灵永不显示，不影响仪表 |
 | 屏幕旋转 | 手势方向跟画面；小精灵本身居中，无需重排 |
+| 麦克风/ES7210 初始化失败 | 打印一次 `[AUDIO] init failed`，小精灵其余功能照常，声音子状态保持 `Off` |
+| 环境持续安静 | 2s 内无有效声音 → 回到现有 Idle 呼吸/眨眼，不做任何额外动画 |
+| 环境很吵但没有节拍（说话、风噪） | 只进入 `Listening`（轻微反应），不进入 `Grooving`，避免“乱抖” |
+| 睡眠（Sleepy/Sleeping）时出现声音 | **忽略**，不唤醒；避免夜间环境噪声把设备弄醒 |
+| 小精灵隐藏 | 立即停止 I2S，麦克风不工作；再次呼出时重新预热（约 200ms 内出第一帧） |
+| 同时有触摸和节拍 | 触摸优先：手指追随/轻点覆盖声音律动，松手 600ms 后声音律动恢复 |
+
+### 2.4 声音子状态（与主状态机正交）
+
+声音不是主状态机的新状态，而是一层**可叠加的“情绪层”**：主状态仍是 `Idle / Happy / Yawning / ...`，声音只决定 `Idle` 时的动画驱动源。这样不会破坏阶段 1–4 已验证的状态迁移。
+
+```mermaid
+stateDiagram-v2
+    [*] --> Off
+    Off --> Quiet: 小精灵可见且 begin() 成功
+    Quiet --> Listening: 有声（level ≥ 噪声门）
+    Listening --> Grooving: 1.2s 内连续 ≥ 2 拍
+    Grooving --> Grooving: 每检测到一拍，刷新 1.6s 保持窗口
+    Grooving --> Listening: 1.6s 无拍
+    Listening --> Quiet: 2s 静音
+    Quiet --> Off: 小精灵隐藏 / 关闭声音
+    Listening --> Off: 小精灵隐藏 / 关闭声音
+    Grooving --> Off: 小精灵隐藏 / 关闭声音
+```
+
+| 子状态 | 进入条件 | 视觉表现 |
+| --- | --- | --- |
+| `Off` | 隐藏、关闭声音、初始化失败 | 完全沿用阶段 1–4 |
+| `Quiet` | 静音或低于噪声门，持续 2s | 同 `Off`，只保留内部电平估计，不驱动动画 |
+| `Listening` | 电平超过噪声门，但节拍置信度不足 | 瞳孔略微放大、腮红随音量轻微变亮、注视方向随机轻移；不跳动 |
+| `Grooving` | 1.2s 内 ≥ 2 拍，且 BPM 在 60–200 | 跟随节拍跳动/摇摆/发光/眨眼，幅度与音量、BPM 相关 |
+
+> 声音层只在主状态为 `Idle` / `Blinking` 时生效；`Happy / Yawning / Squint / Sleepy / Sleeping / Hiding` 期间暂停声音动画（但音频特征照常更新，回到 Idle 后立即接上）。
 
 ---
 
@@ -217,6 +254,46 @@ stateDiagram-v2
 - 触摸时立刻看向手指（眼睛在屏幕内的相对位置），松手后 600ms 回到随机游走。
 - 轻点后眼睛看向手指 300ms 再回正，形成“被摸到”的反馈。
 
+### 4.3 声音律动动画（阶段 5）
+
+> 原则：**一拍只改几个属性，不新建动画对象。** 拍点很密（120 BPM = 每 500ms 一下），如果每一拍都 `lv_anim_start()`，动画句柄会频繁创建/销毁。声音律动统一用**一个衰减包络**驱动，定时器每 30ms 读取一次。
+
+记：
+
+- `level`：0–255 的对数音量（已做噪声门与平滑）。
+- `g`：律动强度 0–1，`g = max(level/255, bpm 权重)`，并做上限钳制。
+- `pulse`：拍点包络，检测到拍瞬间置 1，之后按 `exp(-t/120ms)` 衰减。
+
+| 动画 | 触发/驱动 | 参数 | 实现（只改属性） |
+| --- | --- | --- | --- |
+| **节拍弹跳** | 每拍 `pulse` | 身体 y 偏移 `- (4 + 8g) * pulse`，90ms 到达、160ms 回落 | 30ms 定时器直接 `lv_obj_set_y(m_body, ...)` |
+| **左右摇摆** | Grooving 常驻 | 身体 x `± (4 + 5g) * sin(2π · beatPhase)`；每拍换向 | 直接改 `x`，与弹跳叠加 |
+| **开心眼** | 每拍 | 眼睛高度 `150 + (4 + 6g) * pulse`，中心不变（`y = 208 - h/2`） | 直接改 `height/y` |
+| **瞳孔呼吸** | level / 每拍 | 瞳孔基准 `74 + 6g`，拍点再 `+4 * pulse`；上限 90 | 直接改 `size`，与车速瞳孔统一取最大值 |
+| **腮红变亮** | level | 不透明度 `12% + 20% * level/255` | 直接改 `bg_opa` |
+| **嘴型张开** | level | 高度 `14 + 10 * level/255`（最大 24） | 直接改 `height`（圆角不变） |
+| **耳朵/尾巴** | 每拍 | 耳朵 y `-4 * pulse`；尾巴三颗按低/中/高能量轻微伸缩，作为“三格电平表” | 直接改 `y/size`，不新增对象 |
+| **光环呼吸** | `g` | 装饰弧边框不透明度 `8% + 12% * g + 8% * pulse`，上限 30% | 直接改 `border_opa` |
+| **节拍眨眼** | 每 4 拍 | 快速单眨一次（闭 70ms / 睁 110ms） | 复用现有眨眼状态机 |
+| **高潮反应** | 每 8 拍或 BPM > 150 | 连眨两下 + 身体弹跳幅度 ×1.3 | 复用现有 Happy/连眨 |
+| **停止律动** | Grooving → Listening | 500ms 内把上述偏移平滑归零，恢复呼吸与随机注视 | 定时器插值，不硬切 |
+
+**幅度分级**（避免所有歌看起来一样）：
+
+| 条件 | `g` | 表现 |
+| --- | --- | --- |
+| `level < 噪声门` | 0 | 完全静态 |
+| 轻声/说话 | 0.2–0.4 | 只眨眼、腮红微亮、眼睛轻微跟随 |
+| 正常音乐 | 0.4–0.7 | 弹跳 + 摇摆 + 瞳孔变化 |
+| 大声/快歌（BPM ≥ 140 或 level ≥ 200） | 0.7–1.0 | 加耳朵/尾巴、8 拍高潮、弹跳上限 |
+
+**冲突处理（关键）**：
+
+1. 呼吸动画和节拍弹跳都改 `m_body.y`。进入 Grooving 时先 `stopBreathing()`，退出后重新 `startBreathing()`；否则两个动画会互相抢属性。
+2. 车速瞳孔、Happy 瞳孔、声音瞳孔都改瞳孔大小。改为**单一目标值函数** `updatePupilTarget()`：先取车速/Happy 的基准，再叠加声音偏移并钳制上限，禁止多个 `lv_anim` 同时写同一个对象。
+3. 声音律动期间暂停“随机注视”，改用节拍换向的视线；触摸仍然最高优先级。
+4. 不做全屏透明度/缩放，不做高于 3Hz 的亮度闪动；`pulse` 是衰减包络，不是方波闪烁，减少视觉疲劳和 AMOLED 烧屏风险。
+
 ---
 
 ## 5. 技术方案
@@ -226,8 +303,11 @@ stateDiagram-v2
 新增一个独立 UI 组件，不往 `LvglDashboard` 里塞逻辑：
 
 ```text
-include/ui/ElfOverlay.h      # 对外接口
-src/ui/ElfOverlay.cpp        # 对象树 + 动画状态机 + 内部 lv_timer
+include/ui/ElfOverlay.h        # 对外接口
+src/ui/ElfOverlay.cpp          # 对象树 + 动画状态机 + 内部 lv_timer
+
+include/audio/SoundSensor.h    # 声音感知对外接口（阶段 5）
+src/audio/SoundSensor.cpp      # ES7210 + I2S TDM + 特征提取任务
 ```
 
 ```cpp
@@ -250,16 +330,53 @@ class ElfOverlay {
 
 推荐**内部自带一个 50ms 的 `lv_timer`** 做状态机（眨眼调度、困倦、自动隐藏），`DashboardApp` 只负责手势和转发触摸坐标。理由：`display.loop()` 里已经统一跑 `lv_timer_handler()`，不需要在 `DashboardApp::loop()` 再加一套时间判断。
 
+阶段 5 再增加一个独立的声音模块，ElfOverlay 只消费特征，不碰 I2S：
+
+```cpp
+// 音频线程发布的最新一帧特征（只读快照，不包含任何原始采样）。
+struct SoundFrame {
+  uint8_t level;        // 0–255 对数音量（已做噪声门/平滑）
+  uint8_t low;          // 0–255 低频（40–180Hz）能量，用于节拍
+  uint8_t bpm;          // 0 = 未知，60–200
+  uint8_t confidence;   // 0–255 BPM 置信度
+  uint8_t beatCount;    // 累计拍数，用来判断“这一帧有没有新拍”
+  bool beat;            // 自上次 read() 起是否出现过新拍（读取即清）
+  bool loud;            // 是否超过噪声门
+};
+
+class SoundSensor {
+ public:
+  bool begin();                 // 初始化 I2C/ES7210/I2S；失败返回 false
+  bool start();                 // 小精灵显示时启动采集任务
+  void stop();                  // 小精灵隐藏时停止并释放 DMA
+  bool running() const;
+  SoundFrame read();            // 主线程读取最新快照
+  bool available() const;       // begin() 是否成功
+};
+```
+
+约定：
+
+- 音频采集和特征计算跑在**独立 FreeRTOS 任务**（core 1，优先级 2，栈 4KB），每 16ms 读一块 I2S 数据；
+- 任务只写一个 `SoundFrame` 快照（临界区/双缓冲），LVGL 定时器只读快照，**绝不在音频任务里调用 LVGL**；
+- `read()` 返回后清掉一次性 `beat` 标志，避免每个 30ms tick 重复触发弹跳。
+
 ### 5.2 与现有代码的接入点
 
 | 文件 | 改动 |
 | --- | --- |
-| `include/app/DashboardApp.h` | 增加 `#include "ui/ElfOverlay.h"`、成员 `ElfOverlay m_elf;`、横向手势状态 `m_elfSwipeLatched`、`m_touchMaxTravel` |
-| `src/app/DashboardApp.cpp` | `begin()` 里 `dashboard.begin()` 之后调用 `m_elf.begin()`（保证浮层在开机图层之上）；`pollTouch()` 增加横向累计与显隐/轻点判定（按下/移动转发 `lookAt`、松手转发 `touchEnd`）；`loop()` 里小精灵可见时**只暂停仪表重绘、BLE 轮询保持**，并在可见性下降沿强制补画一帧；每轮调用 `m_elf.setVehicleState(...)` 传递实时车速/充电状态 |
-| `include/config.h` | 新增 `CFG_ELF_*` 开关与阈值 |
+| `include/app/DashboardApp.h` | 增加 `#include "ui/ElfOverlay.h"`、成员 `ElfOverlay m_elf;`、横向手势状态 `m_elfSwipeLatched`、`m_touchMaxTravel`；阶段 5 增加 `#include "audio/SoundSensor.h"`、成员 `SoundSensor m_sound;` |
+| `src/app/DashboardApp.cpp` | `begin()` 里 `dashboard.begin()` 之后调用 `m_elf.begin()`（保证浮层在开机图层之上）；`pollTouch()` 增加横向累计与显隐/轻点判定（按下/移动转发 `lookAt`、松手转发 `touchEnd`）；`loop()` 里小精灵可见时**只暂停仪表重绘、BLE 轮询保持**，并在可见性下降沿强制补画一帧；每轮调用 `m_elf.setVehicleState(...)` 传递实时车速/充电状态；阶段 5 在 `m_elf.show()` 后 `m_sound.start()`、`hide()` 完成或可见性下降沿 `m_sound.stop()`，并每轮把 `m_sound.read()` 喂给 `m_elf.setSoundFrame(...)` |
+| `include/audio/SoundSensor.h` | 新增：I2S/ES7210 初始化、采集任务、节拍/BPM 特征输出 |
+| `src/audio/SoundSensor.cpp` | 新增：ES7210 寄存器初始化 + `driver/i2s_tdm.h` 接收 + 能量/鼓点分析 |
+| `include/ui/ElfOverlay.h` | 新增 `setSoundFrame(const SoundFrame&)`、声音子状态、包络变量、`updatePupilTarget()` |
+| `src/ui/ElfOverlay.cpp` | 新增 `applySound()`，30ms 声音动画 tick；Grooving 时停呼吸、接管 body/pupil；退出后恢复 |
+| `include/config.h` | 新增 `CFG_ELF_*` 开关与阈值、`CFG_ELF_SOUND_*` 参数 |
 | `README.md` | 增加一节“离线小精灵”与本文链接（可选，建议加） |
 
-**不改** `platformio.ini`、`lv_conf.h`、显示驱动、BLE 后端。
+**不改** `platformio.ini`、`lv_conf.h`、显示驱动、BLE 后端、`RoundDisplay`/`LvglDashboard`。
+
+> I2S 驱动使用 Arduino-ESP32 已内置的 ESP-IDF 组件（`driver/i2s_tdm.h`），不需要在 `platformio.ini` 增加依赖。ES7210 没有现成库，采用**最小寄存器初始化表**（从微雪 BSP / 06_ES7210 示例移植），避免为了一个麦克风引入 `esp_codec_dev` 整棵依赖树。
 
 ### 5.3 手势接入伪代码
 
@@ -332,11 +449,18 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
     now - m_lastRenderMs >= 50) {
   ...
 }
+
+#if CFG_ELF_SOUND_ENABLE
+if (m_elf.visible()) {
+  m_elf.setSoundFrame(m_sound.read());  // 无锁快照，小精灵内部再消费
+}
+#endif
 ```
 
 - **小精灵可见期间保持数据轮询**：`m_source.loop()` 照常调用，`UiModel` 持续更新，充电打哈欠、车速瞳孔、急减速眯眼才能实时联动。
 - **只暂停仪表重绘**（`!m_elf.visible()`），避免浮层后面的仪表白白刷屏。
 - `hide()` 完成后强制 `m_hasRenderedModel = false;`，下一轮一定重画一帧，退出后仪表立刻显示最新数据。
+- **声音采集只跟随可见性**：`show()` 成功启动后 `m_sound.start()`；可见性下降沿（含 Hiding 动画结束）`m_sound.stop()`。不要在 `loop()` 里每帧 start/stop。
 
 ### 5.5 LVGL / 性能注意事项（本项目踩过的坑）
 
@@ -350,6 +474,15 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 8. **AMOLED 纯白**：眼球用 `#E8F7FF`，并把高光不透明度控制在 90% 以内。
 9. **横滑要持续累计位移**：判定为横向手势后仍要在每次 `pollTouch()` 里更新 `dx`，不能提前退出函数。阶段 1 实机出现过慢速横滑无效，就是这个原因。
 10. **不要依赖左右方向**：触摸 X 轴与画面存在镜像可能，横滑显隐按 `|dx|` 判断，左右都能呼出/退出。
+11. **音频任务不碰 LVGL**：I2S 任务里只能改 `SoundFrame` 快照；LVGL 只能在 `lv_timer`/主任务里改。跨线程直接 `lv_obj_set_*` 会偶发花屏/死机。
+12. **拍点包络代替逐拍动画**：120 BPM 下每 500ms 一个 `lv_anim` 虽然能跑，但会和呼吸、注视、瞳孔动画抢同一属性。统一用一个 `pulse` 变量 + 30ms tick。
+13. **呼吸/弹跳互斥**：进入 Grooving 必须 `stopBreathing()`，退出再恢复；否则 `m_body.y` 被两个动画同时写。
+14. **瞳孔只允许一个写入者**：车速、Happy、声音三者叠加后统一写一次，避免动画“打架”导致瞳孔抖动。
+15. **麦克风只在可见时开**：隐藏后必须 `i2s_channel_disable` + 停任务，否则白耗电，也会让用户担心隐私。
+16. **不要用 FFT 做第一版**：16kHz 下 512 点 FFT 当然能跑，但第一版只需要低频能量和鼓点，用 DC 阻断 + 二阶低通 + 能量包络就够，CPU 和代码复杂度都低一个量级。
+17. **不要在 MCU 上做 AGC 过度补偿**：自动增益会把安静时的底噪也放大，导致小精灵在无声环境乱跳；只做固定增益 + 噪声门。
+18. **ES7210 模拟供电**：板上 codec 模拟电源由 AXP2101 ALDO1（A3V3）提供。若读到的采样恒为 0，先确认 ALDO1 已开启，再查 MCLK/BCLK/LRCK/DIN 和 ES7210 寄存器，不要盲目改算法。
+19. **MCLK 引脚以当前 BSP 为准**：硬件参考里 MCLK = GPIO42（不是 GPIO16）。论坛上有人照旧原理图接 GPIO16 导致全 0，已确认 GPIO42 可用。
 
 ### 5.6 配置项（`include/config.h`）
 
@@ -366,6 +499,22 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 #define CFG_ELF_BLINK_MAX_MS 6000UL
 #define CFG_ELF_GAZE_MIN_MS 2500UL
 #define CFG_ELF_GAZE_MAX_MS 5000UL
+
+// 阶段 5：声音律动
+#define CFG_ELF_SOUND_ENABLE 1           // 0 = 不初始化麦克风，完全沿用阶段 1–4
+#define CFG_ELF_SOUND_SAMPLE_RATE 16000  // ES7210 采样率
+#define CFG_ELF_SOUND_HOP_MS 16          // 特征帧移（分析窗口 32ms）
+#define CFG_ELF_SOUND_NOISE_GATE 10      // level 低于此值视为静音（0–255）
+#define CFG_ELF_SOUND_QUIET_MS 2000UL    // 静音多久回 Quiet
+#define CFG_ELF_SOUND_BEAT_MIN_BPM 60    // 有效节拍范围
+#define CFG_ELF_SOUND_BEAT_MAX_BPM 200
+#define CFG_ELF_SOUND_BEAT_REFRACTORY_MS 200UL  // 两拍最小间隔
+#define CFG_ELF_SOUND_BEAT_CONFIRM 2     // 1.2s 内至少几拍才进 Grooving
+#define CFG_ELF_SOUND_GROOVE_HOLD_MS 1600UL     // 无拍后保持律动的时间
+#define CFG_ELF_SOUND_BOUNCE_PX 12       // 弹跳最大行程
+#define CFG_ELF_SOUND_SWAY_PX 9          // 摇摆最大行程
+#define CFG_ELF_SOUND_LEVEL_GAIN 4       // ES7210 输入增益档位（按实机调）
+#define CFG_ELF_SOUND_LOG 0              // 1 = 每 500ms 打印 level/bpm/conf
 ```
 
 ### 5.7 内存与帧率预算
@@ -374,10 +523,115 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 | --- | --- |
 | LVGL 对象 | ~24 个（含 2 眼 × 5 部件 + 腮红/嘴/弧/2 耳/3 尾/3 z） |
 | 对象内存 | < 6KB |
-| 动画 | 同时最多 3 个（呼吸 + 眨眼 + 视线） |
+| 动画 | 同时最多 3 个（呼吸 + 眨眼 + 视线）；声音律动不新增 `lv_anim` |
 | 单帧重绘 | < 32K px（约 15% 屏），远低于仪表整屏刷新 |
 | 额外 PSRAM | 0（不用 canvas / 图片） |
 | 预期帧率影响 | 可忽略；BLE 轮询不受影响 |
+| 声音：I2S DMA | 4 个描述符 × 256 帧 × 8B ≈ 8KB（16kHz、16bit、4 时隙） |
+| 声音：分析缓冲 | 512 点环形缓冲 + 特征状态 < 2KB（内部 RAM） |
+| 声音：任务栈 | 4KB（core 1，优先级 2） |
+| 声音：CPU | 约 2–4%（16kHz，DC 阻断 + 2 个低通 + RMS，无 FFT） |
+| 声音：额外对象 | **0 个**（复用眼睛/身体/腮红/嘴/耳朵/尾巴/光环） |
+
+### 5.8 音频硬件与驱动
+
+**硬件（已核对官方硬件参考）**：
+
+| 信号 | GPIO | 说明 |
+| --- | ---: | --- |
+| MCLK | 42 | ES8311 / ES7210 共用主时钟 |
+| BCLK | 9 | 位时钟 |
+| LRCK / WS | 45 | 帧时钟 |
+| DIN（采集） | 10 | ES7210 → ESP32-S3 |
+| DOUT（播放） | 8 | 本期不使用 |
+| PA_CTRL | 46 | 本期不驱动，保持关闭 |
+| ES7210 I2C | 0x40 | 与触摸/IMU/PWR 键共用 14/15 总线 |
+| 麦克风 | MIC1 / MIC2 | 两个板载前置麦；MIC3 是 ES8311 播放参考（本期不用），MIC4 未接 |
+
+**初始化顺序**（`SoundSensor::begin()`）：
+
+1. `Wire` 已由 `DashboardApp` 启动（触摸/PWR 键共用），直接复用，不重复 `Wire.begin()`。
+2. 复位/唤醒 ES7210（软复位 + 上电序列），写最小寄存器表：**从模式**（I2S 主控是 ESP32-S3）、16kHz、16bit、TDM 4 时隙、MIC1/MIC2 使能、增益 `CFG_ELF_SOUND_LEVEL_GAIN`。
+3. 配置 I2S RX 为 TDM 模式：
+   - `i2s_new_channel()` 只建 RX（`tx_handle = nullptr`），角色 master；
+   - 时钟：16kHz、MCLK ×256、BCLK = 64×fs；
+   - 槽位：4 × 16bit（`I2S_TDM_SLOT0..3`），每帧 8 字节；
+   - `auto_clear = true`，DMA 4 个描述符，每个 256 帧（约 16ms）。
+4. `i2s_channel_enable()` 后先丢弃前 8 帧（约 130ms），等 ES7210 高通/偏置稳定，再开始发布特征。
+5. 任一步失败 → 释放已申请资源，返回 `false`；上层只打印一次日志，不重试、不影响小精灵。
+
+**声道选择**：TDM 四时隙顺序是 MIC1、MIC3（参考）、MIC2、MIC4。取 **slot0（MIC1）与 slot2（MIC2）**，两路相加/取较大者，抑制单麦被手指或外壳挡住导致的漏检。
+
+**供电注意**：codec 模拟电源来自 AXP2101 的 ALDO1（A3V3）。当前工程没有 AXP2101 驱动；若 `begin()` 成功但采样恒为 0，按以下顺序排查：
+
+1. 用示波器/逻辑分析仪确认 GPIO42/9/45 有时钟、GPIO10 有数据；
+2. 读 ES7210 寄存器确认未静音、增益正确；
+3. 必要时通过 I2C `0x34` 写 AXP2101，打开 ALDO1 3.3V（只写电源寄存器，不引入完整电源驱动）；
+4. 以上都正常仍为 0，再检查焊接/麦克风孔是否被外壳堵住。
+
+### 5.9 节拍分析算法（第一版，无 FFT）
+
+目标不是“识别歌曲”，而是**稳定地知道现在有没有拍子、多快、多响**。采样率 16kHz、窗口 32ms（512 点）、帧移 16ms。
+
+```text
+I2S TDM 4ch ──取 slot0/2 平均──► DC 阻断 ──► 低通(180Hz)×2 ──► 低频能量
+                                   │
+                                   └──► 全带 RMS ──► level（对数 + 平滑）
+低频能量序列 ──► 与 1.5s 慢速基线比较 ──► onset 强度
+onset 序列 ──► 局部峰值 + 200ms 不应期 ──► 拍点
+拍点间隔 ──► 中位数 + 平滑 ──► BPM / confidence
+```
+
+1. **DC 阻断**：`y[n] = x[n] - x[n-1] + 0.995 * y[n-1]`，去掉麦克风偏置和低频漂移。
+2. **低频能量**：两级一阶低通（截止约 180Hz）后求均方；只关心底鼓/贝斯/拍手的主要能量。
+3. **全带电平**：去 DC 后的 RMS → `20log10` → 映射到 0–255；再做 200ms 慢速平滑，作为 `level`。
+4. **Onset**：
+   - 基线 `baseline` 用 1.5s 慢速 EMA；
+   - `onset = max(0, lowEnergy / (baseline + ε) - 1)`；
+   - 只有 `level > 噪声门` 且 `onset > 0.6`（可调）才候选。
+5. **峰值确认 + 不应期**：
+   - 候选值必须大于前一帧与后一帧（延迟 1 帧确认，16ms）；
+   - 距上一拍 < 200ms 的候选丢弃（对应最高 300 BPM，覆盖快歌）；
+   - 连续 3 拍间隔稳定（±25%）才把 `confidence` 拉高。
+6. **BPM**：
+   - 取最近 8 个有效 IOI 的中位数 → `60000 / ioi`；
+   - 折叠到 60–200（例如 240 → 120，避免把八分音符当主拍）；
+   - 与上一值相差 < 8% 时平滑跟随，否则 1s 后再切换，避免显示值乱跳。
+7. **静音判定**：`level < CFG_ELF_SOUND_NOISE_GATE` 持续 2s → `Quiet`，`bpm = 0`。
+8. **可选增强（第二阶段再做）**：3 段 Goertzel（低/中/高）驱动尾巴三颗圆点做电平表；双麦时延差做左右声源（本期不做）。
+
+**为什么不用 FFT**：第一版只需要低频能量包络；512 点 FFT 每 16ms 一次在 S3 上也能跑，但会引入复数运算、窗函数和频谱峰值挑选，调参成本高。等节拍稳定后，再按需加 Goertzel 频段。
+
+### 5.10 数据流与线程模型
+
+```text
+core 1: SoundSensor task (16ms)
+  I2S read → 特征计算 → 写 SoundFrame 快照（portMUX 临界区，<10µs）
+        │
+        ▼
+主任务: DashboardApp::loop()
+  m_elf.setSoundFrame(m_sound.read());   // 只拷贝 8 字节，无锁等待
+        │
+        ▼
+LVGL thread: ElfOverlay 30ms lv_timer
+  读 m_soundFrame → 更新 pulse / groove 包络 → 只改小对象属性
+```
+
+- `SoundSensor::read()` 使用双缓冲 + 序号（seqlock）或 `portMUX_TYPE`，主任务绝不阻塞等待 I2S。
+- `beat` 是一次性标志：`read()` 读取后清零，ElfOverlay 在同一 tick 内消费。
+- 音频任务优先级低于 BLE/LVGL 主循环，避免抢占导致掉帧；栈 4KB，看门狗喂狗由主循环负责。
+
+### 5.11 调试与调参
+
+| 手段 | 说明 |
+| --- | --- |
+| `CFG_ELF_SOUND_LOG = 1` | 每 500ms 打印 `[AUDIO] lvl=... low=... bpm=... conf=... beat=...`；状态切换另有 `[ELF] sound ...` |
+| 静音基线 | 上电后 3s 内不触发节拍，只记录环境底噪；日志里 `lvl` 应稳定在 0–8 |
+| 节拍器 | 手机播放 60/90/120/150 BPM，确认 `bpm` 在 ±5 内、`beat` 与声音同步 |
+| 拍手 | 单次拍手应只产生 1 拍；连续拍手 8 次应进入 Grooving |
+| 音乐 | 低音明显的歌优先；只有人声/高频的歌允许只进 `Listening` |
+| 误触发 | 敲桌子/触摸屏幕不应连续触发；必要时提高 `NOISE_GATE` 或 `onset` 阈值 |
+| 延迟 | 拍点到画面变化目标 < 100ms（分析 16–32ms + 定时器 ≤30ms） |
 
 ---
 
@@ -433,6 +687,25 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 > - 耳朵/尾巴：2 个 52px 圆 + 3 个 18/22/26px 圆，颜色 `#2A5A68`、不透明度约 78%，挂在 `m_body` 且位于眼睛之前，随呼吸一起漂移。
 > - 嘴：`#9FB4C4`，常态 120、Happy/哈欠 235，不再隐藏。
 
+### 阶段 5：听见律动（已完成代码，待实机验证）
+
+- [ ] **5.0 麦克风点亮**：独立测试日志（或 `CFG_ELF_SOUND_LOG`）能稳定打印 RMS/峰值；确认 ES7210 供电、MCLK=42、16kHz TDM 四时隙。**（需实机确认）**
+- [x] **5.1 `SoundSensor` 驱动**：`begin/start/stop/read`，失败安全回退；隐藏时停 I2S。
+- [x] **5.2 特征提取**：DC 阻断、低频能量、全带 level、onset、拍点、BPM、confidence。
+- [x] **5.3 接入 ElfOverlay**：`setSoundFrame()`，声音子状态 `Off/Quiet/Listening/Grooving`。
+- [x] **5.4 律动动画**：弹跳、摇摆、瞳孔/腮红/嘴、耳朵尾巴、光环、4/8 拍特殊动作；呼吸与声音互斥。
+- [ ] **5.5 调参与回归**：节拍器/音乐/拍手/静音/噪声；BLE 连接下测试；确认无 LVGL 堆问题、无掉帧。**（需实机确认）**
+- [x] **5.6 文档与开关**：`CFG_ELF_SOUND_ENABLE=0` 时编译与运行完全回到阶段 4。
+
+> 实现要点：
+> - `SoundSensor` 内部用 core 1 任务按 16ms 帧移读 I2S TDM（16kHz/16bit/4 槽，slot0/2 取 MIC1/MIC2），只发布 8 字节 `SoundFrame` 快照；`read()` 在 `portMUX` 临界区拷贝后清一次性 `beat`，主循环不阻塞。
+> - `begin()` 顺序很关键：ES7210 挂在触摸/IMU/PWR 共用的 15/14 `Wire` 上，必须在 `beginPowerButton()` 的 `Wire.begin()` 之后初始化；失败只关闭声音子状态，不阻塞启动。
+> - `ElfOverlay` 新增独立 30ms 定时器：`pulse` 为拍点衰减包络，`grooveW` 为 150ms 淡入/500ms 淡出的律动权重；Grooving 期间 `m_body.y` 由声音层接管（弹跳），呼吸暂停，退出淡出后自动恢复。触摸优先：`lookAt()`/`touchEnd()` 后 600ms 内声音层不写身体 x/y 与虹膜。
+> - 瞳孔只有一个写入者 `updatePupilTarget()`：车速/Happy 基准 + 声音偏移，统一钳制到 90；Listening 只轻微放大瞳孔/腮红/光环，Grooving 额外驱动弹跳、摇摆、嘴高、耳朵、尾巴三格电平和光环。
+> - 4 拍复用现有眨眼状态机快速单眨，8 拍（或 BPM > 150）把当拍 `g` 临时 ×1.3；不新增任何 LVGL 对象，也不新增 `lv_anim`（统一用一个衰减包络）。
+> - 调试：`CFG_ELF_SOUND_LOG = 1` 时，启动前 2s 每 250ms 打印 `[AUDIO] slot0..3` 的 RMS，之后每 500ms 打印 `[AUDIO] lvl/low/bpm/conf/beat`；状态切换打印 `[ELF] sound quiet/listening/groove/groove end`。
+> - 实机若 `slot0` 有声音但 `slot2` 恒 0，优先改 ES7210 `0x12`（TDM 槽序）；若全 0，先查 AXP2101 ALDO1（A3V3）与 MCLK=GPIO42，再动算法阈值。
+
 ---
 
 ## 7. 验收标准
@@ -445,6 +718,13 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 6. 不出现 LVGL 堆不足/重启；串口无 `StoreProhibited`、无看门狗。
 7. 眨眼/注视动画无撕裂、无明显掉帧；BLE 驾驶数据刷新间隔无可感知变化。
 8. 关闭 `CFG_ELF_ENABLE` 后，固件行为与当前版本完全一致。
+9. 声音开启后，静音环境连续 5 分钟不出现律动/误触发；`Listening` 不常驻。
+10. 手机节拍器 90 BPM 与 120 BPM：显示 BPM 误差 ≤ ±5，拍点与画面变化延迟 ≤ 100ms。
+11. 连续拍手 8 次或播放低音清晰的音乐能稳定进入 `Grooving`，停止后 1.6s 内平滑回到 `Idle`。
+12. 大声说话/风噪最多进 `Listening`，不出现持续抽搐式弹跳。
+13. 小精灵隐藏后麦克风停止工作（可用功耗或日志确认），再次呼出 200ms 内恢复响应。
+14. 声音功能开启时，BLE 连接、车速联动、充电打哈欠、触摸追随均无回归；无看门狗、无 `StoreProhibited`。
+15. `CFG_ELF_SOUND_ENABLE=0` 时不初始化 I2S/ES7210，固件行为与阶段 4 完全一致。
 
 ## 8. 待确认
 
@@ -452,8 +732,11 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
    已定：做成**方向不敏感**——隐藏时左右横滑都呼出，显示时左右横滑都退出。原因：实机触摸 X 轴与画面方向存在镜像，固定方向会导致文档与手感相反。
 2. **自动隐藏时长**：已改为默认关闭（`CFG_ELF_AUTO_HIDE_MS = 0`），需要时设 45000。
 3. **是否需要身体**：已定——只加低对比度耳朵/尾巴剪影，不做完整身体，避免抢眼睛。
-4. **是否要声音**：本期静音；若后续加“摸头音效”，需要评估 I2S 与 BLE 的共存。
+4. **是否要声音**：已定——**只收不放**。阶段 5 用板载 ES7210 双麦做环境节拍感知，不驱动扬声器、不做语音识别/唤醒；后续若加“摸头音效”，再单独评估 ES8311/PA 与 BLE 的共存。
 5. **是否联动车辆状态**：已实现充电打哈欠、车速瞳孔、急减速眯眼、行驶中保持清醒（本地实时数据，不联网）。
+6. **声音默认开还是关**：建议默认 `CFG_ELF_SOUND_ENABLE=1`，但只在可见时工作；如果实机底噪大/误触发多，可先默认 0，调好参数再打开。
+7. **要不要做声源方位**：本期不做。双麦时延差需要更复杂的校准，且圆屏上“转头看声源”容易和随机注视混淆。
+8. **要不要在屏幕上提示“正在听”**：本期不加新对象；如需要，可让光环在 `Listening` 时轻微呼吸变亮，避免额外文案/图标。
 
 ---
 
@@ -475,8 +758,10 @@ lv_screen_active()
         │   └── ... 同左
         ├── m_blushL (34×16 @ 103,298)
         ├── m_blushR (34×16 @ 329,298)
-        ├── m_mouth  (44×14 @ 211,342, 默认 hidden)
+        ├── m_mouth  (44×14 @ 211,342, 常态低亮度可见)
         └── m_z[0..2] ("z" ×3, 右上角错峰闪烁, 默认 hidden)
 ```
 
 > 高光挂在**虹膜**下而不是瞳孔下，这样瞳孔放大时高光位置稳定，不会跟着“漂”。
+
+> 阶段 5 声音律动**不新增任何 LVGL 对象**：弹跳用 `m_body`、发光用 `m_aura`、电平表用已有的 `m_tail[3]`、张嘴用 `m_mouth`、瞳孔/腮红用已有部件。对象数保持 ~24 个。

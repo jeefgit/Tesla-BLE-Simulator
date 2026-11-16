@@ -3,6 +3,8 @@
 #include <lvgl.h>
 #include <stdint.h>
 
+#include "audio/SoundSensor.h"
+
 // 离线小精灵浮层（见 design/ELF-DESIGN.md）。
 //
 // 对象树在 begin() 时一次性建好，之后只改属性；默认隐藏。
@@ -35,7 +37,13 @@ class ElfOverlay {
   //   speedValid=false 时视为无车速；charging=true 时定期打哈欠。
   void setVehicleState(float speedKmh, bool speedValid, bool charging);
 
+  // 阶段 5：主循环每轮传入最新声音快照；只在可见时调用。
+  void setSoundFrame(const SoundFrame& frame);
+
  private:
+  // 声音子状态（与主状态机正交，见 design/ELF-DESIGN.md §2.4）。
+  enum class SoundLevel : uint8_t { Off, Quiet, Listening, Grooving };
+
   enum class State : uint8_t {
     Hidden,
     Waking,
@@ -54,6 +62,8 @@ class ElfOverlay {
   void onTimer();
   void startBreathing(uint32_t halfPeriodMs);
   void stopBreathing();
+  // 从当前 y 平滑过渡回呼吸起点（声音层退出时用，避免 22px 跳变）。
+  void resumeBreathing();
   void startBlink();
   void startGaze();
   void animateEyes(int32_t fromHeight, int32_t toHeight, uint32_t durationMs,
@@ -71,11 +81,25 @@ class ElfOverlay {
   void startZzz();
   void stopZzz();
 
+  // 声音层（30ms 定时器，只做视觉；状态机仍由 50ms 定时器驱动）。
+  void onSoundTimer();
+  void updateSoundState(uint32_t now);
+  void applySoundVisuals(uint32_t now, uint32_t dt);
+  void handleSoundBeat(uint32_t now);
+  void enterGroove(uint32_t now);
+  void resetSoundVisuals(bool animate);
+  void resetSoundState();
+  void updatePupilTarget();
+  bool soundTintActive() const;
+
   static void timerCallback(lv_timer_t* timer);
+  static void soundTimerCallback(lv_timer_t* timer);
   static void setEyeOpen(void* var, int32_t height);
   static void setGazeX(void* var, int32_t x);
   static void setGazeY(void* var, int32_t y);
   static void setBodyY(void* var, int32_t y);
+  static void setBodyYOnSelf(void* var, int32_t y);
+  static void onResumeBreathDone(lv_anim_t* anim);
   static void setBodyX(void* var, int32_t x);
   static void setPupilSize(void* var, int32_t size);
   static void setBlushOpa(void* var, int32_t opacity);
@@ -124,4 +148,53 @@ class ElfOverlay {
   // 本次眨眼是否是“连眨”的第二下，避免无限连眨。
   bool m_blinkIsSecond = false;
   bool m_built = false;
+
+  // --- 阶段 5：声音律动 ---
+  lv_timer_t* m_soundTimer = nullptr;
+  SoundLevel m_soundLevel = SoundLevel::Off;
+  uint8_t m_level = 0;
+  uint8_t m_low = 0;
+  uint8_t m_bpm = 0;
+  uint8_t m_confidence = 0;
+  bool m_loudFlag = false;
+  bool m_soundHadFrame = false;
+  // 一次性拍点：主循环可能快于 30ms tick，先累计再消费，避免丢拍。
+  bool m_pendingBeat = false;
+  // 8 拍 / 快歌的下一拍眨眼要连眨两下（一次性）。
+  bool m_forceDoubleBlink = false;
+  uint32_t m_soundFrameAt = 0;
+  uint32_t m_soundLastTick = 0;
+  uint32_t m_lastBeatAt = 0;
+  uint32_t m_lastSoundLoudAt = 0;
+  uint32_t m_beatWindowStart = 0;
+  int16_t m_beatsInWindow = 0;
+  int16_t m_beatInGroove = 0;
+  uint32_t m_grooveBoostUntil = 0;
+  uint32_t m_soundYieldUntil = 0;
+  // pulse：拍点衰减包络（1 → 0）；g：律动强度（0..1）。
+  float m_pulse = 0;
+  float m_soundYOffset = 0.0f;  // 声音层接管呼吸时的 body.y 残留偏移
+  float m_g = 0;
+  // grooveW：Grooving 偏移权重，进入快速升到 1，退出 500ms 降到 0。
+  float m_grooveW = 0;
+  float m_soundBodyX = 0;
+  float m_soundGazeX = -10000;
+  float m_soundGazeY = -10000;
+  int8_t m_soundSwayDir = 1;
+  bool m_soundTintApplied = false;
+  bool m_soundVisApplied = false;
+  bool m_soundBreathStopped = false;
+
+  // 属性缓存：只在值变化时调用 lv_obj_set_*，避免无谓重绘。
+  int32_t m_lastBodyX = -10000;
+  int32_t m_lastBodyY = -10000;
+  int32_t m_lastEyeH = -10000;
+  int32_t m_lastMouthH = -10000;
+  int32_t m_lastEarY = -10000;
+  int32_t m_lastTailSize[3] = {-10000, -10000, -10000};
+  int32_t m_lastPupilSize = -10000;
+  int32_t m_lastBlushOpa = -10000;
+  int32_t m_lastAuraOpa = -10000;
+  int32_t m_lastGazeX = -10000;
+  int32_t m_lastGazeY = -10000;
 };
