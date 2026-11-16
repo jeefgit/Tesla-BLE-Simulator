@@ -117,6 +117,10 @@
 //   只收不放：小精灵可见时用 ES7210 双麦感知音量/节拍，不录音、不上传。
 // ---------------------------------------------------------------------------
 #define CFG_ELF_SOUND_ENABLE 1           // 0 = 不初始化麦克风，完全沿用阶段 1–4
+// 1 = 模拟声音输入：不碰 ES7210/I2S/Wire，按时间生成
+//     静音 4s -> 环境声 4s -> 120BPM 律动 12s 的循环，方便无麦时检查小精灵联动。
+// 0 = 使用真实麦克风采集。
+#define CFG_ELF_SOUND_SIMULATE 1
 #define CFG_ELF_SOUND_SAMPLE_RATE 16000  // ES7210 采样率
 #define CFG_ELF_SOUND_HOP_MS 16          // 特征帧移（分析窗口 32ms）
 #define CFG_ELF_SOUND_NOISE_GATE 8       // level 低于此值视为静音（0–255）

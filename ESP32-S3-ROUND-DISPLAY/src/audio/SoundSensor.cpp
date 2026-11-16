@@ -54,6 +54,16 @@ constexpr uint8_t kMaxBeginAttempts = 5;
 constexpr uint16_t kIoiMinMs = 200;   // 与不应期一致，再靠折叠落到 60–200
 constexpr uint16_t kIoiMaxMs = 1200;
 
+#if CFG_ELF_SOUND_SIMULATE
+// 模拟声音脚本：静音 -> 环境声 -> 律动，循环播放，覆盖小精灵三种响应状态。
+constexpr uint32_t kSimQuietMs = 4000UL;
+constexpr uint32_t kSimListenMs = 4000UL;
+constexpr uint32_t kSimBeatMs = 12000UL;
+constexpr uint32_t kSimCycleMs = kSimQuietMs + kSimListenMs + kSimBeatMs;
+constexpr uint32_t kSimBpm = 120;
+constexpr uint32_t kSimBeatPeriodMs = 60000UL / kSimBpm;  // 500ms
+#endif
+
 struct RegValue {
   uint8_t reg;
   uint8_t value;
@@ -152,6 +162,13 @@ struct Impl {
   uint32_t lastLogMs = 0;
   uint32_t lastSlotLogMs = 0;
   bool logBeatSeen = false;
+
+#if CFG_ELF_SOUND_SIMULATE
+  // 模拟模式状态：start() 之后由 read() 按 millis() 生成帧。
+  uint32_t simBeatIndex = 0;
+  uint8_t simBeatCount = 0;
+  uint32_t simLastLogMs = 0;
+#endif
 };
 
 Impl g_impl;
@@ -568,6 +585,14 @@ void audioTask(void* arg) {
 
 bool SoundSensor::begin() {
   if (m_available) return true;
+#if CFG_ELF_SOUND_SIMULATE
+  // 模拟模式：不初始化 ES7210、不配置 I2S，也不依赖 Wire 总线。
+  m_impl = &g_impl;
+  m_available = true;
+  CFG_LOG("[AUDIO] simulate mode: no ES7210/I2S, %u BPM pattern",
+          static_cast<unsigned>(kSimBpm));
+  return true;
+#else
   Impl& s = g_impl;
   const uint32_t now = millis();
   if (s.beginAttempts >= kMaxBeginAttempts ||
@@ -608,11 +633,28 @@ bool SoundSensor::begin() {
   m_available = true;
   CFG_LOG("[AUDIO] es7210 ready (16k, TDM 4 slots, MCLK=GPIO42)");
   return true;
+#endif
 }
 
 bool SoundSensor::start() {
   if (!m_available || m_impl == nullptr) return false;
   Impl& s = *static_cast<Impl*>(m_impl);
+#if CFG_ELF_SOUND_SIMULATE
+  if (m_running) return true;
+  s.startMs = millis();
+  s.simBeatIndex = 0;
+  s.simBeatCount = 0;
+  s.simLastLogMs = s.startMs;
+
+  portENTER_CRITICAL(&s.mux);
+  ++s.generation;
+  s.frame = SoundFrame{};
+  portEXIT_CRITICAL(&s.mux);
+
+  m_running = true;
+  CFG_LOG("[AUDIO] simulate start");
+  return true;
+#else
   if (m_running) return true;
   if (s.rx == nullptr) return false;
   // 上次 stop 超时后先关 I2S 并等待旧任务退出，不能并行启动第二个任务。
@@ -665,12 +707,21 @@ bool SoundSensor::start() {
 
   m_running = true;
   return true;
+#endif
 }
 
 void SoundSensor::stop() {
   if (m_impl == nullptr) return;
   Impl& s = *static_cast<Impl*>(m_impl);
 
+#if CFG_ELF_SOUND_SIMULATE
+  m_running = false;
+  portENTER_CRITICAL(&s.mux);
+  ++s.generation;
+  s.frame = SoundFrame{};
+  portEXIT_CRITICAL(&s.mux);
+  return;
+#else
   s.taskRun = false;
   if (m_running && s.rx != nullptr) {
     const esp_err_t err = i2s_channel_disable(s.rx);
@@ -691,6 +742,7 @@ void SoundSensor::stop() {
   ++s.generation;
   s.frame = SoundFrame{};
   portEXIT_CRITICAL(&s.mux);
+#endif
 }
 
 bool SoundSensor::running() const { return m_running; }
@@ -698,13 +750,68 @@ bool SoundSensor::running() const { return m_running; }
 SoundFrame SoundSensor::read() {
   if (m_impl == nullptr) return SoundFrame{};
   Impl& s = *static_cast<Impl*>(m_impl);
+#if CFG_ELF_SOUND_SIMULATE
+  if (!m_running) return SoundFrame{};
 
+  const uint32_t now = millis();
+  const uint32_t t = now - s.startMs;
+  const uint32_t phase = t % kSimCycleMs;
+  SoundFrame f;
+
+  if (phase < kSimQuietMs) {
+    // 静音段：level 低于噪声门，回到 Quiet。
+    f.level = 2;
+    s.simBeatIndex = t / kSimBeatPeriodMs;
+  } else if (phase < kSimQuietMs + kSimListenMs) {
+    // 环境声段：慢慢起伏的中等音量，但没有稳定节拍 -> Listening。
+    const float wave =
+        0.5f + 0.5f * sinf(static_cast<float>(phase - kSimQuietMs) *
+                           6.2831853f / 3000.0f);
+    f.level = static_cast<uint8_t>(45.0f + 45.0f * wave + 0.5f);
+    f.low = static_cast<uint8_t>(20.0f + 15.0f * wave + 0.5f);
+    f.loud = true;
+    s.simBeatIndex = t / kSimBeatPeriodMs;
+  } else {
+    // 律动段：每 500ms 一拍（120BPM），拍后 120ms 指数衰减的鼓点包络。
+    const uint32_t bt = phase - kSimQuietMs - kSimListenMs;
+    const uint32_t idx = bt / kSimBeatPeriodMs;
+    const uint32_t sinceBeat = bt % kSimBeatPeriodMs;
+    const float env = expf(-static_cast<float>(sinceBeat) / 120.0f);
+    f.level = static_cast<uint8_t>(55.0f + 150.0f * env + 0.5f);
+    f.low = static_cast<uint8_t>(35.0f + 200.0f * env + 0.5f);
+    f.bpm = static_cast<uint8_t>(kSimBpm);
+    f.confidence = 230;
+    f.loud = true;
+    if (idx != s.simBeatIndex) {
+      s.simBeatIndex = idx;
+      ++s.simBeatCount;
+      f.beat = true;
+    }
+    f.beatCount = s.simBeatCount;
+  }
+
+#if CFG_ELF_SOUND_LOG
+  if (now - s.simLastLogMs >= 500UL) {
+    s.simLastLogMs = now;
+    const char* phaseName = phase < kSimQuietMs
+                                ? "quiet"
+                                : (phase < kSimQuietMs + kSimListenMs ? "listen"
+                                                                      : "beat");
+    CFG_LOG("[AUDIO][SIM] lvl=%u low=%u bpm=%u conf=%u beat=%u phase=%s",
+            static_cast<unsigned>(f.level), static_cast<unsigned>(f.low),
+            static_cast<unsigned>(f.bpm), static_cast<unsigned>(f.confidence),
+            f.beat ? 1U : 0U, phaseName);
+  }
+#endif
+  return f;
+#else
   SoundFrame out;
   portENTER_CRITICAL(&s.mux);
   out = s.frame;
   s.frame.beat = false;
   portEXIT_CRITICAL(&s.mux);
   return out;
+#endif
 }
 
 bool SoundSensor::available() const { return m_available; }
