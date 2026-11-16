@@ -92,6 +92,10 @@ void TeslaUiSource::mapVehicle(const VehicleState& vehicle) {
   m_model.socValid = vehicle.has(VF_SOC);
   m_model.rangeValid = vehicle.has(VF_RANGE);
   m_model.temperatureValid = vehicle.has(VF_TEMPS);
+  m_model.doorsValid = vehicle.has(VF_DOORS);
+  for (uint8_t i = 0; i < 6; ++i) {
+    m_model.doors[i] = m_model.doorsValid && vehicle.doors[i] != 0;
+  }
 
   m_model.speedKmh = vehicle.speedKmh;
   m_model.motorPowerKw = vehicle.motorPowerKw;

@@ -32,6 +32,8 @@ struct UiModel {
   bool socValid = true;
   bool rangeValid = true;
   bool temperatureValid = true;
+  bool doorsValid = false;
+  bool doors[6] = {};
   float speedKmh = 128.0f;
   float motorPowerKw = 44.0f;
   float chargePowerKw = 11.2f;

@@ -68,6 +68,8 @@ bool sameModel(const UiModel& a, const UiModel& b) {
          a.chargePowerValid == b.chargePowerValid &&
          a.socValid == b.socValid && a.rangeValid == b.rangeValid &&
          a.temperatureValid == b.temperatureValid &&
+         a.doorsValid == b.doorsValid &&
+         memcmp(a.doors, b.doors, sizeof(a.doors)) == 0 &&
          a.motorPowerKw == b.motorPowerKw &&
          a.chargePowerKw == b.chargePowerKw && a.soc == b.soc &&
          a.rangeKm == b.rangeKm && a.insideTempC == b.insideTempC &&

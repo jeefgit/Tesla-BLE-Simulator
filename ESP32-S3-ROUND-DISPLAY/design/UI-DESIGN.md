@@ -2,7 +2,7 @@
 
 目标硬件：**Waveshare ESP32-S3-Touch-AMOLED-1.75-B**（466×466，CO5300 QSPI，CST9217 触摸）。
 本版按 `src/ui/LvglDashboard.cpp` 的实机实现重新校对，重点同步了**行驶页**的布局、
-配色与字号；其余三个状态页仍沿用 v0.1 版式，后续按同一方法校对。
+配色与字号，并补充了门状态页的实现与状态映射。
 
 - 可交互查看：`design/dashboard-ui.html`（浏览器直接打开，1:1 尺寸，可勾选安全区）
 - 本文档：布局坐标、颜色/字号 token、状态机、数据映射与实现注意点
@@ -16,6 +16,7 @@
 | 充电 CHARGING | 同上且 `charging == true` | 速度环切换为 SOC 环，中心显示充电功率 |
 | 断连/扫描 LINK STATE | 未 Ready 或握手未完成 | 整屏状态页（SCANNING / CONNECTING / SYNCING / RECONNECTING / ERROR） |
 | 配钥 PAIRING | `PairingHint::phase != Idle` 且链路 Ready | 配钥提示优先于断连页 |
+| 门状态 DOORS | 链路 Ready、门数据有效且任一门/前备箱/后备箱打开 | 显示俯视车身、逐项开合状态；全部关闭后自动返回原页面 |
 
 ---
 
@@ -157,7 +158,8 @@ SourceStatus.link / PairingHint
 | 锁 | `locked` | `LOCK` / `UNLOCK`（UNLOCK 用 CAUTION） |
 | 链路 | `SourceStatus.link` | 绿=LINK，琥珀=扫描/连接/同步，灰=Idle，红=Retry/Error |
 | 配钥 | `PairingHint` | `TAP CARD / CONFIRM / RETRY / KEY ADDED / FAILED` |
-| 车门/胎压 | `doors[6]` / `tpms[4]` | 本稿未常驻显示，见待确认问题 |
+| 车门 | `doors[6]` | 任一项打开时切换到门状态页；顺序为左前、右前、左后、右后、前备箱、后备箱 |
+| 胎压 | `tpms[4]` | 本稿未常驻显示，见待确认问题 |
 
 ---
 

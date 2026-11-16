@@ -23,6 +23,7 @@ class LvglDashboard : public IDashboard {
   void buildCards();
   void buildLinkPage();
   void buildPairingPage();
+  void buildDoorPage();
   void buildBootAnimation();
   void startLinkAnimation();
   void stopLinkAnimation();
@@ -81,6 +82,14 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_pairCardGlow = nullptr;
   lv_obj_t* m_pairPulse = nullptr;
   bool m_pairAnimationRunning = false;
+  lv_obj_t* m_doorPage = nullptr;
+  lv_obj_t* m_doorTitle = nullptr;
+  lv_obj_t* m_doorCount = nullptr;
+  lv_obj_t* m_doorIndicators[6] = {};
+  lv_obj_t* m_doorIndicatorCenters[6] = {};
+  lv_obj_t* m_doorCallouts[6] = {};
+  lv_obj_t* m_doorPanels[4] = {};
+  uint8_t m_doorDisplayMask = 0xFF;
   lv_obj_t* m_topGroup = nullptr;
   lv_obj_t* m_bootLayer = nullptr;
   lv_obj_t* m_bootRing = nullptr;

@@ -34,7 +34,7 @@
 
 // 1 = 辅助状态轮询包含车门/中控锁状态
 // 0 = 暂不查询车门（仪表车门/锁车状态保持断连/占位）
-#define CFG_TESLA_QUERY_CLOSURES 0
+#define CFG_TESLA_QUERY_CLOSURES 1
 
 // 本地真实私钥（被 .gitignore 忽略，不提交）；缺失时用后端内置测试密钥。
 #if defined(__has_include)
