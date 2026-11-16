@@ -159,8 +159,8 @@ constexpr uint32_t kGrooveFadeInMs = 150;  // 进入 Grooving 的偏移升入时
 constexpr uint32_t kGrooveFadeOutMs = 500; // 退出 Grooving 的平滑归零
 constexpr uint32_t kGrooveBoostMs = 180;   // 高潮拍：g 临时 ×1.3 的持续
 constexpr uint32_t kSoundYieldMs = 600;    // 触摸后声音层让位时间
-constexpr uint32_t kMusicBubbleDurationMs = 720;
-constexpr int32_t kMusicBubbleRisePx = 54;
+constexpr uint32_t kMusicBubbleDurationMs = 1200;
+constexpr int32_t kMusicBubbleRisePx = 84;
 constexpr int32_t kPupilSoundMaxSize = 90; // 声音/车速/Happy 叠加后的瞳孔上限
 constexpr int32_t kMouthMaxH = 24;
 constexpr int32_t kSoundGazeX = 24;        // Grooving 拍点换向的视线摆幅
@@ -168,10 +168,9 @@ constexpr uint8_t kBlushSoundMaxOpa = 77;  // 和 Happy 上限一致，避免抢
 constexpr uint8_t kAuraSoundMaxOpa = 77;   // 上限 30%
 constexpr uint32_t kAuraAmbientPeriodMs = 3200;
 constexpr int32_t kAuraAmbientPulseOpa = 8;
-constexpr uint8_t kMusicBubbleCount = 4;
-constexpr int16_t kMusicBubbleX[kMusicBubbleCount] = {42, 390, 58, 380};
-constexpr int16_t kMusicBubbleY[kMusicBubbleCount] = {252, 240, 198, 190};
-constexpr int32_t kMusicBubbleSize = 11;
+constexpr uint8_t kMusicBubblesPerBeat = 4;
+constexpr int32_t kMusicBubbleMinSize = 7;
+constexpr int32_t kMusicBubbleMaxSize = 15;
 
 int32_t randomBetween(int32_t low, int32_t high) {
   if (high <= low) {
@@ -331,8 +330,8 @@ void ElfOverlay::buildObjects() {
 
 #if CFG_ELF_SOUND_ENABLE
   for (int i = 0; i < kMusicBubbleCount; ++i) {
-    m_bubble[i] = makeBlock(m_body, 0, 0, kMusicBubbleSize, kMusicBubbleSize,
-                            LV_RADIUS_CIRCLE, kGlow, 72);
+    m_bubble[i] = makeBlock(m_body, 0, 0, kMusicBubbleMinSize,
+                            kMusicBubbleMinSize, LV_RADIUS_CIRCLE, kGlow, 72);
     lv_obj_set_style_border_width(m_bubble[i], 2, 0);
     lv_obj_set_style_border_color(m_bubble[i], lv_color_white(), 0);
     lv_obj_set_style_border_opa(m_bubble[i], 180, 0);
@@ -354,27 +353,37 @@ bool ElfOverlay::visible() const {
 
 void ElfOverlay::emitMusicBubble(uint32_t now) {
 #if CFG_ELF_SOUND_ENABLE
-  const uint8_t index = m_nextBubble;
-  m_nextBubble = static_cast<uint8_t>((m_nextBubble + 1) % kMusicBubbleCount);
-  m_bubbleStartedAt[index] = now;
-  m_bubbleStartX[index] = kMusicBubbleX[index];
-  m_bubbleStartY[index] = kMusicBubbleY[index];
-  m_bubbleHue[index] = static_cast<uint16_t>(
-      (185 + (m_beatInGroove % 8) * 45) % 360);
-  m_bubbleActive[index] = true;
-  lv_obj_set_style_bg_color(
-      m_bubble[index],
-      lv_color_hsv_to_rgb(m_bubbleHue[index], 190, 245), 0);
-  lv_obj_set_style_border_color(
-      m_bubble[index],
-      lv_color_hsv_to_rgb(m_bubbleHue[index], 75, 255), 0);
-  lv_obj_set_pos(m_bubble[index],
-                 m_bubbleStartX[index] - kMusicBubbleSize / 2,
-                 m_bubbleStartY[index] - kMusicBubbleSize / 2);
-  lv_obj_set_size(m_bubble[index], kMusicBubbleSize, kMusicBubbleSize);
-  lv_obj_set_style_bg_opa(m_bubble[index], 72, 0);
-  lv_obj_set_style_border_opa(m_bubble[index], 180, 0);
-  lv_obj_set_hidden(m_bubble[index], false);
+  const uint16_t beatHue =
+      static_cast<uint16_t>((185 + (m_beatInGroove % 8) * 45) % 360);
+  for (int i = 0; i < kMusicBubblesPerBeat; ++i) {
+    const uint8_t index = m_nextBubble;
+    m_nextBubble = static_cast<uint8_t>((m_nextBubble + 1) % kMusicBubbleCount);
+    m_bubbleStartedAt[index] = now;
+    const bool leftSide = (randomBetween(0, 1) == 0);
+    m_bubbleStartX[index] = static_cast<int16_t>(
+        leftSide ? randomBetween(18, 82) : randomBetween(384, 448));
+    m_bubbleStartY[index] =
+        static_cast<int16_t>(randomBetween(170, 315));
+    m_bubbleBaseSize[index] = static_cast<uint8_t>(
+        randomBetween(kMusicBubbleMinSize, kMusicBubbleMaxSize));
+    m_bubbleHue[index] = static_cast<uint16_t>(
+        (beatHue + i * 42 + randomBetween(0, 24)) % 360);
+    m_bubbleActive[index] = true;
+    lv_obj_set_style_bg_color(
+        m_bubble[index],
+        lv_color_hsv_to_rgb(m_bubbleHue[index], 190, 245), 0);
+    lv_obj_set_style_border_color(
+        m_bubble[index],
+        lv_color_hsv_to_rgb(m_bubbleHue[index], 75, 255), 0);
+    lv_obj_set_pos(m_bubble[index],
+                   m_bubbleStartX[index] - m_bubbleBaseSize[index] / 2,
+                   m_bubbleStartY[index] - m_bubbleBaseSize[index] / 2);
+    lv_obj_set_size(m_bubble[index], m_bubbleBaseSize[index],
+                    m_bubbleBaseSize[index]);
+    lv_obj_set_style_bg_opa(m_bubble[index], 72, 0);
+    lv_obj_set_style_border_opa(m_bubble[index], 180, 0);
+    lv_obj_set_hidden(m_bubble[index], false);
+  }
 #endif
 }
 
@@ -396,9 +405,11 @@ void ElfOverlay::updateMusicBubbles(uint32_t now) {
     const float progress =
         static_cast<float>(age) / kMusicBubbleDurationMs;
     const float rise = progress * (2.0f - progress);
-    const float drift = sinf(progress * 6.2831853f) * 7.0f;
+    const float drift =
+        sinf(progress * 6.2831853f + i * 0.7f) * 12.0f;
     const int32_t size =
-        kMusicBubbleSize + static_cast<int32_t>(5.0f * rise + 0.5f);
+        m_bubbleBaseSize[i] +
+        static_cast<int32_t>(4.0f * rise + 0.5f);
     const int32_t x = m_bubbleStartX[i] +
                       static_cast<int32_t>(lroundf(drift)) - size / 2;
     const int32_t y = m_bubbleStartY[i] -

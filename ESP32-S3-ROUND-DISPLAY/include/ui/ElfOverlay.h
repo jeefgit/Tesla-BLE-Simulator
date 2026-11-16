@@ -41,6 +41,8 @@ class ElfOverlay {
   void setSoundFrame(const SoundFrame& frame);
 
  private:
+  static constexpr uint8_t kMusicBubbleCount = 16;
+
   // 声音子状态（与主状态机正交，见 design/ELF-DESIGN.md §2.4）。
   enum class SoundLevel : uint8_t { Off, Quiet, Listening, Grooving };
 
@@ -127,7 +129,7 @@ class ElfOverlay {
   lv_obj_t* m_ear[2] = {};
   lv_obj_t* m_tail[3] = {};
   lv_obj_t* m_z[3] = {};
-  lv_obj_t* m_bubble[4] = {};
+  lv_obj_t* m_bubble[kMusicBubbleCount] = {};
   lv_timer_t* m_timer = nullptr;
 
   State m_state = State::Hidden;
@@ -185,12 +187,13 @@ class ElfOverlay {
   float m_soundGazeX = -10000;
   float m_soundGazeY = -10000;
   int8_t m_soundSwayDir = 1;
-  uint32_t m_bubbleStartedAt[4] = {};
-  int16_t m_bubbleStartX[4] = {};
-  int16_t m_bubbleStartY[4] = {};
-  uint16_t m_bubbleHue[4] = {};
+  uint32_t m_bubbleStartedAt[kMusicBubbleCount] = {};
+  int16_t m_bubbleStartX[kMusicBubbleCount] = {};
+  int16_t m_bubbleStartY[kMusicBubbleCount] = {};
+  uint16_t m_bubbleHue[kMusicBubbleCount] = {};
+  uint8_t m_bubbleBaseSize[kMusicBubbleCount] = {};
   uint8_t m_nextBubble = 0;
-  bool m_bubbleActive[4] = {};
+  bool m_bubbleActive[kMusicBubbleCount] = {};
   bool m_soundTintApplied = false;
   bool m_soundVisApplied = false;
   bool m_soundBreathStopped = false;
