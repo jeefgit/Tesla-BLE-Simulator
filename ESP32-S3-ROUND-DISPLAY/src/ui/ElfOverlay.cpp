@@ -30,10 +30,10 @@
 #define CFG_ELF_SOUND_GROOVE_HOLD_MS 1600UL
 #endif
 #ifndef CFG_ELF_SOUND_BOUNCE_PX
-#define CFG_ELF_SOUND_BOUNCE_PX 12
+#define CFG_ELF_SOUND_BOUNCE_PX 20
 #endif
 #ifndef CFG_ELF_SOUND_SWAY_PX
-#define CFG_ELF_SOUND_SWAY_PX 9
+#define CFG_ELF_SOUND_SWAY_PX 12
 #endif
 
 #if CFG_ELF_ENABLE
@@ -159,11 +159,19 @@ constexpr uint32_t kGrooveFadeInMs = 150;  // 进入 Grooving 的偏移升入时
 constexpr uint32_t kGrooveFadeOutMs = 500; // 退出 Grooving 的平滑归零
 constexpr uint32_t kGrooveBoostMs = 180;   // 高潮拍：g 临时 ×1.3 的持续
 constexpr uint32_t kSoundYieldMs = 600;    // 触摸后声音层让位时间
+constexpr uint32_t kMusicBubbleDurationMs = 720;
+constexpr int32_t kMusicBubbleRisePx = 54;
 constexpr int32_t kPupilSoundMaxSize = 90; // 声音/车速/Happy 叠加后的瞳孔上限
 constexpr int32_t kMouthMaxH = 24;
 constexpr int32_t kSoundGazeX = 24;        // Grooving 拍点换向的视线摆幅
 constexpr uint8_t kBlushSoundMaxOpa = 77;  // 和 Happy 上限一致，避免抢
 constexpr uint8_t kAuraSoundMaxOpa = 77;   // 上限 30%
+constexpr uint32_t kAuraAmbientPeriodMs = 3200;
+constexpr int32_t kAuraAmbientPulseOpa = 8;
+constexpr uint8_t kMusicBubbleCount = 4;
+constexpr int16_t kMusicBubbleX[kMusicBubbleCount] = {42, 390, 58, 380};
+constexpr int16_t kMusicBubbleY[kMusicBubbleCount] = {252, 240, 198, 190};
+constexpr int32_t kMusicBubbleSize = 11;
 
 int32_t randomBetween(int32_t low, int32_t high) {
   if (high <= low) {
@@ -321,6 +329,17 @@ void ElfOverlay::buildObjects() {
     lv_obj_set_hidden(m_z[i], true);
   }
 
+#if CFG_ELF_SOUND_ENABLE
+  for (int i = 0; i < kMusicBubbleCount; ++i) {
+    m_bubble[i] = makeBlock(m_body, 0, 0, kMusicBubbleSize, kMusicBubbleSize,
+                            LV_RADIUS_CIRCLE, kGlow, 72);
+    lv_obj_set_style_border_width(m_bubble[i], 2, 0);
+    lv_obj_set_style_border_color(m_bubble[i], lv_color_white(), 0);
+    lv_obj_set_style_border_opa(m_bubble[i], 180, 0);
+    lv_obj_set_hidden(m_bubble[i], true);
+  }
+#endif
+
   // 初始为闭眼状态，第一次 show() 才有“睁开”的过程。
   setEyeOpen(this, kEyeClosedH);
 }
@@ -331,6 +350,80 @@ bool ElfOverlay::visible() const {
 #else
   return false;
 #endif
+}
+
+void ElfOverlay::emitMusicBubble(uint32_t now) {
+#if CFG_ELF_SOUND_ENABLE
+  const uint8_t index = m_nextBubble;
+  m_nextBubble = static_cast<uint8_t>((m_nextBubble + 1) % kMusicBubbleCount);
+  m_bubbleStartedAt[index] = now;
+  m_bubbleStartX[index] = kMusicBubbleX[index];
+  m_bubbleStartY[index] = kMusicBubbleY[index];
+  m_bubbleHue[index] = static_cast<uint16_t>(
+      (185 + (m_beatInGroove % 8) * 45) % 360);
+  m_bubbleActive[index] = true;
+  lv_obj_set_style_bg_color(
+      m_bubble[index],
+      lv_color_hsv_to_rgb(m_bubbleHue[index], 190, 245), 0);
+  lv_obj_set_style_border_color(
+      m_bubble[index],
+      lv_color_hsv_to_rgb(m_bubbleHue[index], 75, 255), 0);
+  lv_obj_set_pos(m_bubble[index],
+                 m_bubbleStartX[index] - kMusicBubbleSize / 2,
+                 m_bubbleStartY[index] - kMusicBubbleSize / 2);
+  lv_obj_set_size(m_bubble[index], kMusicBubbleSize, kMusicBubbleSize);
+  lv_obj_set_style_bg_opa(m_bubble[index], 72, 0);
+  lv_obj_set_style_border_opa(m_bubble[index], 180, 0);
+  lv_obj_set_hidden(m_bubble[index], false);
+#endif
+}
+
+void ElfOverlay::updateMusicBubbles(uint32_t now) {
+#if CFG_ELF_SOUND_ENABLE
+  for (int i = 0; i < kMusicBubbleCount; ++i) {
+    if (!m_bubbleActive[i]) {
+      continue;
+    }
+
+    const uint32_t age = now - m_bubbleStartedAt[i];
+    if (age >= kMusicBubbleDurationMs || m_state == State::Hidden ||
+        m_state == State::Hiding) {
+      m_bubbleActive[i] = false;
+      lv_obj_set_hidden(m_bubble[i], true);
+      continue;
+    }
+
+    const float progress =
+        static_cast<float>(age) / kMusicBubbleDurationMs;
+    const float rise = progress * (2.0f - progress);
+    const float drift = sinf(progress * 6.2831853f) * 7.0f;
+    const int32_t size =
+        kMusicBubbleSize + static_cast<int32_t>(5.0f * rise + 0.5f);
+    const int32_t x = m_bubbleStartX[i] +
+                      static_cast<int32_t>(lroundf(drift)) - size / 2;
+    const int32_t y = m_bubbleStartY[i] -
+                      static_cast<int32_t>(kMusicBubbleRisePx * rise) -
+                      size / 2;
+    const float fade = 1.0f - progress;
+    lv_obj_set_pos(m_bubble[i], x, y);
+    lv_obj_set_size(m_bubble[i], size, size);
+    lv_obj_set_style_bg_opa(
+        m_bubble[i], static_cast<lv_opa_t>(72.0f * fade + 0.5f), 0);
+    lv_obj_set_style_border_opa(
+        m_bubble[i], static_cast<lv_opa_t>(180.0f * fade + 0.5f), 0);
+  }
+#else
+  (void)now;
+#endif
+}
+
+void ElfOverlay::hideMusicBubbles() {
+  for (int i = 0; i < kMusicBubbleCount; ++i) {
+    m_bubbleActive[i] = false;
+    if (m_bubble[i] != nullptr) {
+      lv_obj_set_hidden(m_bubble[i], true);
+    }
+  }
 }
 
 void ElfOverlay::show() {
@@ -1035,6 +1128,7 @@ void ElfOverlay::handleSoundBeat(uint32_t now) {
 
   if (m_soundLevel == SoundLevel::Grooving) {
     ++m_beatInGroove;
+    emitMusicBubble(now);
     // 每 4 拍快速单眨一次（复用现有眨眼状态机）。
     if ((m_beatInGroove % 4) == 0 && m_state == State::Idle &&
         static_cast<int32_t>(now - m_soundYieldUntil) >= 0) {
@@ -1103,17 +1197,24 @@ void ElfOverlay::resetSoundState() {
   m_soundTintApplied = false;
   m_soundVisApplied = false;
   m_soundBreathStopped = false;
+  m_nextBubble = 0;
+  hideMusicBubbles();
   m_lastBodyX = -10000;
   m_lastBodyY = -10000;
   m_lastEyeH = -10000;
   m_lastMouthH = -10000;
-  m_lastEarY = -10000;
-  m_lastTailSize[0] = -10000;
-  m_lastTailSize[1] = -10000;
-  m_lastTailSize[2] = -10000;
+  for (int i = 0; i < 2; ++i) {
+    m_lastEarY[i] = -10000;
+  }
+  for (int i = 0; i < 3; ++i) {
+    m_lastTailSize[i] = -10000;
+    m_lastTailX[i] = -10000;
+    m_lastTailY[i] = -10000;
+  }
   m_lastPupilSize = -10000;
   m_lastBlushOpa = -10000;
   m_lastAuraOpa = -10000;
+  m_lastSoundHue = -1;
   m_lastGazeX = -10000;
   m_lastGazeY = -10000;
 #endif
@@ -1141,8 +1242,25 @@ void ElfOverlay::resetSoundVisuals(bool animate) {
   setBlushOpa(this, kBlushOpa);
   m_lastBlushOpa = kBlushOpa;
   lv_obj_set_style_border_opa(m_aura, kAuraBaseOpa, 0);
+  lv_obj_set_style_border_color(m_aura, kGlow, 0);
   m_lastAuraOpa = kAuraBaseOpa;
+  m_lastSoundHue = -1;
   m_soundTintApplied = false;
+
+  for (int i = 0; i < 2; ++i) {
+    lv_obj_set_y(m_ear[i], kEarY);
+    m_lastEarY[i] = kEarY;
+    lv_obj_set_style_bg_color(m_ear[i], kSilhouette, 0);
+  }
+  for (int i = 0; i < 3; ++i) {
+    lv_obj_set_pos(m_tail[i], kTailX[i], kTailY[i]);
+    lv_obj_set_size(m_tail[i], kTailSize[i], kTailSize[i]);
+    lv_obj_set_style_bg_color(m_tail[i], kSilhouette, 0);
+    m_lastTailSize[i] = kTailSize[i];
+    m_lastTailX[i] = kTailX[i];
+    m_lastTailY[i] = kTailY[i];
+  }
+  hideMusicBubbles();
 
   if (!allowed) {
     return;
@@ -1166,16 +1284,6 @@ void ElfOverlay::resetSoundVisuals(bool animate) {
   lv_obj_set_size(m_mouth, kMouthW, kMouthH);
   lv_obj_set_y(m_mouth, kMouthCenterY - kMouthH / 2);
   m_lastMouthH = kMouthH;
-
-  for (int i = 0; i < 2; ++i) {
-    lv_obj_set_y(m_ear[i], kEarY);
-  }
-  m_lastEarY = kEarY;
-  for (int i = 0; i < 3; ++i) {
-    lv_obj_set_pos(m_tail[i], kTailX[i], kTailY[i]);
-    lv_obj_set_size(m_tail[i], kTailSize[i], kTailSize[i]);
-    m_lastTailSize[i] = kTailSize[i];
-  }
 
   // 触摸让位期间不写虹膜，避免抢 lookAt() 的追随位置。
   if (!yield) {
@@ -1421,31 +1529,45 @@ void ElfOverlay::applySoundVisuals(uint32_t now, uint32_t dt) {
     m_lastMouthH = mouthH;
   }
 
-  // 耳朵：每拍 −4 * pulse。
-  const int32_t earY =
-      kEarY - (grooveOwns
-                   ? static_cast<int32_t>(4.0f * m_pulse * m_grooveW + 0.5f)
-                   : 0);
-  if (earY != m_lastEarY) {
-    for (int i = 0; i < 2; ++i) {
+  // 耳朵随每拍交替弹起，触摸期间不覆盖用户交互。
+  const int activeEar = m_soundSwayDir > 0 ? 0 : 1;
+  for (int i = 0; i < 2; ++i) {
+    const float earLift =
+        grooveOwns && !yield
+            ? (i == activeEar ? 9.0f : 3.0f) * m_pulse * m_grooveW
+            : 0.0f;
+    const int32_t earY = kEarY - static_cast<int32_t>(earLift + 0.5f);
+    if (earY != m_lastEarY[i]) {
       lv_obj_set_y(m_ear[i], earY);
+      m_lastEarY[i] = earY;
     }
-    m_lastEarY = earY;
   }
 
-  // 尾巴三颗按 low 能量做三格电平表（只改尺寸/位置，不增对象）。
+  // 尾巴按低频能量伸缩，并随每拍做波浪摆动。
   for (int i = 0; i < 3; ++i) {
     int32_t size = kTailSize[i];
     if (grooveOwns && m_low > i * 80) {
       size += static_cast<int32_t>(
           (2.0f + 4.0f * m_g) * m_grooveW + 0.5f);
     }
-    if (size != m_lastTailSize[i]) {
-      const int32_t cx = kTailX[i] + kTailSize[i] / 2;
-      const int32_t cy = kTailY[i] + kTailSize[i] / 2;
-      lv_obj_set_pos(m_tail[i], cx - size / 2, cy - size / 2);
+    const float wag =
+        grooveOwns && !yield ? m_pulse * m_grooveW : 0.0f;
+    const int32_t centerX =
+        kTailX[i] + kTailSize[i] / 2 +
+        static_cast<int32_t>(
+            lroundf(m_soundSwayDir * (i + 1) * 2.0f * wag));
+    const int32_t centerY =
+        kTailY[i] + kTailSize[i] / 2 -
+        static_cast<int32_t>(lroundf((3 - i) * 2.0f * wag));
+    const int32_t tailX = centerX - size / 2;
+    const int32_t tailY = centerY - size / 2;
+    if (size != m_lastTailSize[i] || tailX != m_lastTailX[i] ||
+        tailY != m_lastTailY[i]) {
+      lv_obj_set_pos(m_tail[i], tailX, tailY);
       lv_obj_set_size(m_tail[i], size, size);
       m_lastTailSize[i] = size;
+      m_lastTailX[i] = tailX;
+      m_lastTailY[i] = tailY;
     }
   }
 
@@ -1504,24 +1626,9 @@ void ElfOverlay::applySoundVisuals(uint32_t now, uint32_t dt) {
       m_lastBlushOpa = blush;
     }
 
-    int32_t aura = kAuraBaseOpa;
-    if (grooving) {
-      aura += static_cast<int32_t>(31.0f * m_g + 20.0f * m_pulse + 0.5f);
-    } else {
-      aura += static_cast<int32_t>(
-          10.0f * static_cast<float>(level) / 255.0f + 0.5f);
-    }
-    if (aura > kAuraSoundMaxOpa) {
-      aura = kAuraSoundMaxOpa;
-    }
-    if (aura != m_lastAuraOpa) {
-      lv_obj_set_style_border_opa(m_aura, static_cast<lv_opa_t>(aura), 0);
-      m_lastAuraOpa = aura;
-    }
-
     updatePupilTarget();
   } else if (m_soundTintApplied) {
-    // 回到 Quiet/Off：一次性恢复阶段 4 基准。
+    // 回到 Quiet/Off：一次性恢复阶段 4 的腮红与瞳孔基准。
     m_soundTintApplied = false;
     lv_anim_delete(this, setPupilSize);
     setPupilSize(this, m_pupilBaseSize);
@@ -1529,9 +1636,73 @@ void ElfOverlay::applySoundVisuals(uint32_t now, uint32_t dt) {
     lv_anim_delete(this, setBlushOpa);
     setBlushOpa(this, kBlushOpa);
     m_lastBlushOpa = kBlushOpa;
-    lv_obj_set_style_border_opa(m_aura, static_cast<lv_opa_t>(kAuraBaseOpa),
-                                0);
-    m_lastAuraOpa = kAuraBaseOpa;
+  }
+
+  if (tint) {
+    uint16_t hue = 185;
+    if (grooving) {
+      float beatPhase = 0.0f;
+      if (m_bpm > 0) {
+        beatPhase = static_cast<float>(now - m_lastBeatAt) *
+                    static_cast<float>(m_bpm) / 60000.0f;
+        if (beatPhase > 1.0f) {
+          beatPhase = 1.0f;
+        }
+      }
+      hue = static_cast<uint16_t>(
+          (185 + (m_beatInGroove % 8) * 45 +
+           static_cast<int32_t>(45.0f * beatPhase)) %
+          360);
+    } else {
+      hue = static_cast<uint16_t>(
+          185 + static_cast<uint16_t>(level) * 110 / 255);
+    }
+    if (hue != m_lastSoundHue) {
+      lv_obj_set_style_border_color(m_aura,
+                                    lv_color_hsv_to_rgb(hue, 190, 245), 0);
+      for (int i = 0; i < 2; ++i) {
+        const uint16_t earHue = static_cast<uint16_t>((hue + i * 18) % 360);
+        lv_obj_set_style_bg_color(
+            m_ear[i], lv_color_hsv_to_rgb(earHue, 155, 115), 0);
+      }
+      for (int i = 0; i < 3; ++i) {
+        const uint16_t tailHue = static_cast<uint16_t>((hue + i * 16) % 360);
+        lv_obj_set_style_bg_color(
+            m_tail[i], lv_color_hsv_to_rgb(tailHue, 155, 115), 0);
+      }
+      m_lastSoundHue = hue;
+    }
+  } else if (m_lastSoundHue >= 0) {
+    lv_obj_set_style_border_color(m_aura, kGlow, 0);
+    for (int i = 0; i < 2; ++i) {
+      lv_obj_set_style_bg_color(m_ear[i], kSilhouette, 0);
+    }
+    for (int i = 0; i < 3; ++i) {
+      lv_obj_set_style_bg_color(m_tail[i], kSilhouette, 0);
+    }
+    m_lastSoundHue = -1;
+  }
+
+  // 安静时光环也缓慢呼吸；声音律动的亮度叠加其上。
+  const float phase =
+      static_cast<float>(now % kAuraAmbientPeriodMs) /
+      static_cast<float>(kAuraAmbientPeriodMs) * 6.2831853f;
+  int32_t aura = kAuraBaseOpa + static_cast<int32_t>(
+                                    kAuraAmbientPulseOpa *
+                                        (0.5f + 0.5f * sinf(phase)) +
+                                    0.5f);
+  if (tint) {
+    aura += grooving
+                ? static_cast<int32_t>(31.0f * m_g + 20.0f * m_pulse + 0.5f)
+                : static_cast<int32_t>(
+                      10.0f * static_cast<float>(level) / 255.0f + 0.5f);
+  }
+  if (aura > kAuraSoundMaxOpa) {
+    aura = kAuraSoundMaxOpa;
+  }
+  if (aura != m_lastAuraOpa) {
+    lv_obj_set_style_border_opa(m_aura, static_cast<lv_opa_t>(aura), 0);
+    m_lastAuraOpa = aura;
   }
 #endif
 }
@@ -1568,6 +1739,7 @@ void ElfOverlay::onSoundTimer() {
 
   updateSoundState(now);
   applySoundVisuals(now, dt);
+  updateMusicBubbles(now);
 #endif
 }
 

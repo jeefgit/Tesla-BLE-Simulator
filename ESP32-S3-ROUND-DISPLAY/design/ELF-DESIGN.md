@@ -266,14 +266,16 @@ stateDiagram-v2
 
 | 动画 | 触发/驱动 | 参数 | 实现（只改属性） |
 | --- | --- | --- | --- |
-| **节拍弹跳** | 每拍 `pulse` | 身体 y 偏移 `- (4 + 8g) * pulse`，90ms 到达、160ms 回落 | 30ms 定时器直接 `lv_obj_set_y(m_body, ...)` |
-| **左右摇摆** | Grooving 常驻 | 身体 x `± (4 + 5g) * sin(2π · beatPhase)`；每拍换向 | 直接改 `x`，与弹跳叠加 |
+| **节拍弹跳** | 每拍 `pulse` | 身体 y 偏移 `- (4 + 16g) * pulse`，最大行程 20px | 30ms 定时器直接 `lv_obj_set_y(m_body, ...)` |
+| **左右摇摆** | Grooving 常驻 | 身体 x `± (4 + 8g) * sin(2π · beatPhase)`；每拍换向 | 直接改 `x`，与弹跳叠加 |
 | **开心眼** | 每拍 | 眼睛高度 `150 + (4 + 6g) * pulse`，中心不变（`y = 208 - h/2`） | 直接改 `height/y` |
 | **瞳孔呼吸** | level / 每拍 | 瞳孔基准 `74 + 6g`，拍点再 `+4 * pulse`；上限 90 | 直接改 `size`，与车速瞳孔统一取最大值 |
 | **腮红变亮** | level | 不透明度 `12% + 20% * level/255` | 直接改 `bg_opa` |
 | **嘴型张开** | level | 高度 `14 + 10 * level/255`（最大 24） | 直接改 `height`（圆角不变） |
-| **耳朵/尾巴** | 每拍 | 耳朵 y `-4 * pulse`；尾巴三颗按低/中/高能量轻微伸缩，作为“三格电平表” | 直接改 `y/size`，不新增对象 |
-| **光环呼吸** | `g` | 装饰弧边框不透明度 `8% + 12% * g + 8% * pulse`，上限 30% | 直接改 `border_opa` |
+| **耳朵/尾巴** | 每拍 | 左右耳交替弹起；尾巴按低频能量伸缩并做波浪摆动 | 直接改 `x/y/size`，不新增对象 |
+| **彩色泡泡** | Grooving 每拍 | 最多 4 个泡泡循环复用，从身体两侧上浮约 54px、轻微漂移并淡出 | 预创建对象，由 30ms 声音定时器更新 |
+| **音乐变色** | 音量 / 拍点 | 光环随音量由青蓝渐变至紫红，Grooving 时按拍轮换色相；耳朵/尾巴同步染色 | HSV 转色后直接改颜色属性 |
+| **光环呼吸** | 常驻 + 声音 | 安静时以 3.2s 周期在 8%–11% 缓慢呼吸；音乐时叠加节拍亮度，最高 30% | 直接改 `border_opa` |
 | **节拍眨眼** | 每 4 拍 | 快速单眨一次（闭 70ms / 睁 110ms） | 复用现有眨眼状态机 |
 | **高潮反应** | 每 8 拍或 BPM > 150 | 连眨两下 + 身体弹跳幅度 ×1.3 | 复用现有 Happy/连眨 |
 | **停止律动** | Grooving → Listening | 500ms 内把上述偏移平滑归零，恢复呼吸与随机注视 | 定时器插值，不硬切 |
@@ -282,7 +284,7 @@ stateDiagram-v2
 
 | 条件 | `g` | 表现 |
 | --- | --- | --- |
-| `level < 噪声门` | 0 | 完全静态 |
+| `level < 噪声门` | 0 | 身体保持呼吸，光环缓慢脉动 |
 | 轻声/说话 | 0.2–0.4 | 只眨眼、腮红微亮、眼睛轻微跟随 |
 | 正常音乐 | 0.4–0.7 | 弹跳 + 摇摆 + 瞳孔变化 |
 | 大声/快歌（BPM ≥ 140 或 level ≥ 200） | 0.7–1.0 | 加耳朵/尾巴、8 拍高潮、弹跳上限 |
@@ -513,8 +515,8 @@ if (m_elf.visible()) {
 #define CFG_ELF_SOUND_MIN_CONFIDENCE 80  // 进入 Grooving 的最低节拍置信度（0–255）
 #define CFG_ELF_SOUND_ONSET_THRESHOLD 0.45f  // 节拍起音阈值；越低越灵敏
 #define CFG_ELF_SOUND_GROOVE_HOLD_MS 1600UL     // 无拍后保持律动的时间
-#define CFG_ELF_SOUND_BOUNCE_PX 12       // 弹跳最大行程
-#define CFG_ELF_SOUND_SWAY_PX 9          // 摇摆最大行程
+#define CFG_ELF_SOUND_BOUNCE_PX 20       // 弹跳最大行程
+#define CFG_ELF_SOUND_SWAY_PX 12         // 摇摆最大行程
 #define CFG_ELF_SOUND_LEVEL_GAIN 6       // ES7210 输入增益档位（比原设置提高约 6dB）
 #define CFG_ELF_SOUND_LOG 0              // 1 = 每 500ms 打印 level/bpm/conf
 ```

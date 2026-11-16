@@ -87,6 +87,9 @@ class ElfOverlay {
   void applySoundVisuals(uint32_t now, uint32_t dt);
   void handleSoundBeat(uint32_t now);
   void enterGroove(uint32_t now);
+  void emitMusicBubble(uint32_t now);
+  void updateMusicBubbles(uint32_t now);
+  void hideMusicBubbles();
   void resetSoundVisuals(bool animate);
   void resetSoundState();
   void updatePupilTarget();
@@ -124,6 +127,7 @@ class ElfOverlay {
   lv_obj_t* m_ear[2] = {};
   lv_obj_t* m_tail[3] = {};
   lv_obj_t* m_z[3] = {};
+  lv_obj_t* m_bubble[4] = {};
   lv_timer_t* m_timer = nullptr;
 
   State m_state = State::Hidden;
@@ -181,6 +185,12 @@ class ElfOverlay {
   float m_soundGazeX = -10000;
   float m_soundGazeY = -10000;
   int8_t m_soundSwayDir = 1;
+  uint32_t m_bubbleStartedAt[4] = {};
+  int16_t m_bubbleStartX[4] = {};
+  int16_t m_bubbleStartY[4] = {};
+  uint16_t m_bubbleHue[4] = {};
+  uint8_t m_nextBubble = 0;
+  bool m_bubbleActive[4] = {};
   bool m_soundTintApplied = false;
   bool m_soundVisApplied = false;
   bool m_soundBreathStopped = false;
@@ -190,11 +200,14 @@ class ElfOverlay {
   int32_t m_lastBodyY = -10000;
   int32_t m_lastEyeH = -10000;
   int32_t m_lastMouthH = -10000;
-  int32_t m_lastEarY = -10000;
+  int32_t m_lastEarY[2] = {-10000, -10000};
   int32_t m_lastTailSize[3] = {-10000, -10000, -10000};
+  int32_t m_lastTailX[3] = {-10000, -10000, -10000};
+  int32_t m_lastTailY[3] = {-10000, -10000, -10000};
   int32_t m_lastPupilSize = -10000;
   int32_t m_lastBlushOpa = -10000;
   int32_t m_lastAuraOpa = -10000;
+  int32_t m_lastSoundHue = -1;
   int32_t m_lastGazeX = -10000;
   int32_t m_lastGazeY = -10000;
 };
