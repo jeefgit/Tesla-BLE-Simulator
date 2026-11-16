@@ -708,6 +708,9 @@ void TeslaClient::sendPairingRequest() {
 
 void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
                                   bool terminal) {
+  // 车辆可能重播之前的配钥终态；只有本次未配对流程已发出请求时才接受。
+  if (!m_notPaired || m_pairSends == 0 || m_pairDone) return;
+
   if (!terminal) {
     if (operationStatus == 1) {
       // 车辆已受理：停止重发和握手，纯等待刷卡（超时由 loop 统一处理）
