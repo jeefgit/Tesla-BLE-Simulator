@@ -195,7 +195,7 @@ stateDiagram-v2
 | **眨眼** | 随机 2.4–6.0s | 闭 90ms / 停 40ms / 睁 140ms；20% 概率连眨两下 | 三段 `lv_anim` 或状态机计时 |
 | **随机注视** | 随机 2.5–5.0s | 目标 x ±30、y ±22，350ms ease_out；身体同时左右 ±10 | `lv_anim` 改虹膜 `x/y` + 身体 `x` |
 | **追随手指** | 触摸移动 | 目标 = 手指位置换算的偏移（±30 / ±22），身体左右 ±10；80ms 跟随 | 直接 `lv_obj_set_pos()`，不做动画 |
-| **呼吸** | 常驻（可见时） | 身体容器 y ±12px，周期 6s，ease_in_out | `lv_anim` repeat_infinite，兼做防烧屏漂移；黑底与装饰弧不动 |
+| **呼吸** | 常驻（可见时） | 身体容器 y ±22px，周期 6s，ease_in_out | `lv_anim` repeat_infinite，兼做防烧屏漂移；黑底与装饰弧不动 |
 | **开心（Happy）** | 轻点 | 连眨 2 次 + 瞳孔 74→82 + 腮红 12%→30%，600ms | 组合动画 |
 | **困倦（Sleepy）** | 20s 无交互且未行驶 | 眼高 150 → 86，瞳孔下移 +8，呼吸周期 6s→9s | 状态切换 + 慢动画 |
 | **入睡（Sleeping）** | 再 10s | 眼高 → 46，显示 `z z z` 呼吸闪烁 | `lv_label` 三个字符，250ms 周期 |
@@ -345,7 +345,7 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 3. **不要用 `lv_obj_set_style_shadow_*` 做柔光**：软件阴影在 466 屏上很贵；用“大一圈、低透明度的同色圆”代替。
 4. **对象数控制在 25 个以内**，`m_root` 不透明纯黑（`#020406`）、无边框、不可点击、不可滚动。
 5. **不新增字体/图片**：`z z z` 用内置 `montserrat_28`，眼睛全部用 `lv_obj` 几何图形。
-6. **防烧屏**：呼吸动画让眼睛整体漂移 ±12px；自动隐藏默认关闭，长时间停留时靠呼吸漂移；亮度上限仍由 `RoundDisplay` 钳在 80%。
+6. **防烧屏**：呼吸动画让眼睛整体漂移 ±22px；自动隐藏默认关闭，长时间停留时靠呼吸漂移；亮度上限仍由 `RoundDisplay` 钳在 80%。
 7. **浮层顺序**：`m_elf.begin()` 必须在 `dashboard.begin()` 之后，否则会被开机图层盖住；`show()` 里可再 `lv_obj_move_foreground(m_root)` 保险。
 8. **AMOLED 纯白**：眼球用 `#E8F7FF`，并把高光不透明度控制在 90% 以内。
 9. **横滑要持续累计位移**：判定为横向手势后仍要在每次 `pollTouch()` 里更新 `dx`，不能提前退出函数。阶段 1 实机出现过慢速横滑无效，就是这个原因。
@@ -398,7 +398,7 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 
 - [x] 睁眼/闭眼过渡（睁眼 220ms ease_out，闭眼 120ms ease_in）。
 - [x] 随机眨眼（闭 90ms / 停 40ms / 睁 140ms，20% 概率连眨，第二下后恢复正常间隔）。
-- [x] 随机注视（±30 / ±22，350ms ease_out，2.5–5.0s 一次，身体左右 ±10）+ 呼吸漂移（身体容器 y +12 ↔ −12，6s 循环，黑底与装饰弧保持不动）。
+- [x] 随机注视（±30 / ±22，350ms ease_out，2.5–5.0s 一次，身体左右 ±10）+ 呼吸漂移（身体容器 y +22 ↔ −22，6s 循环，黑底与装饰弧保持不动）。
 - [x] 串口日志：`[ELF] blink` / `[ELF] blink x2` / `[ELF] gaze -> (x,y)`。
 
 > 实现要点：眨眼用 `height + y`，中心固定在 y=208；所有动画只改眼睛/虹膜/根容器的几何属性。状态机 `Hidden → Waking → Idle → Blinking / Hiding`，由 50ms `lv_timer` 调度，`hide()` 期间 `visible()` 仍为 true，等闭眼动画结束才真正隐藏，避免硬切。
@@ -463,7 +463,7 @@ if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
 lv_screen_active()
 └── m_root (466×466, 不透明黑, hidden)
     ├── m_aura       (R210 弧, 8% 青, 呼吸时不动)
-    └── m_body       (466×466, 透明, 呼吸时 y ±12px)
+    └── m_body       (466×466, 透明, 呼吸时 y ±22px)
         ├── m_ear[0..1] (52×52 圆, #2A5A68, 低对比度剪影)
         ├── m_tail[0..2] (18/22/26px 圆, 右下角剪影)
         ├── m_eyeL   (128×150 @ 90,133, 胶囊)

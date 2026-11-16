@@ -13,7 +13,11 @@ namespace {
 constexpr int32_t kScreenSize = 466;
 constexpr uint32_t kPairingWindowMs = 30000;
 constexpr int32_t kArcMaxValue = 1000;
-constexpr float kGaugeMaxSpeedKmh = 240.0f;
+constexpr float kGaugeMaxSpeedKmh = 150.0f;
+// Motor power bar: the track is 268px wide with the zero mark at x=134, so
+// each direction has 134px of travel. Clamp at +/-100kW for a livelier bar.
+constexpr float kPowerMaxKw = 100.0f;
+constexpr float kPowerHalfWidthPx = 134.0f;
 constexpr uint32_t kBootRingDurationMs = 1500;
 const lv_color_t kScreen = lv_color_hex(0x020406);
 const lv_color_t kText = lv_color_hex(0xF5F7FA);
@@ -390,10 +394,83 @@ void LvglDashboard::buildGauge() {
   lv_obj_set_style_border_width(m_arc, 0, LV_PART_KNOB);
   lv_obj_set_clickable(m_arc, false);
 
+  // Speed ticks at 30 / 60 / 90 / 120 km/h. LVGL angle 0 is 3 o'clock and
+  // grows clockwise; the arc starts at 204 deg and spans 132 deg over
+  // 0..kGaugeMaxSpeedKmh, so a tick sits at
+  //   204 + 132 * speed / kGaugeMaxSpeedKmh
+  // degrees. The short radial line straddles the R167 arc midline. The number
+  // radius differs by position so it never collides with the top status bar
+  // (y43..63) or the scaled 3-digit speed readout: 60/90 sit just inside the
+  // ring at R162, while 30/120 sit outside at R190, clear of the digits.
+  constexpr float kArcStartDeg = 204.0f;
+  constexpr float kArcSpanDeg = 132.0f;
+  constexpr float kGaugeCenter = 233.0f;
+  constexpr float kTickInnerRadius = 162.0f;
+  constexpr float kTickOuterRadius = 172.0f;
+  constexpr float kTickLabelRadius[4] = {190.0f, 162.0f, 162.0f, 190.0f};
+  constexpr float kDegToRad = 3.14159265f / 180.0f;
+  constexpr int32_t kTickSpeeds[] = {30, 60, 90, 120};
+  constexpr int32_t kTickLabelWidth = 24;
+  constexpr int32_t kTickLabelHeight = 16;
+
+  m_gaugeTicks = lv_obj_create(screen);
+  lv_obj_remove_style_all(m_gaugeTicks);
+  lv_obj_set_pos(m_gaugeTicks, 0, 0);
+  lv_obj_set_size(m_gaugeTicks, kScreenSize, kScreenSize);
+  lv_obj_set_scrollable(m_gaugeTicks, false);
+  lv_obj_set_clickable(m_gaugeTicks, false);
+
+  // lv_line keeps only the pointer to its points, so the array must outlive
+  // buildGauge().
+  static lv_point_precise_t tickPoints[4][2];
+  for (int32_t i = 0; i < 4; ++i) {
+    const float angle =
+        (kArcStartDeg + kArcSpanDeg * static_cast<float>(kTickSpeeds[i]) /
+                             kGaugeMaxSpeedKmh) *
+        kDegToRad;
+    const float c = cosf(angle);
+    const float s = sinf(angle);
+
+    tickPoints[i][0].x =
+        static_cast<lv_value_precise_t>(lroundf(kGaugeCenter +
+                                                c * kTickInnerRadius));
+    tickPoints[i][0].y =
+        static_cast<lv_value_precise_t>(lroundf(kGaugeCenter +
+                                                s * kTickInnerRadius));
+    tickPoints[i][1].x =
+        static_cast<lv_value_precise_t>(lroundf(kGaugeCenter +
+                                                c * kTickOuterRadius));
+    tickPoints[i][1].y =
+        static_cast<lv_value_precise_t>(lroundf(kGaugeCenter +
+                                                s * kTickOuterRadius));
+
+    lv_obj_t* tick = lv_line_create(m_gaugeTicks);
+    lv_line_set_points(tick, tickPoints[i], 2);
+    lv_obj_set_style_line_width(tick, 2, 0);
+    lv_obj_set_style_line_color(tick, kFaint, 0);
+    lv_obj_set_style_line_rounded(tick, true, 0);
+    lv_obj_set_clickable(tick, false);
+
+    char tickText[8];
+    snprintf(tickText, sizeof(tickText), "%ld",
+             static_cast<long>(kTickSpeeds[i]));
+    const int32_t labelX =
+        static_cast<int32_t>(
+            lroundf(kGaugeCenter + c * kTickLabelRadius[i])) -
+        kTickLabelWidth / 2;
+    const int32_t labelY =
+        static_cast<int32_t>(
+            lroundf(kGaugeCenter + s * kTickLabelRadius[i])) -
+        kTickLabelHeight / 2;
+    makeLabel(m_gaugeTicks, labelX, labelY, kTickLabelWidth,
+              kTickLabelHeight, tickText, &lv_font_montserrat_10, kFaint,
+              LV_TEXT_ALIGN_CENTER);
+  }
+
   m_gaugeMinLabel = makeLabel(screen, 47, 150, 30, 18, "0",
                               &lv_font_montserrat_10, kFaint,
                               LV_TEXT_ALIGN_CENTER);
-  m_gaugeMaxLabel = makeLabel(screen, 389, 150, 30, 18, "240",
+  m_gaugeMaxLabel = makeLabel(screen, 389, 150, 30, 18, "150",
                               &lv_font_montserrat_10, kFaint,
                               LV_TEXT_ALIGN_CENTER);
 }
@@ -887,6 +964,7 @@ void LvglDashboard::render(const UiModel& model) {
   setHidden(m_chargeCardsGroup, !showCharging);
   setHidden(m_temperatureGroup, !ready || pairing);
   setHidden(m_arc, showLinkPage || pairing);
+  setHidden(m_gaugeTicks, showLinkPage || pairing || showCharging);
   setHidden(m_gaugeMinLabel, pairing);
   setHidden(m_gaugeMaxLabel, pairing);
   setHidden(m_topGroup, pairing);
@@ -907,7 +985,7 @@ void LvglDashboard::render(const UiModel& model) {
   }
 
   updateLabel(m_gaugeMinLabel, "0");
-  updateLabel(m_gaugeMaxLabel, showCharging ? "100" : "240");
+  updateLabel(m_gaugeMaxLabel, showCharging ? "100" : "150");
   const lv_color_t currentLinkColor = linkColor(model.link);
   lv_obj_set_style_bg_color(m_linkDot, currentLinkColor, 0);
   lv_obj_set_style_text_color(m_linkLabel, currentLinkColor, 0);
@@ -959,7 +1037,8 @@ void LvglDashboard::render(const UiModel& model) {
              fabsf(model.motorPowerKw));
     updateLabel(m_powerLabel, powerText);
     const int32_t fillWidth = static_cast<int32_t>(
-        fminf(fabsf(model.motorPowerKw), 250.0f) * 0.536f);
+        fminf(fabsf(model.motorPowerKw), kPowerMaxKw) *
+        kPowerHalfWidthPx / kPowerMaxKw);
     const bool regen = model.motorPowerKw < 0;
     lv_obj_set_size(m_powerFill, fillWidth, 5);
     lv_obj_set_pos(m_powerFill, regen ? 134 - fillWidth : 134, 0);

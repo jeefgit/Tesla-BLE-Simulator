@@ -98,9 +98,9 @@ constexpr uint32_t kWakeMs = 220;
 constexpr uint32_t kHideMs = 120;
 constexpr uint32_t kGazeMs = 350;
 constexpr uint32_t kHappyMs = 600;
-// 呼吸：身体整体 +12 → -12px（24px 行程），3s 单程（6s 周期）；
+// 呼吸：身体整体 +22 → -22px（44px 行程），3s 单程（6s 周期）；
 // 困倦 4.5s 单程（9s 周期）。根容器黑底足够大，移动不会露出仪表。
-constexpr int32_t kBreathOffsetPx = 12;
+constexpr int32_t kBreathOffsetPx = 22;
 constexpr uint32_t kBreathHalfMs = 3000;
 constexpr uint32_t kBreathSleepyHalfMs = 4500;
 

@@ -35,6 +35,7 @@ class LvglDashboard : public IDashboard {
 
   lv_obj_t* m_arc = nullptr;
   bool m_showSpeedArc = false;
+  lv_obj_t* m_gaugeTicks = nullptr;
   lv_obj_t* m_gaugeMinLabel = nullptr;
   lv_obj_t* m_gaugeMaxLabel = nullptr;
   lv_obj_t* m_linkLabel = nullptr;
