@@ -398,16 +398,16 @@ void LvglDashboard::buildGauge() {
   // grows clockwise; the arc starts at 204 deg and spans 132 deg over
   // 0..kGaugeMaxSpeedKmh, so a tick sits at
   //   204 + 132 * speed / kGaugeMaxSpeedKmh
-  // degrees. The short radial line straddles the R167 arc midline. The number
-  // radius differs by position so it never collides with the top status bar
-  // (y43..63) or the scaled 3-digit speed readout: 60/90 sit just inside the
-  // ring at R162, while 30/120 sit outside at R190, clear of the digits.
+  // degrees. The short radial line straddles the R167 arc midline. All tick
+  // numbers sit straight outside the ring at R190, radially centred on their
+  // own tick (same style as 30 / 120). At 60/90 they land in the horizontal
+  // gaps of the transparent top status bar, so they do not overlap its text.
   constexpr float kArcStartDeg = 204.0f;
   constexpr float kArcSpanDeg = 132.0f;
   constexpr float kGaugeCenter = 233.0f;
   constexpr float kTickInnerRadius = 162.0f;
   constexpr float kTickOuterRadius = 172.0f;
-  constexpr float kTickLabelRadius[4] = {190.0f, 162.0f, 162.0f, 190.0f};
+  constexpr float kTickLabelRadius = 190.0f;
   constexpr float kDegToRad = 3.14159265f / 180.0f;
   constexpr int32_t kTickSpeeds[] = {30, 60, 90, 120};
   constexpr int32_t kTickLabelWidth = 24;
@@ -456,11 +456,11 @@ void LvglDashboard::buildGauge() {
              static_cast<long>(kTickSpeeds[i]));
     const int32_t labelX =
         static_cast<int32_t>(
-            lroundf(kGaugeCenter + c * kTickLabelRadius[i])) -
+            lroundf(kGaugeCenter + c * kTickLabelRadius)) -
         kTickLabelWidth / 2;
     const int32_t labelY =
         static_cast<int32_t>(
-            lroundf(kGaugeCenter + s * kTickLabelRadius[i])) -
+            lroundf(kGaugeCenter + s * kTickLabelRadius)) -
         kTickLabelHeight / 2;
     makeLabel(m_gaugeTicks, labelX, labelY, kTickLabelWidth,
               kTickLabelHeight, tickText, &lv_font_montserrat_10, kFaint,
