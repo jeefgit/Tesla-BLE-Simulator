@@ -165,15 +165,10 @@ start——CST9217 对后者不应答。
 ```text
 [TOUCH] firmware info: .. .. CA CA
 [TOUCH] CST9217 ready (res 466x466)
-[TOUCH] press x=.. y=.. frame=......
-[GESTURE] press rot=0 raw=(..,..) screen=(..,..)
-[TOUCH] brightness swipe start (dx=.. dy=.. base 160)
-[TOUCH] brightness saved -> 200
 ```
 
-`[TOUCH] press` 每按下/松开各出现一次（空闲不刷屏）；`[GESTURE] press`
-里的 `raw` 是面板原始坐标、`screen` 是旋转换算后的画面坐标，可用于核对触摸
-方向是否与画面一致。
+手势日志（`[GESTURE] ...` / `[TOUCH] brightness ...`）默认已关闭，避免滑动时串口刷屏；
+需要排查手势时可在 `src/app/DashboardApp.cpp` 的 `pollTouch()` 里临时加回 `CFG_LOG`。
 
 ### 静止自动休眠 / 运动唤醒
 

@@ -226,9 +226,6 @@ void DashboardApp::pollTouch() {
     if (m_touchDown) {
       m_touchDown = false;
       m_touchHorizontal = false;
-      CFG_LOG("[GESTURE] release raw=(%d,%d)->(%d,%d) screen=(%d,%d)",
-              m_touchStartRawX, m_touchStartRawY, rawX, rawY, m_touchLastX,
-              m_touchLastY);
       // 小精灵可见时：松手 600ms 后视线回到随机游走；几乎没移动则算轻点。
       const int32_t travel =
           max(abs(m_touchLastX - m_touchStartX),
@@ -243,15 +240,11 @@ void DashboardApp::pollTouch() {
         m_swipeActive = false;
         // 拖动过程中只写面板寄存器，松手才把最终亮度存进 NVS。
         display.saveBrightness();
-        CFG_LOG("[TOUCH] brightness saved -> %u",
-                static_cast<unsigned>(display.brightness()));
       }
     }
     return;
   }
 
-  const int16_t rawTouchX = rawX;
-  const int16_t rawTouchY = rawY;
   // 触摸是用户活动，重置自动休眠的静止计时。
   m_power.notifyUserActivity();
   // 触摸原始坐标跟画面旋转走：先换算成 LVGL 逻辑坐标，这样"屏幕上的上下"
@@ -267,15 +260,10 @@ void DashboardApp::pollTouch() {
     m_elfSwipeLatched = false;
     m_touchStartX = rawX;
     m_touchStartY = rawY;
-    m_touchStartRawX = rawTouchX;
-    m_touchStartRawY = rawTouchY;
     // 小精灵可见时，按下也算一次交互（并让眼睛立刻看向按下的位置）。
     if (m_elf.visible()) {
       m_elf.lookAt(rawX, rawY);
     }
-    CFG_LOG("[GESTURE] press rot=%u raw=(%d,%d) screen=(%d,%d)",
-            static_cast<unsigned>(display.rotation()), rawTouchX, rawTouchY,
-            rawX, rawY);
     return;
   }
 
@@ -305,9 +293,6 @@ void DashboardApp::pollTouch() {
     m_swipeActive = true;
     m_swipeAnchorY = rawY;
     m_swipeBaseBrightness = display.brightness();
-    CFG_LOG("[TOUCH] brightness swipe start (dx=%d dy=%d base %u)",
-            static_cast<int>(dx), static_cast<int>(dy),
-            static_cast<unsigned>(m_swipeBaseBrightness));
     return;
   }
 
@@ -316,8 +301,6 @@ void DashboardApp::pollTouch() {
   // 滑动永远到不了 60px 阈值，表现为“不灵敏、经常无效”。
   if (!m_touchHorizontal && abs(dx) > abs(dy) + kSwipeDominancePx) {
     m_touchHorizontal = true;
-    CFG_LOG("[GESTURE] horizontal drag start (dx=%d dy=%d)",
-            static_cast<int>(dx), static_cast<int>(dy));
   }
   if (!m_touchHorizontal || m_elfSwipeLatched) {
     return;
@@ -337,8 +320,6 @@ void DashboardApp::pollTouch() {
       m_hasRenderedModel = false;
     }
     m_elfSwipeLatched = true;
-    CFG_LOG("[GESTURE] elf swipe dx=%d -> %s", static_cast<int>(dx),
-            m_elf.visible() ? "shown" : "hidden");
   }
 }
 

@@ -41,8 +41,6 @@ class DashboardApp {
   bool m_elfWasVisible = false;
   int16_t m_touchStartX = 0;
   int16_t m_touchStartY = 0;
-  int16_t m_touchStartRawX = 0;
-  int16_t m_touchStartRawY = 0;
   int16_t m_touchLastX = 0;
   int16_t m_touchLastY = 0;
   int16_t m_swipeAnchorY = 0;
