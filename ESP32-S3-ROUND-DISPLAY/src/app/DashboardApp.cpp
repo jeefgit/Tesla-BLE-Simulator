@@ -6,6 +6,7 @@
 
 #include "config.h"
 #include "display/RoundDisplay.h"
+#include "display/ScreenShot.h"
 #include "input/Cst9217Touch.h"
 #include "input/Qmi8658.h"
 #include "platform/boards/waveshare_esp32_s3_touch_amoled_175_b.h"
@@ -238,6 +239,11 @@ void DashboardApp::pollTouch() {
           m_elf.poke(m_touchLastX, m_touchLastY);
         }
       }
+      // 轻点第二下触发串口截图（第一下只记时间）。位移超过容差的手势
+      // 不算轻点，避免滑动调亮度/呼出小精灵时误触发。
+      if (travel < CFG_SCREENSHOT_TAP_PX) {
+        handleTap(m_touchLastX, m_touchLastY);
+      }
       if (m_swipeActive) {
         m_swipeActive = false;
         // 拖动过程中只写面板寄存器，松手才把最终亮度存进 NVS。
@@ -323,6 +329,25 @@ void DashboardApp::pollTouch() {
     }
     m_elfSwipeLatched = true;
   }
+}
+
+void DashboardApp::handleTap(int16_t x, int16_t y) {
+  const uint32_t now = millis();
+  const bool inWindow =
+      m_lastTapValid && (now - m_lastTapMs) <= CFG_SCREENSHOT_DOUBLE_TAP_MS &&
+      abs(x - m_lastTapX) <= CFG_SCREENSHOT_TAP_PX &&
+      abs(y - m_lastTapY) <= CFG_SCREENSHOT_TAP_PX;
+  if (!inWindow) {
+    m_lastTapValid = true;
+    m_lastTapMs = now;
+    m_lastTapX = x;
+    m_lastTapY = y;
+    return;
+  }
+
+  // 双击成立：消费掉这次轻点，避免三连击再触发第二次。
+  m_lastTapValid = false;
+  screenshot::dumpToSerial(display.rotation());
 }
 
 void DashboardApp::setModel(const UiModel& model) { m_model = model; }

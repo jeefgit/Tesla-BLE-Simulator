@@ -42,7 +42,8 @@ ESP32-S3-ROUND-DISPLAY/
 │   │   └── IVehicleSource.h
 │   ├── display/
 │   │   ├── IDisplay.h
-│   │   └── RoundDisplay.h
+│   │   ├── RoundDisplay.h
+│   │   └── ScreenShot.h        # 双击截图：LVGL 快照 → BMP → 串口 base64
 │   ├── input/
 │   │   ├── Cst9217Touch.h       # CST9217 触摸轮询驱动
 │   │   └── Qmi8658.h            # QMI8658 IMU 最小驱动（加速度 / WoM）
@@ -55,11 +56,12 @@ ESP32-S3-ROUND-DISPLAY/
 │   └── ui/
 │       ├── IDashboard.h
 │       └── LvglDashboard.h
-└── src/
+├── src/
     ├── app/
     │   └── DashboardApp.cpp
     ├── display/
-    │   └── RoundDisplay.cpp
+    │   ├── RoundDisplay.cpp
+    │   └── ScreenShot.cpp
     ├── input/
     │   ├── Cst9217Touch.cpp
     │   └── Qmi8658.cpp
@@ -68,6 +70,8 @@ ESP32-S3-ROUND-DISPLAY/
     ├── ui/
     │   └── LvglDashboard.cpp
     └── main.cpp
+└── tools/
+    └── decode_screenshot.py       # 从串口日志还原 .bmp
 ```
 
 ## 界面设计
@@ -169,6 +173,49 @@ start——CST9217 对后者不应答。
 
 手势日志（`[GESTURE] ...` / `[TOUCH] brightness ...`）默认已关闭，避免滑动时串口刷屏；
 需要排查手势时可在 `src/app/DashboardApp.cpp` 的 `pollTouch()` 里临时加回 `CFG_LOG`。
+
+### 双击截图（USB 串口）
+
+双击屏幕（两次轻点，间隔 < 400 ms，位置相差 < 20 px）会把当前 LVGL 画面
+渲染成 **466×466 的 24bit BMP**，按当前旋转方向输出，再以 base64 从 USB
+串口打印。固件不保存文件、也不联网，图片需要 PC 端从串口日志里还原。
+
+**取图步骤**
+
+```bash
+# 1. 打开串口监视器；log2file 会把原始日志写到 platformio-device-monitor-*.log
+pio device monitor -f log2file -f default
+
+# 2. 等开机完成后，在屏幕上连点两下
+#    串口会先打印 ===SHOT-BEGIN===，随后是约 87 万字符的 base64，最后 ===SHOT-END===
+
+# 3. Ctrl+C 退出，然后在工程目录运行解码脚本
+python tools/decode_screenshot.py platformio-device-monitor-*.log
+# 需要 PNG 时（依赖 Pillow）：加 --png
+python tools/decode_screenshot.py shot.log --png
+```
+
+输出为 `shot-<时间戳>.bmp`，方向与屏幕当前方向一致（BOOT 键旋转 90° 后，
+截图也会跟着转）。想直接管道也可以：
+
+```bash
+pio device monitor | python tools/decode_screenshot.py -
+```
+
+**实现说明**
+
+- `include/display/ScreenShot.h` / `src/display/ScreenShot.cpp`：用 LVGL 9 的
+  `lv_snapshot_take()` 把整屏渲染到 PSRAM（RGB565，约 434 KB），再转成 BMP
+  （约 652 KB）；按 `RoundDisplay::rotation()` 做与 flush 相同的旋转变换。
+- 串口输出期间会临时静音其他 `CFG_LOG` 日志（`cfglog::muted()`），并且每行
+  base64 带 `SHOT:` 前缀，避免 BLE 回调日志把图片数据弄花。
+- 截图时主循环会阻塞 1–5 秒（取决于 PC 读取串口的速度），画面暂时不刷新属正常。
+- 内存峰值约 1.1 MB，全部在 PSRAM；抓完立即释放。
+- 开关和阈值在 `include/config.h`：
+  `CFG_SCREENSHOT_ENABLE` / `CFG_SCREENSHOT_DOUBLE_TAP_MS` / `CFG_SCREENSHOT_TAP_PX`。
+- `LV_USE_SNAPSHOT` 已在 `include/lv_conf.h` 打开；首次编译会多编译 LVGL 的
+  snapshot 模块。
+- 自动休眠默认 150 秒：调试时如果屏幕已经熄了，先碰一下设备唤醒再双击。
 
 ### 静止自动休眠 / 运动唤醒
 

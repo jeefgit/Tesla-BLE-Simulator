@@ -512,12 +512,12 @@ if (m_elf.visible()) {
 #define CFG_ELF_SOUND_BEAT_MAX_BPM 200
 #define CFG_ELF_SOUND_BEAT_REFRACTORY_MS 200UL  // 两拍最小间隔
 #define CFG_ELF_SOUND_BEAT_CONFIRM 2     // 1.2s 内至少几拍才进 Grooving
-#define CFG_ELF_SOUND_MIN_CONFIDENCE 80  // 进入 Grooving 的最低节拍置信度（0–255）
-#define CFG_ELF_SOUND_ONSET_THRESHOLD 0.45f  // 节拍起音阈值；越低越灵敏
+#define CFG_ELF_SOUND_MIN_CONFIDENCE 60  // 进入 Grooving 的最低节拍置信度（0–255）
+#define CFG_ELF_SOUND_ONSET_THRESHOLD 0.30f  // 节拍起音阈值；越低越灵敏
 #define CFG_ELF_SOUND_GROOVE_HOLD_MS 1600UL     // 无拍后保持律动的时间
 #define CFG_ELF_SOUND_BOUNCE_PX 20       // 弹跳最大行程
 #define CFG_ELF_SOUND_SWAY_PX 12         // 摇摆最大行程
-#define CFG_ELF_SOUND_LEVEL_GAIN 6       // ES7210 输入增益档位（比原设置提高约 6dB）
+#define CFG_ELF_SOUND_LEVEL_GAIN 9       // ES7210 增益档位，每档 3dB：9 = 27dB（最大 14 = 37.5dB）
 #define CFG_ELF_SOUND_LOG 0              // 1 = 每 500ms 打印 level/bpm/conf
 ```
 

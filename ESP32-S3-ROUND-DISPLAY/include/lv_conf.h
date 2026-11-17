@@ -22,6 +22,13 @@
  */
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB
 
+/* 双击屏幕截图：lv_snapshot_take() 把整屏渲染到一块 PSRAM 缓冲。
+ *
+ * 466x466 的 RGB565 快照约 434KB；LVGL 默认不编译 snapshot 模块，这里显式
+ * 打开。关闭截图功能时也可以把这一行改回 0，省一点 flash。
+ */
+#define LV_USE_SNAPSHOT 1
+
 /* 仪表用到的字体。
  *
  * 这里一次性启用一批常用字号，避免以后每换一个字号都要改本文件、

@@ -24,6 +24,7 @@ class DashboardApp {
   void pollPowerButton();
   void beginTouch();
   void pollTouch();
+  void handleTap(int16_t x, int16_t y);
 
 #if !CFG_DEMO_MODE
   TeslaUiSource m_source;
@@ -45,6 +46,12 @@ class DashboardApp {
   int16_t m_touchLastY = 0;
   int16_t m_swipeAnchorY = 0;
   uint8_t m_swipeBaseBrightness = 0;
+  // 双击截图：记录上一次轻点的时间和位置，第二次轻点落在时间/位置窗口内
+  // 就触发一次串口截图。
+  bool m_lastTapValid = false;
+  uint32_t m_lastTapMs = 0;
+  int16_t m_lastTapX = 0;
+  int16_t m_lastTapY = 0;
   bool m_pwrAvailable = false;
   bool m_pwrArmed = false;
   bool m_pwrRawPressed = false;

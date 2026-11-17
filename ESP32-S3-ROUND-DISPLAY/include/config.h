@@ -22,9 +22,9 @@
 #define CFG_TESLA_UNITS_MILES 1
 
 // 驾驶状态轮询间隔；单条请求仍需等车端响应后才会发送下一条。
-#define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 280
+#define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 313
 
-#define CFG_TESLA_AUX_POLL_INTERVAL_MS 500
+#define CFG_TESLA_AUX_POLL_INTERVAL_MS 15000
 
 // 1 = 先完成加密握手，再用 GetVehicleData 轮询
 // 0 = 只接收 53B 旁路 SimPayload（模拟器调试用）
@@ -92,10 +92,27 @@
 // 后端诊断日志；Drive 请求耗时最多记录前 10 次响应。
 #define CFG_DEBUG_LOG 1
 #if CFG_DEBUG_LOG
-#define CFG_LOG(fmt, ...) \
-  Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f, ##__VA_ARGS__)
-#define CFG_LOG_ALWAYS(fmt, ...) \
-  Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f, ##__VA_ARGS__)
+namespace cfglog {
+// 串口截图输出 base64 期间临时静音其他日志，避免 BLE 回调里的日志插进
+// 数据行把图片弄花。实现见 src/display/ScreenShot.cpp。
+void setMuted(bool muted);
+bool muted();
+}  // namespace cfglog
+
+#define CFG_LOG(fmt, ...)                                        \
+  do {                                                           \
+    if (!cfglog::muted()) {                                      \
+      Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f,   \
+                    ##__VA_ARGS__);                              \
+    }                                                            \
+  } while (0)
+#define CFG_LOG_ALWAYS(fmt, ...)                                 \
+  do {                                                           \
+    if (!cfglog::muted()) {                                      \
+      Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f,   \
+                    ##__VA_ARGS__);                              \
+    }                                                            \
+  } while (0)
 #endif
 
 // ---------------------------------------------------------------------------
@@ -115,6 +132,23 @@
 #define CFG_ELF_GAZE_MAX_MS 5000UL
 
 // ---------------------------------------------------------------------------
+// 串口截图（双击屏幕）
+//   双击屏幕把当前画面渲染成 466×466 BMP（24bit），按当前旋转方向输出，
+//   以 base64 从 USB 串口打印，前后带 ===SHOT-BEGIN/END=== 标记。
+//
+//   取图步骤：
+//     1. pio device monitor -f log2file -f default   （先连上，等开机完成）
+//     2. 在屏幕上轻点两下（间隔 < 400ms）
+//     3. Ctrl+C 退出，得到 platformio-device-monitor-*.log
+//     4. python tools/decode_screenshot.py <log 文件>
+//
+//   截图期间主循环会阻塞 1~5 秒（取决于串口读取速度），属正常现象。
+// ---------------------------------------------------------------------------
+#define CFG_SCREENSHOT_ENABLE 1
+#define CFG_SCREENSHOT_DOUBLE_TAP_MS 400UL  // 两次轻点的最大间隔
+#define CFG_SCREENSHOT_TAP_PX 20            // 轻点位移容差 / 两次轻点位置容差
+
+// ---------------------------------------------------------------------------
 // 阶段 5：声音律动（design/ELF-DESIGN.md §5.6）
 //   只收不放：小精灵可见时用 ES7210 双麦感知音量/节拍，不录音、不上传。
 // ---------------------------------------------------------------------------
@@ -131,10 +165,10 @@
 #define CFG_ELF_SOUND_BEAT_MAX_BPM 200   // 有效节拍上限
 #define CFG_ELF_SOUND_BEAT_REFRACTORY_MS 200UL  // 两拍最小间隔
 #define CFG_ELF_SOUND_BEAT_CONFIRM 2     // 1.2s 内至少几拍才进 Grooving
-#define CFG_ELF_SOUND_MIN_CONFIDENCE 80  // 进入 Grooving 的最低节拍置信度（0–255）
-#define CFG_ELF_SOUND_ONSET_THRESHOLD 0.45f  // 节拍起音阈值；越低越灵敏
+#define CFG_ELF_SOUND_MIN_CONFIDENCE 60  // 进入 Grooving 的最低置信度（0–255）；60 允许约第 3 拍进入
+#define CFG_ELF_SOUND_ONSET_THRESHOLD 0.30f  // 节拍起音阈值；越低越灵敏（0.45 -> 0.30）
 #define CFG_ELF_SOUND_GROOVE_HOLD_MS 1600UL     // 无拍后保持律动的时间
 #define CFG_ELF_SOUND_BOUNCE_PX 20       // 弹跳最大行程
 #define CFG_ELF_SOUND_SWAY_PX 12         // 摇摆最大行程
-#define CFG_ELF_SOUND_LEVEL_GAIN 6       // ES7210 输入增益档位（比原设置提高约 6dB）
+#define CFG_ELF_SOUND_LEVEL_GAIN 9       // ES7210 增益档位，每档 3dB：6=18dB，9=27dB，14=37.5dB（最大）
 #define CFG_ELF_SOUND_LOG 1              // 1 = 每 500ms 打印 level/bpm/conf
