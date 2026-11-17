@@ -372,16 +372,19 @@ void DashboardApp::loop() {
     m_source.begin();
     m_sourceStarted = true;
   }
-  if (m_sourceStarted) {
-    // 小精灵显示期间不再暂停 BLE 轮询：阶段 4 的充电打哈欠、车速瞳孔和
-    // 急减速眯眼都需要实时数据。仪表重绘仍然暂停，退出后补画一帧。
+  if (m_sourceStarted && !elfVisible) {
+    // 小精灵显示期间完全停止 BLE 轮询：不再获取驾驶数据，小精灵只跑本地动画。
+    // 隐藏（含 Hiding 动画结束）后恢复轮询，并靠 m_hasRenderedModel=false
+    // 强制补画一帧最新数据。
     m_source.loop();
     m_model = m_source.model();
   }
 #endif
-  // 车辆状态实时快照（阶段 4）：充电打哈欠、车速瞳孔放大、急减速眯眼。
-  // BLE 轮询在小精灵显示期间照常进行，因此这些联动是实时的。
-  m_elf.setVehicleState(m_model.speedKmh, m_model.speedValid, m_model.charging);
+  // 车辆状态只在仪表模式同步给浮层（阶段 4 的充电打哈欠/车速瞳孔/急减速眯眼）。
+  // 小精灵显示期间不更新：m_model 已冻结，避免用陈旧数据继续驱动联动。
+  if (!elfVisible) {
+    m_elf.setVehicleState(m_model.speedKmh, m_model.speedValid, m_model.charging);
+  }
 #if CFG_ELF_SOUND_ENABLE
   // 初始化失败时 SoundSensor 内部按 5s 间隔最多重试 5 次。
   if (!m_soundReady) {

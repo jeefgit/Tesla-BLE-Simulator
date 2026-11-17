@@ -96,7 +96,7 @@ stateDiagram-v2
 | --- | --- |
 | 开机动画未结束 | 忽略横滑，不显示 |
 | 配钥页 / 断连页 / 充电页 | 允许显示（不透明纯黑浮层覆盖，退出后恢复原页） |
-| 小精灵可见时车辆数据变化 | **BLE 轮询继续**（照常调用 `m_source.loop()`），仪表重绘暂停；退出后强制重绘一帧，浮层内的车速/充电联动实时生效 |
+| 小精灵可见时车辆数据变化 | **BLE 轮询暂停**（不调用 `m_source.loop()`），小精灵不感知车速/充电变化；退出后恢复轮询并强制重绘一帧 |
 | 小精灵可见时到自动休眠时间 | 先隐藏小精灵，休眠逻辑照旧（触摸本身已重置静止计时） |
 | 触摸芯片初始化失败 | 手势不可用，小精灵永不显示，不影响仪表 |
 | 屏幕旋转 | 手势方向跟画面；小精灵本身居中，无需重排 |
@@ -368,7 +368,7 @@ class SoundSensor {
 | 文件 | 改动 |
 | --- | --- |
 | `include/app/DashboardApp.h` | 增加 `#include "ui/ElfOverlay.h"`、成员 `ElfOverlay m_elf;`、横向手势状态 `m_elfSwipeLatched`、`m_touchMaxTravel`；阶段 5 增加 `#include "audio/SoundSensor.h"`、成员 `SoundSensor m_sound;` |
-| `src/app/DashboardApp.cpp` | `begin()` 里 `dashboard.begin()` 之后调用 `m_elf.begin()`（保证浮层在开机图层之上）；`pollTouch()` 增加横向累计与显隐/轻点判定（按下/移动转发 `lookAt`、松手转发 `touchEnd`）；`loop()` 里小精灵可见时**只暂停仪表重绘、BLE 轮询保持**，并在可见性下降沿强制补画一帧；每轮调用 `m_elf.setVehicleState(...)` 传递实时车速/充电状态；阶段 5 在 `m_elf.show()` 后 `m_sound.start()`、`hide()` 完成或可见性下降沿 `m_sound.stop()`，并每轮把 `m_sound.read()` 喂给 `m_elf.setSoundFrame(...)` |
+| `src/app/DashboardApp.cpp` | `begin()` 里 `dashboard.begin()` 之后调用 `m_elf.begin()`（保证浮层在开机图层之上）；`pollTouch()` 增加横向累计与显隐/轻点判定（按下/移动转发 `lookAt`、松手转发 `touchEnd`）；`loop()` 里小精灵可见时**暂停仪表重绘并暂停 BLE 轮询**，并在可见性下降沿强制补画一帧；仅在仪表模式下调用 `m_elf.setVehicleState(...)` 传递车速/充电状态；阶段 5 在 `m_elf.show()` 后 `m_sound.start()`、`hide()` 完成或可见性下降沿 `m_sound.stop()`，并每轮把 `m_sound.read()` 喂给 `m_elf.setSoundFrame(...)` |
 | `include/audio/SoundSensor.h` | 新增：I2S/ES7210 初始化、采集任务、节拍/BPM 特征输出 |
 | `src/audio/SoundSensor.cpp` | 新增：ES7210 寄存器初始化 + `driver/i2s_tdm.h` 接收 + 能量/鼓点分析 |
 | `include/ui/ElfOverlay.h` | 新增 `setSoundFrame(const SoundFrame&)`、声音子状态、包络变量、`updatePupilTarget()` |
@@ -441,27 +441,33 @@ if (m_touchDown) {
 ```cpp
 // DashboardApp::loop()
 #if !CFG_DEMO_MODE
-if (m_sourceStarted) {
-  m_source.loop();          // 小精灵显示期间仍保持 BLE 轮询（阶段 4 需要实时数据）
+if (m_sourceStarted && !elfVisible) {
+  m_source.loop();          // 小精灵显示期间彻底停止 BLE 轮询
   m_model = m_source.model();
 }
 #endif
 
-if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
+if (!elfVisible) {
+  m_elf.setVehicleState(m_model.speedKmh, m_model.speedValid, m_model.charging);
+}
+
+if (!dashboard.bootAnimationRunning() && !elfVisible &&
     now - m_lastRenderMs >= 50) {
   ...
 }
 
 #if CFG_ELF_SOUND_ENABLE
-if (m_elf.visible()) {
+if (elfVisible) {
   m_elf.setSoundFrame(m_sound.read());  // 无锁快照，小精灵内部再消费
 }
 #endif
 ```
 
-- **小精灵可见期间保持数据轮询**：`m_source.loop()` 照常调用，`UiModel` 持续更新，充电打哈欠、车速瞳孔、急减速眯眼才能实时联动。
-- **只暂停仪表重绘**（`!m_elf.visible()`），避免浮层后面的仪表白白刷屏。
-- `hide()` 完成后强制 `m_hasRenderedModel = false;`，下一轮一定重画一帧，退出后仪表立刻显示最新数据。
+- **小精灵可见期间不轮询车辆数据**：`m_source.loop()` 不再调用，`UiModel` 冻结在呼出前的快照。小精灵只跑本地动画（眨眼/注视/呼吸/声音律动），不再跟随车速瞳孔、急减速眯眼、充电打哈欠。
+- **进入浮层时不再同步驾驶状态**：可见性为 true 时也不调用 `setVehicleState()`，避免用冻结的旧数据继续驱动联动；退出后下一轮恢复同步。
+- **只暂停仪表重绘**（`!elfVisible`），避免浮层后面的仪表白白刷屏。
+- `hide()` 完成后强制 `m_hasRenderedModel = false;`，下一轮一定重画一帧，退出后仪表立刻显示最新数据（数据由恢复后的轮询刷新）。
+- **BLE 可能因空闲断链**：车端连接在无轮询时可能超时断开，这是预期行为；退出小精灵后 `m_source.loop()` 恢复，由后端自行重连并重新握手。
 - **声音采集只跟随可见性**：`show()` 成功启动后 `m_sound.start()`；可见性下降沿（含 Hiding 动画结束）`m_sound.stop()`。不要在 `loop()` 里每帧 start/stop。
 
 ### 5.5 LVGL / 性能注意事项（本项目踩过的坑）
@@ -646,7 +652,7 @@ LVGL thread: ElfOverlay 30ms lv_timer
 - [x] 新建 `ElfOverlay`，画静态双眼（眼球 + 虹膜 + 瞳孔 + 高光）。
 - [x] `DashboardApp` 横向手势：左/右滑显示、再横滑隐藏，串口打印 `[ELF] show/hide`。
 - [x] 小精灵可见时跳过仪表重绘，退出时强制重绘一帧。
-- [x] 小精灵可见时保持 BLE 数据轮询，只暂停仪表重绘。
+- [x] 小精灵可见时暂停仪表重绘与 BLE 轮询（浮层只跑本地动画）。
 - [x] 根容器改为不透明纯黑，呼出时完全盖住仪表页。
 - [ ] 验证 0°/90°/180°/270° 四个方向手势一致。
 
@@ -683,7 +689,7 @@ LVGL thread: ElfOverlay 30ms lv_timer
 - [x] 去除 45s 自动退出（默认常亮）。
 
 > 实现要点：
-> - `DashboardApp::loop()` 每轮调用 `setVehicleState(m_model.speedKmh, m_model.speedValid, m_model.charging)`；BLE 轮询在显示期间保持，因此充电/车速联动是实时的。
+> - `DashboardApp::loop()` 仅在**小精灵不可见**时调用 `setVehicleState(m_model.speedKmh, m_model.speedValid, m_model.charging)`；小精灵显示期间 BLE 轮询暂停，联动数据不更新（见 5.4），只保留呼出前的最后一帧状态。
 > - 充电上升沿后 3–6s 第一次打哈欠，之后每 12–20s 一次；慢闭 500ms、停 400ms、慢睁 500ms，嘴变亮，结束回 Idle。拔掉充电立即取消排期。
 > - 车速瞳孔：20 km/h 起从 74 线性放大，100 km/h 到 86，300ms 平滑过渡；Happy 临时放大到 82，结束后回到当前车速基准。
 > - 行驶中（车速 ≥5 km/h）持续刷新交互计时，不会进入 Sleepy/Sleeping；已在睡眠中的会立即唤醒。
@@ -720,7 +726,7 @@ LVGL thread: ElfOverlay 30ms lv_timer
 4. 断网、未连接车辆、`CFG_DEMO_MODE=1` 时功能完全正常。
 5. 默认常亮不自动退出；横滑退出后仪表数据是最新的。需要限时演示时把 `CFG_ELF_AUTO_HIDE_MS` 设为 45000。
 6. 不出现 LVGL 堆不足/重启；串口无 `StoreProhibited`、无看门狗。
-7. 眨眼/注视动画无撕裂、无明显掉帧；BLE 驾驶数据刷新间隔无可感知变化。
+7. 眨眼/注视动画无撕裂、无明显掉帧；小精灵显示期间停止 BLE 轮询，退出后仪表数据在一个轮询周期内恢复刷新。
 8. 关闭 `CFG_ELF_ENABLE` 后，固件行为与当前版本完全一致。
 9. 声音开启后，静音环境连续 5 分钟不出现律动/误触发；`Listening` 不常驻。
 10. 手机节拍器 90 BPM 与 120 BPM：显示 BPM 误差 ≤ ±5，拍点与画面变化延迟 ≤ 100ms。
@@ -737,7 +743,7 @@ LVGL thread: ElfOverlay 30ms lv_timer
 2. **自动隐藏时长**：已改为默认关闭（`CFG_ELF_AUTO_HIDE_MS = 0`），需要时设 45000。
 3. **是否需要身体**：已定——只加低对比度耳朵/尾巴剪影，不做完整身体，避免抢眼睛。
 4. **是否要声音**：已定——**只收不放**。阶段 5 用板载 ES7210 双麦做环境节拍感知，不驱动扬声器、不做语音识别/唤醒；后续若加“摸头音效”，再单独评估 ES8311/PA 与 BLE 的共存。
-5. **是否联动车辆状态**：已实现充电打哈欠、车速瞳孔、急减速眯眼、行驶中保持清醒（本地实时数据，不联网）。
+5. **是否联动车辆状态**：已实现充电打哈欠、车速瞳孔、急减速眯眼、行驶中保持清醒（本地实时数据，不联网）。注意：小精灵显示期间不轮询车辆数据，这些联动只在仪表页生效。
 6. **声音默认开还是关**：建议默认 `CFG_ELF_SOUND_ENABLE=1`，但只在可见时工作；如果实机底噪大/误触发多，可先默认 0，调好参数再打开。
 7. **要不要做声源方位**：本期不做。双麦时延差需要更复杂的校准，且圆屏上“转头看声源”容易和随机注视混淆。
 8. **要不要在屏幕上提示“正在听”**：本期不加新对象；如需要，可让光环在 `Listening` 时轻微呼吸变亮，避免额外文案/图标。
