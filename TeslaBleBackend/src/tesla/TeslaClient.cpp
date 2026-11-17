@@ -450,6 +450,10 @@ void TeslaClient::onConnected() {
   m_pairWaitLogged = false;
   m_pairWaitNfc = false;
   m_pairSuccessReported = false;
+  m_pairAwaitSession = false;
+  m_pairTerminalHandled = false;
+  m_pairTerminalOp = 0;
+  m_pairTerminalInfo = 0;
   m_pairSends = 0;
   m_nextPairAt = 0;
   m_pairWaitAt = 0;
@@ -493,6 +497,10 @@ void TeslaClient::onDisconnected() {
   m_pairWaitLogged = false;
   m_pairWaitNfc = false;
   m_pairSuccessReported = false;
+  m_pairAwaitSession = false;
+  m_pairTerminalHandled = false;
+  m_pairTerminalOp = 0;
+  m_pairTerminalInfo = 0;
   m_pairSends = 0;
   m_pairWaitAt = 0;
   m_hint = PairingHint{};
@@ -623,15 +631,28 @@ void TeslaClient::sendPoll() {
 
 void TeslaClient::onCryptoSession(bool ok) {
   if (ok) {
+    // 车端回配钥成功后，用加密握手成功来确认钥匙真的生效，再显示 KEY ADDED。
+    const bool pairVerified = m_pairAwaitSession;
     m_handshakeTries = 0;
     m_notPaired = false;
     m_pairDone = false;
     m_pairWaitLogged = false;
     m_pairWaitNfc = false;
+    m_pairSuccessReported = false;
+    m_pairAwaitSession = false;
+    m_pairTerminalHandled = false;
+    m_pairTerminalOp = 0;
+    m_pairTerminalInfo = 0;
     m_pairSends = 0;
     m_pairWaitAt = 0;
     m_nextAuxiliaryRequest = TeslaCrypto::VehicleDataRequest::Charge;
     m_hint = PairingHint{};
+    if (pairVerified) {
+      m_hint.phase = PairingHint::Success;
+      m_hint.info = 0;
+      m_hintUntil = millis() + 4000;
+      CFG_LOG("[PAIR] ✅ 配钥成功：加密握手已建立，钥匙已生效");
+    }
     // 握手成功后立即开始辅助数据首轮连续取数。
     const uint32_t now = millis();
     m_nextDrivePollAt = now;
@@ -657,6 +678,7 @@ void TeslaClient::onNotPaired() {
   m_notPaired = true;
   m_pairDone = false;
   m_pairSuccessReported = false;
+  m_pairAwaitSession = false;
   m_pairWaitNfc = false;
   m_pairWaitLogged = false;
   m_pairSends = 0;
@@ -687,8 +709,13 @@ void TeslaClient::sendPairingRequest() {
   }
   ++m_pairSends;
   m_nextPairAt = millis() + CFG_TESLA_PAIR_RETRY_MS;
-  // 超时基准：最后一次发送时刻；若随后收到 WAIT 会用 WAIT 时刻刷新
+  // 超时基准：最后一次发送时刻（车端 30s 刷卡窗口从收到请求开始算）
   m_pairWaitAt = millis();
+  // 新一轮贴卡：允许重新处理下一条配钥终态（车端可能重播上一轮的终态）。
+  m_pairTerminalHandled = false;
+  m_pairTerminalOp = 0;
+  m_pairTerminalInfo = 0;
+  m_pairAwaitSession = false;
   // 屏幕提示：开始贴卡倒计时（真车要先贴卡，中控屏才弹确认框）
   m_hint.phase = PairingHint::TapCard;
   m_hint.attempt = (uint8_t)m_pairSends;
@@ -713,34 +740,41 @@ void TeslaClient::onPairingStatus(uint32_t operationStatus, uint32_t info,
 
   if (!terminal) {
     if (operationStatus == 1) {
-      // 车辆已受理：停止重发和握手，纯等待刷卡（超时由 loop 统一处理）
+      // 协议里 OPERATIONSTATUS_WAIT 的含义是「车端已受理，等待 NFC 卡」，
+      // 不是「卡已刷」。真车会每秒重播 WAIT，屏幕必须一直停在贴卡倒计时，
+      // 不能在这里切到 CONFIRM/已刷卡，否则界面会来回跳。
       m_pairWaitNfc = true;
-      m_pairWaitAt = millis();
-      m_hint.phase = PairingHint::WaitConfirm;
-      m_hint.info = 0;
       if (!m_pairWaitLogged) {
         m_pairWaitLogged = true;
-        CFG_LOG("[PAIR] 车辆已受理请求，等待 NFC 卡授权（中控台轻点钥匙卡，"
-                "固件暂停发送 %u s）",
-                (unsigned)(CFG_TESLA_PAIR_WAIT_TIMEOUT_MS / 1000));
+        CFG_LOG("[PAIR] 车辆已受理请求，继续等待 NFC 卡授权（中控台轻点钥匙卡）");
       }
     }
     return;
   }
 
-  if (m_pairSuccessReported && operationStatus == 0 && info == 0) return;
+  // 车端会每秒重播同一条终态。同一轮配钥只处理一次，避免界面在
+  // 贴卡 / 重试 / 已添加之间反复跳变。
+  if (m_pairTerminalHandled && operationStatus == m_pairTerminalOp &&
+      info == m_pairTerminalInfo) {
+    return;
+  }
+  m_pairTerminalHandled = true;
+  m_pairTerminalOp = operationStatus;
+  m_pairTerminalInfo = info;
 
   m_pairDone = true;
   m_pairWaitNfc = false;
+
   if (operationStatus == 0 && info == 0) {
     m_pairSuccessReported = true;
-    CFG_LOG("[PAIR] ✅ 配钥成功：公钥已写入车端白名单，重新握手");
     m_notPaired = false;
     m_handshakeTries = 0;
     m_nextActionAt = millis() + 300;
-    m_hint.phase = PairingHint::Success;
+    // 车端说成功了，但「钥匙真的生效」要等随后的加密握手。先保持贴卡
+    // 倒计时画面，握手成功后才切 KEY ADDED，防止误报/重播造成闪屏。
+    m_pairAwaitSession = true;
     m_hint.info = 0;
-    m_hintUntil = millis() + 4000;
+    CFG_LOG("[PAIR] 车端已回配钥成功，等待加密握手确认后显示 KEY ADDED");
     return;
   }
 

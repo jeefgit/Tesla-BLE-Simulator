@@ -105,6 +105,13 @@ class TeslaClient {
   bool m_pairWaitLogged = false;  // WAIT 日志只打一次
   bool m_pairWaitNfc = false;     // 车辆已回 WAIT，正在等待 NFC 刷卡
   bool m_pairSuccessReported = false;
+  // 车端已回「配钥成功」终态，但还在等加密握手确认（真正确认钥匙可用）。
+  // 只有握手成功后才显示 KEY ADDED，避免车端重播终态时界面闪跳。
+  bool m_pairAwaitSession = false;
+  // 车端每秒重播同一条配钥终态；同一轮只处理一次，避免反复跳变。
+  bool m_pairTerminalHandled = false;
+  uint32_t m_pairTerminalOp = 0;
+  uint32_t m_pairTerminalInfo = 0;
   uint32_t m_pairSends = 0;
   uint32_t m_nextPairAt = 0;
   uint32_t m_pairWaitAt = 0;       // 进入等待/最后一次发送的时刻（超时基准）

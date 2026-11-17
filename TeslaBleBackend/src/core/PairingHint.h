@@ -16,10 +16,10 @@
 struct PairingHint {
   enum Phase : uint8_t {
     Idle = 0,     // 没在配钥（屏幕上不显示任何配钥提示）
-    TapCard,      // 已发 add-key-request，等待把卡贴到读卡区（有倒计时）
-    WaitConfirm,  // 车端已受理，等贴卡 + 中控屏确认
+    TapCard,      // 已发 add-key-request（含车端 WAIT），等贴卡；贴卡到车机确认完成前都停在这里
+    WaitConfirm,  // 保留：车端读到卡、等待中控屏确认（当前固件不再进入，避免界面来回跳）
     Retry,        // 超时或暂时失败，固件会自动重来
-    Success,      // 配钥成功（短时展示）
+    Success,      // 配钥成功且加密握手已建立（短时展示）
     Failed,       // 需要人工处理（车主拒绝 / 白名单满等）
   };
 

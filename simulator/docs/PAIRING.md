@@ -315,11 +315,10 @@ RESULT: IDENTICAL —— 信封与官方 vehicle-command 完全一致
 
 | 屏幕内容 | 含义 / 该做什么 |
 | --- | --- |
-| `ADD NEW KEY` + `TAP CARD` + 倒计时秒数（橙） | 已发 add-key-request。**立刻贴卡**，倒计时是车端刷卡窗口（`CFG_TESLA_PAIR_TAP_WINDOW_MS`，30s） |
-| `CONFIRM` + `CARD READ - CHECK SCREEN`（绿） | 车端读到卡了：去中控屏点「添加」确认 |
+| `ADD NEW KEY` + `TAP CARD` + 倒计时秒数（橙） | 已发 add-key-request。**立刻贴卡**，倒计时是车端刷卡窗口（`CFG_TESLA_PAIR_TAP_WINDOW_MS`，30s）。贴卡后到车机确认完成前都保持这一页，不会跳到其它状态 |
 | `TIMEOUT` + `RETRYING IN A FEW SECONDS`（橙） | 收到 `info=25/26` 或窗口已过；固件会自动重发，下一轮再贴卡 |
 | `WINDOW CLOSED` | 当前这轮窗口用完了，等自动重发（不发请求时贴卡无效） |
-| `KEY ADDED` + `PAIRED - RECONNECTING`（绿） | 配钥成功，正在重新握手取数据 |
+| `KEY ADDED` + `PAIRED - RECONNECTING`（绿） | 配钥成功且加密握手已建立（车机确认完毕），正在取数据 |
 | `FAILED` + `ERROR n`（红） | 被拒/白名单满等，`n` 对应 `info` 码，详见串口日志 |
 
 卡片底部的 `TRY 1/3` 是本轮第几次重发；副标题会写明

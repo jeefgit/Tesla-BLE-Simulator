@@ -157,7 +157,7 @@ SourceStatus.link / PairingHint
 | 温度 | `insideTempC` / `outsideTempC` | 四舍五入整数 °C；标签 OUTSIDE / CABIN |
 | 锁 | `locked` | `LOCK` / `UNLOCK`（UNLOCK 用 CAUTION） |
 | 链路 | `SourceStatus.link` | 绿=LINK，琥珀=扫描/连接/同步，灰=Idle，红=Retry/Error |
-| 配钥 | `PairingHint` | `TAP CARD / CONFIRM / RETRY / KEY ADDED / FAILED` |
+| 配钥 | `PairingHint` | `TAP CARD / RETRY / KEY ADDED / FAILED`（`WAIT` 期间保持 TAP CARD，握手成功后才显示 KEY ADDED） |
 | 车门 | `doors[6]` | 任一项打开时切换到门状态页；顺序为左前、右前、左后、右后、前备箱、后备箱 |
 | 胎压 | `tpms[4]` | 本稿未常驻显示，见待确认问题 |
 
