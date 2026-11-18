@@ -152,6 +152,24 @@ bool muted();
 #define CFG_SCREENSHOT_TAP_PX 20            // 轻点位移容差 / 两次轻点位置容差
 
 // ---------------------------------------------------------------------------
+// USB OTA（本地网页升级）
+//   设备正常运行时通过板载 USB CDC 接收 firmware.bin，写入另一个 OTA
+//   app 分区（分区表 default_16MB.csv 自带 app0/app1），CRC32 校验通过后
+//   自动重启；NVS（旋转、亮度）保持不变。不需要 WiFi。
+//
+//   主机侧：ESP32-S3-ROUND-DISPLAY/tools/ota/run.bat 启动本地页面，
+//   Chrome/Edge 通过 Web Serial 选择 .pio/build/<env>/firmware.bin 发送。
+//   协议见 src/ota/UsbOta.cpp 与 tools/ota/README.md。
+// ---------------------------------------------------------------------------
+#define CFG_USB_OTA_ENABLE 1
+// PING 时上报给网页的固件版本，方便确认设备端已经运行带 OTA 的固件。
+#define CFG_FW_VERSION "0.1.0"
+// 单块数据大小；主机每块等一次 ACK，flash 写入期间不会有数据在途。
+#define CFG_USB_OTA_CHUNK 4096
+// 单块接收超时：主机取消 / 拔线后最多等这么久就放弃并回到仪表。
+#define CFG_USB_OTA_RX_TIMEOUT_MS 10000
+
+// ---------------------------------------------------------------------------
 // 阶段 5：声音律动（design/ELF-DESIGN.md §5.6）
 //   只收不放：小精灵可见时用 ES7210 双麦感知音量/节拍，不录音、不上传。
 // ---------------------------------------------------------------------------

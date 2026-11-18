@@ -51,6 +51,8 @@ ESP32-S3-ROUND-DISPLAY/
 │   │   ├── BoardProfile.h
 │   │   └── boards/
 │   │       └── waveshare_esp32_s3_touch_amoled_175_b.h
+│   ├── ota/
+│   │   └── UsbOta.h              # USB CDC 网页 OTA：写备用分区 + 进度页
 │   ├── power/
 │   │   └── PowerManager.h       # 静止自动休眠 / 运动唤醒状态机
 │   └── ui/
@@ -67,11 +69,14 @@ ESP32-S3-ROUND-DISPLAY/
     │   └── Qmi8658.cpp
     ├── power/
     │   └── PowerManager.cpp
+    ├── ota/
+    │   └── UsbOta.cpp             # 串口协议 + Update.h 写 OTA 分区
     ├── ui/
     │   └── LvglDashboard.cpp
     └── main.cpp
 └── tools/
-    └── decode_screenshot.py       # 从串口日志还原 .bmp
+    ├── decode_screenshot.py       # 从串口日志还原 .bmp
+    └── ota/                       # 本地网页 OTA（index.html + serve.py）
 ```
 
 ## 界面设计
@@ -216,6 +221,40 @@ pio device monitor | python tools/decode_screenshot.py -
 - `LV_USE_SNAPSHOT` 已在 `include/lv_conf.h` 打开；首次编译会多编译 LVGL 的
   snapshot 模块。
 - 自动休眠默认 150 秒：调试时如果屏幕已经熄了，先碰一下设备唤醒再双击。
+
+### USB OTA（本地网页升级）
+
+不依赖 WiFi。设备正常运行时通过板载 USB CDC 接收主机发来的固件，写入另一个
+OTA app 分区（`default_16MB.csv` 自带 `app0`/`app1`，各 6.25MB，**不需要改
+`platformio.ini`**），CRC32 校验通过后自动重启；NVS 里的旋转、亮度设置保留。
+
+**步骤**
+
+```bash
+# 1. 编译（产物是 app 镜像，不要用 merged/bootloader 镜像）
+cd ESP32-S3-ROUND-DISPLAY
+pio run
+
+# 2. 双击 tools/ota/run.bat，或手动起本地页面
+py tools/ota/serve.py           # 自动打开 http://localhost:8787/index.html
+```
+
+3. 用 USB 线连接设备；若已自动休眠，先触摸屏幕或摇晃唤醒。
+4. 页面点“连接设备”，选择 ESP32 串口，等待显示固件版本。
+5. 拖入 `.pio/build/waveshare_esp32_s3/firmware.bin`，点“开始升级”。
+   屏幕显示 `USB OTA` 进度页，完成后自动重启。
+
+**注意**
+
+- 必须用 Chrome / Edge 89+，且通过 `http://localhost` 打开；直接双击
+  `index.html`（`file://`）浏览器不会提供 Web Serial。
+- `pio device monitor` / 串口助手会独占串口，连接前先关闭。
+- 升级期间不要拔 USB。中途取消时设备会在 10 秒超时后自动退出升级模式并
+  回到仪表，不需要重启。
+- 没有启用 bootloader 自动回滚：如果新固件启动即崩溃，需要重新用 USB
+  （`pio run -t upload` / esptool）烧录。
+- 协议、逐块 ACK 与 CRC 细节见 `tools/ota/README.md`；开关和版本号在
+  `include/config.h` 的 `CFG_USB_OTA_ENABLE` / `CFG_FW_VERSION`。
 
 ### 静止自动休眠 / 运动唤醒
 

@@ -5,6 +5,7 @@
 #include "core/UiModel.h"
 #include "input/Cst9217Touch.h"
 #include "input/Qmi8658.h"
+#include "ota/UsbOta.h"
 #include "power/PowerManager.h"
 #include "ui/ElfOverlay.h"
 
@@ -60,6 +61,7 @@ class DashboardApp {
   uint32_t m_pwrPressStartMs = 0;
   Qmi8658 m_imu;
   PowerManager m_power;
+  UsbOta m_ota;
   UiModel m_model;
   bool m_initialized = false;
   uint32_t m_lastRenderMs = 0;

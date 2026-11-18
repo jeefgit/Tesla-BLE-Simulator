@@ -111,6 +111,7 @@ void DashboardApp::begin() {
   beginPowerButton();
   beginTouch();
   m_power.begin(&m_imu, &display);
+  m_ota.begin(&display);
 
 #if CFG_ELF_SOUND_ENABLE
   // 麦克风放在最后：ES7210 挂在 15/14 的 Wire 总线上，必须等
@@ -360,6 +361,12 @@ void DashboardApp::loop() {
   pollBootButton();
   pollPowerButton();
   pollTouch();
+  // USB OTA：收到主机命令说明有人正在操作设备，顺带重置自动休眠计时，
+  // 避免网页还连着、设备却先进入 deep sleep。OTA_BEGIN 会在 loop() 内
+  // 阻塞到升级结束（成功则直接重启）。
+  if (m_ota.loop()) {
+    m_power.notifyUserActivity();
+  }
   // 小精灵可能在内部计时器里自动隐藏：检测可见性下降沿，强制补画一帧。
   // （自动隐藏默认关闭，这里也覆盖横滑退出后的补画。）
   const bool elfVisible = m_elf.visible();

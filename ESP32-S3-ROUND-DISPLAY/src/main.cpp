@@ -6,6 +6,9 @@
 DashboardApp dashboard;
 
 void setup() {
+  // USB CDC 默认接收队列只有 256B，OTA 时按块接收 4KB 固件数据，
+  // 放大到 8KB，给 flash 写入后的收尾留出缓冲。
+  Serial.setRxBufferSize(8192);
   Serial.begin(115200);
   delay(200);
   Serial.println("ESP32-S3 round dashboard starting");

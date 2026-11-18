@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32-S3 圆屏 · USB OTA</title>
+<style>
+  :root {
+    --bg: #0b0b0c;
+    --panel: #161618;
+    --line: #2a2a2e;
+    --text: #f2f2f5;
+    --muted: #8a8a8e;
+    --red: #e82127;
+    --green: #2ecc71;
+    --yellow: #f5c542;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: radial-gradient(1200px 600px at 50% -20%, #1d1012 0%, var(--bg) 60%);
+    color: var(--text);
+    font: 15px/1.55 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  main { width: min(760px, 92vw); margin: 40px auto 64px; }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; letter-spacing: .5px; }
+  h1 span { color: var(--red); }
+  .sub { color: var(--muted); margin: 0 0 24px; font-size: 13px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  button {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: #232327;
+    color: var(--text);
+    border-radius: 10px;
+    padding: 9px 16px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: .15s ease;
+  }
+  button:hover:not(:disabled) { border-color: #4a4a52; background: #2b2b30; }
+  button.primary { background: var(--red); border-color: var(--red); font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: #ff2d33; border-color: #ff2d33; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .status { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #555; flex: none; }
+  .dot.on { background: var(--green); box-shadow: 0 0 8px rgba(46, 204, 113, .7); }
+  .dot.err { background: var(--red); }
+  .dot.busy { background: var(--yellow); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  .drop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 120px;
+    margin: 16px 0;
+    padding: 20px;
+    border: 1.5px dashed #3a3a41;
+    border-radius: 12px;
+    background: #101012;
+    text-align: center;
+    cursor: pointer;
+    transition: .15s ease;
+  }
+  .drop:hover, .drop.hover { border-color: var(--red); background: #160d0e; }
+  .drop strong { font-size: 15px; font-weight: 600; }
+  .drop small { color: var(--muted); }
+  .file-meta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  .bar {
+    height: 10px;
+    border-radius: 999px;
+    background: #222226;
+    overflow: hidden;
+    margin: 16px 0 8px;
+  }
+  .bar > i {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #b3151a, var(--red));
+    transition: width .12s linear;
+  }
+  .meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  pre#log {
+    margin: 0;
+    height: 190px;
+    overflow: auto;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #0e0e10;
+    color: #b9b9c0;
+    font: 12px/1.5 Consolas, "Cascadia Mono", monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  pre#log .err { color: #ff6b70; }
+  pre#log .ok { color: var(--green); }
+  pre#log .dev { color: #7fb2ff; }
+  .note { color: var(--muted); font-size: 12.5px; margin: 12px 0 0; }
+  .note b { color: #c9c9d0; font-weight: 600; }
+  code { font-family: Consolas, monospace; color: #e6e6eb; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ESP32-S3 圆屏 · <span>USB OTA</span></h1>
+  <p class="sub">本地网页 + USB 串口升级固件，不需要 WiFi。请用 Chrome / Edge 打开，并保持本页通过 http://localhost 访问。</p>
+
+  <section class="card">
+    <div class="row">
+      <button id="btnConnect" class="primary">连接设备</button>
+      <button id="btnDisconnect" disabled>断开</button>
+      <div class="grow"></div>
+      <div class="status"><i id="dot" class="dot"></i><span id="status">未连接</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <strong class="grow">固件文件</strong>
+      <button id="btnPick">选择 .bin</button>
+    </div>
+    <div id="drop" class="drop">
+      <strong>拖入 firmware.bin，或点击这里选择</strong>
+      <small>路径：ESP32-S3-ROUND-DISPLAY/.pio/build/waveshare_esp32_s3/firmware.bin</small>
+      <div id="fileMeta" class="file-meta">未选择文件</div>
+    </div>
+    <input id="file" type="file" accept=".bin,application/octet-stream" hidden>
+
+    <div class="row">
+      <button id="btnFlash" class="primary" disabled>开始升级</button>
+      <div class="grow"></div>
+      <div class="status" id="deviceInfo">设备固件：--</div>
+    </div>
+
+    <div class="bar"><i id="bar"></i></div>
+    <div class="meta"><span id="pct">0%</span><span id="speed">--</span></div>
+    <p class="note"><b>升级期间不要拔 USB。</b>设备会写入备用 OTA 分区，CRC 校验通过后自动重启；NVS（屏幕旋转、亮度）会保留。若设备已自动休眠，先触摸或摇晃设备唤醒，再点“连接设备”。</p>
+  </section>
+
+  <section class="card">
+    <div class="row" style="margin-bottom:10px">
+      <strong class="grow">日志</strong>
+      <button id="btnClear">清空</button>
+    </div>
+    <pre id="log"></pre>
+    <p class="note">串口监视器 / PlatformIO monitor 会占用同一个串口，连接前请先关闭。浏览器需要 <code>navigator.serial</code>（Chrome/Edge 89+，localhost 或 https）。</p>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+// ── 协议常量 ────────────────────────────────────────────────
+// 与 src/ota/UsbOta.cpp 保持一致：
+//   主机 → 设备：ASCII 行 "OTA_PING\n" / "OTA_BEGIN <size> <crc32hex>\n"
+//   设备 → 主机：ASCII 行 "OTA: PONG <ver>" / "OTA: READY <size>" /
+//                "OTA: A <received>" / "OTA: OK" / "OTA: ERR <reason>"
+const CHUNK_SIZE = 4096;
+const READY_TIMEOUT_MS = 10000;
+const ACK_TIMEOUT_MS = 20000;
+const RESULT_TIMEOUT_MS = 180000;
+
+const $ = (id) => document.getElementById(id);
+const btnConnect = $('btnConnect');
+const btnDisconnect = $('btnDisconnect');
+const btnPick = $('btnPick');
+const btnFlash = $('btnFlash');
+const btnClear = $('btnClear');
+const fileInput = $('file');
+const drop = $('drop');
+const logEl = $('log');
+
+let port = null;
+let reader = null;
+let writer = null;
+let readTask = null;
+let heartbeat = null;
+let lineBuf = '';
+let pendingLines = [];
+let busy = false;
+let disconnecting = false;
+let fwVersion = '';
+
+let file = null;
+let fileBytes = null;
+let fileCrc = 0;
+
+// ── 小工具 ──────────────────────────────────────────────────
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function setStatus(text, kind) {
+  $('status').textContent = text;
+  const dot = $('dot');
+  dot.className = 'dot' + (kind ? ' ' + kind : '');
+}
+
+function addLog(text, cls) {
+  if (!text) return;
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  const t = new Date();
+  const stamp = t.toTimeString().slice(0, 8);
+  line.textContent = `[${stamp}] ${text}`;
+  logEl.appendChild(line);
+  while (logEl.childElementCount > 300) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function fmtBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    crc = CRC_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+// ── 行分发 / 等待 ───────────────────────────────────────────
+function dispatchLine(line) {
+  for (let i = 0; i < pendingLines.length; i++) {
+    const waiter = pendingLines[i];
+    if (waiter.re.test(line)) {
+      pendingLines.splice(i, 1);
+      clearTimeout(waiter.timer);
+      waiter.resolve(line);
+      return;
+    }
+  }
+}
+
+function rejectAll(err) {
+  const waiters = pendingLines;
+  pendingLines = [];
+  for (const w of waiters) {
+    clearTimeout(w.timer);
+    w.reject(err);
+  }
+}
+
+function waitFor(re, timeoutMs, label) {
+  return new Promise((resolve, reject) => {
+    const waiter = { re, resolve, reject, timer: null };
+    waiter.timer = setTimeout(() => {
+      const i = pendingLines.indexOf(waiter);
+      if (i >= 0) pendingLines.splice(i, 1);
+      reject(new Error(`${label} 超时（${timeoutMs} ms）`));
+    }, timeoutMs);
+    pendingLines.push(waiter);
+  });
+}
+
+function onLine(line) {
+  if (!line) return;
+  if (!line.startsWith('OTA:')) {
+    // 设备正常运行的调试日志，保留下来便于排查。
+    addLog(line, '');
+    return;
+  }
+  if (line.startsWith('OTA: PONG')) {
+    dispatchLine(line);
+    return;
+  }
+  if (line.startsWith('OTA: OK')) {
+    addLog(line, 'ok');
+    dispatchLine(line);
+    return;
+  }
+  if (line.startsWith('OTA: ERR')) {
+    addLog(line, 'err');
+    // 任何一个 ERR 都终止当前所有等待，避免后续等待各自超时。
+    rejectAll(new Error(line));
+    return;
+  }
+  addLog(line, 'dev');
+  dispatchLine(line);
+}
+
+function feedText(text) {
+  lineBuf += text;
+  let idx;
+  while ((idx = lineBuf.indexOf('\n')) >= 0) {
+    const line = lineBuf.slice(0, idx).replace(/\r$/, '');
+    lineBuf = lineBuf.slice(idx + 1);
+    onLine(line);
+  }
+  if (lineBuf.length > 8192) lineBuf = '';
+}
+
+// ── 串口连接 ─────────────────────────────────────────────────
+async function writeBytes(bytes) {
+  if (!writer) throw new Error('串口未连接');
+  await writer.write(bytes);
+}
+
+async function sendLine(text) {
+  await writeBytes(new TextEncoder().encode(text.endsWith('\n') ? text : text + '\n'));
+}
+
+async function pingOnce(timeoutMs) {
+  const p = waitFor(/^OTA: PONG/, timeoutMs, 'PING');
+  await sendLine('OTA_PING');
+  const line = await p;
+  const m = line.match(/^OTA: PONG\s+(.*)$/);
+  fwVersion = m ? m[1].trim() : '?';
+  $('deviceInfo').textContent = `设备固件：${fwVersion}`;
+}
+
+async function connect() {
+  if (!('serial' in navigator)) {
+    addLog('当前浏览器不支持 Web Serial，请使用 Chrome / Edge 89+，并通过 http://localhost 打开本页。', 'err');
+    return;
+  }
+  if (port) return;
+
+  btnConnect.disabled = true;
+  setStatus('选择串口…', 'busy');
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+  } catch (err) {
+    port = null;
+    btnConnect.disabled = false;
+    setStatus('未连接', 'err');
+    addLog('打开串口失败：' + (err && err.message ? err.message : err), 'err');
+    return;
+  }
+
+  writer = port.writable.getWriter();
+  reader = port.readable.getReader();
+  const decoder = new TextDecoder();
+  readTask = (async () => {
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        feedText(decoder.decode(value, { stream: true }));
+      }
+    } catch (err) {
+      // 拔线 / 设备重启时读循环会报错，属于正常路径。
+    }
+  })();
+
+  setStatus('等待设备响应…', 'busy');
+  addLog('串口已打开，等待设备握手（若设备已休眠，请先触摸/摇晃唤醒）');
+
+  const deadline = Date.now() + 30000;
+  let ok = false;
+  while (Date.now() < deadline) {
+    try {
+      await pingOnce(1500);
+      ok = true;
+      break;
+    } catch (err) {
+      // 设备可能还在开机，继续重试。
+    }
+  }
+
+  if (!ok) {
+    addLog('设备没有响应。请确认：串口监视器已关闭 / 设备已唤醒 / 当前固件包含 USB OTA。', 'err');
+    await disconnect();
+    return;
+  }
+
+  busy = false;
+  btnConnect.disabled = true;
+  btnDisconnect.disabled = false;
+  updateButtons();
+  setStatus(`已连接（固件 ${fwVersion}）`, 'on');
+  addLog(`握手成功，设备固件 ${fwVersion}`, 'ok');
+
+  // 页面保持连接期间每 5 秒发一次 PING：既确认设备在线，也让设备端
+  // 重置自动休眠计时，避免填文件的功夫设备先睡过去。
+  heartbeat = setInterval(() => {
+    if (!busy && writer) sendLine('OTA_PING').catch(() => {});
+  }, 5000);
+}
+
+async function disconnect() {
+  if (disconnecting) return;
+  disconnecting = true;
+  try {
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      heartbeat = null;
+    }
+    rejectAll(new Error('已断开连接'));
+    busy = false;
+
+    try { if (reader) await reader.cancel(); } catch (err) {}
+    if (readTask) { try { await readTask; } catch (err) {} readTask = null; }
+    try { if (reader) reader.releaseLock(); } catch (err) {}
+    reader = null;
+    try { if (writer) writer.releaseLock(); } catch (err) {}
+    writer = null;
+    try { if (port) await port.close(); } catch (err) {}
+    port = null;
+
+    lineBuf = '';
+    fwVersion = '';
+    $('deviceInfo').textContent = '设备固件：--';
+    btnConnect.disabled = false;
+    btnDisconnect.disabled = true;
+    updateButtons();
+    setStatus('未连接', '');
+  } finally {
+    disconnecting = false;
+  }
+}
+
+// ── 文件选择 ─────────────────────────────────────────────────
+async function setFile(f) {
+  if (!f) return;
+  if (!/\.bin$/i.test(f.name)) {
+    addLog('请选择 .bin 文件（PlatformIO 的 firmware.bin）。', 'err');
+    return;
+  }
+  try {
+    const buf = await f.arrayBuffer();
+    file = f;
+    fileBytes = new Uint8Array(buf);
+    if (fileBytes.length < 1024 || fileBytes[0] !== 0xE9) {
+      file = null;
+      fileBytes = null;
+      addLog('这个文件不像 ESP32 app 镜像（首字节不是 0xE9）。请选择 firmware.bin，不要选 bootloader / partitions 镜像。', 'err');
+      updateFileMeta();
+      updateButtons();
+      return;
+    }
+    fileCrc = crc32(fileBytes);
+    updateFileMeta();
+    addLog(`已选择 ${f.name}，${fmtBytes(fileBytes.length)}，CRC32 ${fileCrc.toString(16).padStart(8, '0')}`);
+  } catch (err) {
+    addLog('读取文件失败：' + (err && err.message ? err.message : err), 'err');
+  }
+  updateButtons();
+}
+
+function updateFileMeta() {
+  const meta = $('fileMeta');
+  if (!file || !fileBytes) {
+    meta.textContent = '未选择文件';
+    return;
+  }
+  meta.textContent =
+    `${file.name} · ${fmtBytes(fileBytes.length)} · CRC32 ${fileCrc.toString(16).padStart(8, '0')}`;
+}
+
+function updateButtons() {
+  btnFlash.disabled = !(port && fileBytes && !busy);
+  btnPick.disabled = busy;
+  btnConnect.disabled = !!port || busy;
+  btnDisconnect.disabled = !port || busy;
+}
+
+function setProgress(done, total, startMs) {
+  const pct = total > 0 ? Math.min(100, Math.floor((done * 100) / total)) : 0;
+  $('bar').style.width = pct + '%';
+  $('pct').textContent = pct + '%';
+  if (done > 0 && startMs > 0) {
+    const sec = (Date.now() - startMs) / 1000;
+    const speed = done / sec;
+    const eta = speed > 0 ? (total - done) / speed : 0;
+    $('speed').textContent =
+      `${fmtBytes(done)} / ${fmtBytes(total)} · ${fmtBytes(speed)}/s · 剩余 ${Math.ceil(eta)}s`;
+  } else {
+    $('speed').textContent = `0 B / ${fmtBytes(total)}`;
+  }
+}
+
+// ── 升级主流程 ───────────────────────────────────────────────
+async function flash() {
+  if (!port || !fileBytes || busy) return;
+  busy = true;
+  updateButtons();
+  setStatus('升级中…', 'busy');
+  $('bar').style.width = '0%';
+  $('pct').textContent = '0%';
+
+  const total = fileBytes.length;
+  const startMs = Date.now();
+
+  try {
+    // 1. 进入升级模式。设备会先 Update.begin()，失败时回 OTA: ERR。
+    const ready = waitFor(/^OTA: (READY|ERR)/, READY_TIMEOUT_MS, '等待设备进入升级模式');
+    await sendLine(`OTA_BEGIN ${total} ${fileCrc.toString(16)}`);
+    const readyLine = await ready;
+    if (!readyLine.startsWith('OTA: READY')) throw new Error(readyLine);
+    addLog(`设备已就绪，开始发送 ${fmtBytes(total)}`, 'dev');
+
+    // 2. 结果等待器提前挂上：最后一块的 ACK 和 OK 可能几乎同时到达。
+    const resultPromise = waitFor(/^OTA: (OK|ERR)/, RESULT_TIMEOUT_MS, '等待校验结果');
+    // 失败路径可能先于 await 触发，先标记为已处理，避免控制台未处理拒绝告警。
+    resultPromise.catch(() => {});
+
+    // 3. 分块发送，每块等设备 ACK（设备写 flash 期间不发送新数据）。
+    for (let offset = 0; offset < total; offset += CHUNK_SIZE) {
+      const end = Math.min(offset + CHUNK_SIZE, total);
+      const ack = waitFor(/^OTA: A /, ACK_TIMEOUT_MS, '等待设备 ACK');
+      await writeBytes(fileBytes.subarray(offset, end));
+      await ack;
+      setProgress(end, total, startMs);
+    }
+
+    // 4. 等待 CRC 校验 + Update.end() 的结果。
+    await resultPromise;
+    setProgress(total, total, startMs);
+    setStatus('升级成功，设备重启中…', 'on');
+    addLog('升级成功，设备正在重启。重新连接后固件版本应更新。', 'ok');
+    await sleep(1500);
+    await disconnect();
+    setStatus('升级完成', 'on');
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    addLog('升级失败：' + msg, 'err');
+    setStatus('升级失败', 'err');
+    // 设备端会在超时后自动退出升级模式，断开重连可避免协议残留数据。
+    await sleep(1200);
+    await disconnect();
+  } finally {
+    busy = false;
+    updateButtons();
+  }
+}
+
+// ── 事件绑定 ─────────────────────────────────────────────────
+btnConnect.addEventListener('click', connect);
+btnDisconnect.addEventListener('click', disconnect);
+btnFlash.addEventListener('click', flash);
+btnPick.addEventListener('click', () => fileInput.click());
+btnClear.addEventListener('click', () => { logEl.textContent = ''; });
+
+fileInput.addEventListener('change', () => setFile(fileInput.files && fileInput.files[0]));
+
+drop.addEventListener('click', () => fileInput.click());
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('hover'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('hover'));
+drop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  drop.classList.remove('hover');
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) setFile(f);
+});
+
+// 串口被拔出 / 设备重启时，浏览器会触发 disconnect 事件。
+if ('serial' in navigator) {
+  navigator.serial.addEventListener('disconnect', (e) => {
+    if (port && e.target === port) {
+      addLog('串口已断开（设备可能正在重启）');
+      disconnect();
+    }
+  });
+}
+
+updateButtons();
+setStatus('未连接', '');
+</script>
+</body>
+</html>
