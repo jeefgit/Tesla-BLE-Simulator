@@ -173,7 +173,7 @@ bool muted();
 #define CFG_USB_OTA_ENABLE 1
 // PING 时上报给网页的固件版本，方便确认设备端已经运行带 OTA 的固件。
 // 每次发版建议改这个号；但真正能证明“升级生效”的是编译时间戳（见下）。
-#define CFG_FW_VERSION "0.1.3"
+#define CFG_FW_VERSION "0.1.7"
 // 编译时间戳，由编译器自动填充，不需要手动改。网页握手时会显示；只要这次
 // 和上次不同，就说明设备确实换成了新固件（版本号忘了改也能看出来）。
 #define CFG_FW_BUILD __DATE__ " " __TIME__

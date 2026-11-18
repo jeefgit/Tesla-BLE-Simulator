@@ -178,17 +178,26 @@
 //                "OTA_BEGIN <size> <crc32hex>\n"
 //   设备 → 主机：ASCII 行 "OTA: PONG ver=<v> build=<date time> part=<label>" /
 //                "OTA: INFO run=<p> boot=<p> state=<n>" /
-//                "OTA: IMG app0=<v>@<date time>" / "OTA: READY <size>" /
+//                "OTA: IMG app0=written|empty" / "OTA: READY <size>" /
 //                "OTA: A <received>" / "OTA: OK boot=<label>" /
 //                "OTA: ERR <reason>"
-const PAGE_VERSION = 'ota-page-5';
+// 注意：OTA: A 只用来驱动进度条，不写进日志（一个固件会有几百条）。
+// 镜像里的 app desc 不要用：这个 PlatformIO 配置下它来自预编译的 core 库
+// （project=arduino-lib-builder），所有构建都一样，没法区分版本。
+const PAGE_VERSION = 'ota-page-9';
 const CHUNK_SIZE = 4096;
 const READY_TIMEOUT_MS = 10000;
 const ACK_TIMEOUT_MS = 20000;
 const RESULT_TIMEOUT_MS = 180000;
 const INFO_TIMEOUT_MS = 5000;
-// 升级成功后等待多久再自动重连（设备重启 + USB 重新枚举需要时间）。
-const AUTO_RECONNECT_DELAY_MS = 10000;
+// 升级成功后先保持串口连接这么久，把新固件的启动日志抓下来。
+// 关键：不要在这一秒内关闭串口——关闭 Web Serial 会让 DTR/RTS 变电平，
+// ESP32-S3 会因此复位；如果这次复位落在新固件调用
+// esp_ota_mark_app_valid_cancel_rollback() 之前，bootloader 会把新镜像
+// 标成 ABORTED 并回滚到旧槽（表现为“写进了 app1 却还在 app0”）。
+const BOOT_CAPTURE_MS = 6000;
+// 抓完启动日志后，再等这么久才自动重连（设备重启 + USB 重新枚举需要时间）。
+const AUTO_RECONNECT_DELAY_MS = 4000;
 const AUTO_RECONNECT_TRIES = 3;
 
 const $ = (id) => document.getElementById(id);
@@ -218,6 +227,10 @@ let fwInfo = { ver: '', build: '', part: '' };
 let lastFlashedFrom = null;
 // 上次成功打开的串口，升级后自动重连时优先复用它。
 let lastPort = null;
+// 升级进度：由设备回传的 ACK（OTA: A <received>）驱动，不再逐条刷日志。
+let flashTotal = 0;
+let flashStartMs = 0;
+let flashAckCount = 0;
 // 自动重连的取消令牌：用户手动点“连接/断开”就 +1，让倒计时立刻退出。
 let autoReconnectToken = 0;
 
@@ -315,6 +328,13 @@ function onLine(line) {
     dispatchLine(line);
     return;
   }
+  if (line.startsWith('OTA: A ')) {
+    // 每块一个 ACK，升级一个大固件会刷几百行。这里只拿它驱动进度条。
+    const received = parseInt(line.slice(7).trim(), 10);
+    if (Number.isFinite(received)) applyDeviceProgress(received);
+    dispatchLine(line);
+    return;
+  }
   if (line.startsWith('OTA: OK')) {
     addLog(line, 'ok');
     dispatchLine(line);
@@ -326,11 +346,8 @@ function onLine(line) {
     rejectAll(new Error(line));
     return;
   }
-  if (line.startsWith('OTA: INFO same_image')) {
-    addLog('⚠ 你选择的 firmware.bin 和设备当前运行的固件是同一个编译结果。' +
-           '这次升级不会带来任何变化，请确认重新编译（pio run）后再选文件。', 'err');
-    return;
-  }
+  // 设备端不再用镜像里的 app desc 判断“是不是同一版”（那个字段来自预编译的
+  // core 库，每次编译都一样）；重复文件由 setFile() 按大小 + CRC32 提醒。
   addLog(line, 'dev');
   dispatchLine(line);
 }
@@ -374,24 +391,42 @@ async function pingOnce(timeoutMs) {
     `设备固件：v${fwInfo.ver}` + (fwInfo.part ? ` · ${fwInfo.part}` : '') +
     (fwInfo.build ? ` · 构建 ${fwInfo.build}` : '');
 
-  // 升级后重连时对比编译时间戳：版本号忘了改也能判断有没有真的换固件。
-  if (lastFlashedFrom && fwInfo.build) {
-    if (fwInfo.build === lastFlashedFrom.build) {
-      addLog(`注意：当前构建时间与升级前完全相同（${fwInfo.build}），` +
-             '说明设备跑的还是同一个镜像。请确认重新编译过，并选择最新的 firmware.bin。', 'err');
-    } else {
-      addLog(`升级已生效：构建时间 ${lastFlashedFrom.build} → ${fwInfo.build}` +
-             (lastFlashedFrom.part && fwInfo.part ? `，分区 ${lastFlashedFrom.part} → ${fwInfo.part}` : ''), 'ok');
-    }
+  // 升级后重连时判断到底有没有生效：
+  //   part  —— 当前运行的分区。ESP32 的 OTA 一定写入“另一个槽”并从那里启动，
+  //            所以分区没变 = OTA 没有真正切过去（写失败 / 没重启 / 被回滚）。
+  //   build —— CFG_FW_BUILD，编译进固件的时间戳。只有用到它的源文件重新编译
+  //            才会更新（例如改了 include/config.h），所以“没变”不代表文件没换。
+  // 判断以 part 为准，build 只作参考。
+  if (lastFlashedFrom) {
+    const before = lastFlashedFrom;
     lastFlashedFrom = null;
+
+    const haveParts = Boolean(before.part && fwInfo.part);
+    const samePart = haveParts && before.part === fwInfo.part;
+    const sameBuild = Boolean(before.build && fwInfo.build && before.build === fwInfo.build);
+    const partText = haveParts ? `${before.part} → ${fwInfo.part}` : '分区信息缺失';
+    const buildText = sameBuild ? `构建时间戳未变（${fwInfo.build}，改了 config.h 才会更新）`
+                                : `构建 ${before.build || '?'} → ${fwInfo.build || '?'}`;
+
+    if (haveParts && samePart) {
+      addLog(`⚠ OTA 没有生效：设备仍在 ${fwInfo.part}（升级前也是 ${before.part}），` +
+             `启动分区没有切换；${buildText}。`, 'err');
+      addLog('说明镜像没写进另一个槽，或重启后回滚了。请把日志里的 OTA: 行发出来排查。', 'err');
+    } else {
+      addLog(`升级已生效：启动分区 ${partText}，${buildText}。`, 'ok');
+      if (sameBuild) {
+        addLog('（构建时间戳没变只说明 CFG_FW_BUILD 所在的源文件没重编译，' +
+               '不代表固件没变；以分区切换和 OTA 日志为准。）');
+      }
+    }
   }
 }
 
-// 读取设备分区信息：两个 OTA 分区里各是哪一版固件、当前启动分区是谁。
+// 读取设备分区信息：当前运行/启动分区、OTA 状态、两个槽里有没有有效镜像。
 async function requestInfo() {
   if (!port || busy) return;
   try {
-    const done = waitFor(/^OTA: IMG app1=/, INFO_TIMEOUT_MS, '读取设备信息');
+    const done = waitFor(/^OTA: (INFO done|IMG app1=)/, INFO_TIMEOUT_MS, '读取设备信息');
     await sendLine('OTA_INFO');
     await done;
   } catch (err) {
@@ -644,6 +679,27 @@ async function disconnect() {
 }
 
 // ── 文件选择 ─────────────────────────────────────────────────
+// 记住“上一次成功升级的文件”（按大小 + CRC32），用来提醒重复上传同一份固件。
+const LAST_UPLOAD_KEY = 'ota.lastUpload';
+
+function readLastUpload() {
+  try {
+    const raw = localStorage.getItem(LAST_UPLOAD_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function saveLastUpload(size, crcText, name) {
+  try {
+    localStorage.setItem(LAST_UPLOAD_KEY, JSON.stringify({
+      size, crc: crcText, name,
+      at: new Date().toLocaleString(),
+    }));
+  } catch (err) {}
+}
+
 async function setFile(f) {
   if (!f) return;
   if (!/\.bin$/i.test(f.name)) {
@@ -664,7 +720,16 @@ async function setFile(f) {
     }
     fileCrc = crc32(fileBytes);
     updateFileMeta();
-    addLog(`已选择 ${f.name}，${fmtBytes(fileBytes.length)}，CRC32 ${fileCrc.toString(16).padStart(8, '0')}`);
+    const crcText = fileCrc.toString(16).padStart(8, '0');
+    addLog(`已选择 ${f.name}，${fmtBytes(fileBytes.length)}，CRC32 ${crcText}`);
+
+    // 真正能判断“是不是同一个文件”的是字节内容，不是镜像里的 app desc
+    // （那个字段来自预编译的 core 库，每次编译都一样）。
+    const last = readLastUpload();
+    if (last && last.size === fileBytes.length && last.crc === crcText) {
+      addLog(`⚠ 这个文件和你上次成功升级的文件完全相同（${fmtBytes(last.size)}，` +
+             `CRC32 ${crcText}，${last.at}），升级后设备不会有任何变化。`, 'err');
+    }
   } catch (err) {
     addLog('读取文件失败：' + (err && err.message ? err.message : err), 'err');
   }
@@ -695,7 +760,7 @@ function setProgress(done, total, startMs) {
   $('bar').style.width = pct + '%';
   $('pct').textContent = pct + '%';
   if (done > 0 && startMs > 0) {
-    const sec = (Date.now() - startMs) / 1000;
+    const sec = Math.max(0.001, (Date.now() - startMs) / 1000);
     const speed = done / sec;
     const eta = speed > 0 ? (total - done) / speed : 0;
     $('speed').textContent =
@@ -703,6 +768,19 @@ function setProgress(done, total, startMs) {
   } else {
     $('speed').textContent = `0 B / ${fmtBytes(total)}`;
   }
+}
+
+// 设备回报“已确认写入的字节数”时调用：只刷新进度条，不写日志。
+// 中间进度用 100ms 节流，避免一帧内改太多 DOM；写入完成时一定刷新。
+let lastProgressRender = 0;
+function applyDeviceProgress(received) {
+  if (!flashTotal) return;
+  flashAckCount++;
+  const done = Math.min(received, flashTotal);
+  const now = Date.now();
+  if (done < flashTotal && now - lastProgressRender < 100) return;
+  lastProgressRender = now;
+  setProgress(done, flashTotal, flashStartMs);
 }
 
 // ── 升级主流程 ───────────────────────────────────────────────
@@ -719,6 +797,12 @@ async function flash() {
 
   const total = fileBytes.length;
   const startMs = Date.now();
+  // 进度完全由设备 ACK 驱动（见 applyDeviceProgress）。
+  flashTotal = total;
+  flashStartMs = startMs;
+  flashAckCount = 0;
+  lastProgressRender = 0;
+  setProgress(0, total, startMs);
 
   try {
     // 记下升级前的身份，重连后对比编译时间戳判断是否真的换成了新固件。
@@ -737,21 +821,27 @@ async function flash() {
     resultPromise.catch(() => {});
 
     // 3. 分块发送，每块等设备 ACK（设备写 flash 期间不发送新数据）。
+    //    进度条由 onLine() 里的 OTA: A 驱动，这里不再重复刷新。
     for (let offset = 0; offset < total; offset += CHUNK_SIZE) {
       const end = Math.min(offset + CHUNK_SIZE, total);
       const ack = waitFor(/^OTA: A /, ACK_TIMEOUT_MS, '等待设备 ACK');
       await writeBytes(fileBytes.subarray(offset, end));
       await ack;
-      setProgress(end, total, startMs);
     }
 
     // 4. 等待 CRC 校验 + Update.end() 的结果。
     await resultPromise;
     setProgress(total, total, startMs);
+    saveLastUpload(total, fileCrc.toString(16).padStart(8, '0'),
+                   file ? file.name : '');
     setStatus('升级成功，设备重启中…', 'on');
-    addLog(`固件已写入并通过校验，设备正在重启。${AUTO_RECONNECT_DELAY_MS / 1000} 秒后` +
-           '页面会自动重连并核对构建时间。', 'ok');
-    await sleep(1500);
+    addLog(`固件已写入并通过校验（共 ${flashAckCount} 块），设备正在重启。`, 'ok');
+    addLog(`保持串口连接 ${BOOT_CAPTURE_MS / 1000} 秒以捕获新固件启动日志` +
+           '（不要在这期间关闭串口：DTR/RTS 复位会让新镜像来不及标记有效而被回滚）。');
+    // 关键：先别断开。设备此刻正在启动新固件，串口一关就会触发一次
+    // DTR/RTS 复位；如果这次复位早于 initArduino() 把新镜像标成 VALID，
+    // bootloader 下次启动就会把 app1 判为 ABORTED 并回滚到 app0。
+    await sleep(BOOT_CAPTURE_MS);
     await disconnect();
     autoReconnectPending = true;
   } catch (err) {
@@ -763,6 +853,7 @@ async function flash() {
     await sleep(1200);
     await disconnect();
   } finally {
+    flashTotal = 0;
     busy = false;
     updateButtons();
   }

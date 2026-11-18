@@ -34,7 +34,8 @@
    > 端口数量判断；全新浏览器/全新设备第一次必然要选一次。
 
 5. 选择/拖入 `firmware.bin`，点“开始升级”。屏幕会显示 `USB OTA` 进度页，
-   完成后设备自动重启。
+   网页上的进度条由设备每块回传的 ACK 驱动（百分比 / 已写入字节 / 速度 / 剩余时间），
+   `OTA: A ...` 不会刷到日志里。完成后设备自动重启。
 
 6. 升级成功后页面会自动断开，**等 10 秒**再自动重连（最多重试 3 次），并在
    日志里给出“升级是否生效”的结论。想立刻连接可以随时点“连接设备”打断倒计时。
@@ -46,48 +47,65 @@
 | 方向 | 内容 | 说明 |
 | --- | --- | --- |
 | 主机 → 设备 | `OTA_PING\n` | 握手 / 心跳 |
-| 设备 → 主机 | `OTA: PONG ver=<v> build=<日期 时间> part=<app0|app1>\n` | 版本 + 编译时间 + 当前运行分区 |
-| 主机 → 设备 | `OTA_INFO\n` | 体检：两个分区各是什么镜像 |
+| 设备 → 主机 | `OTA: PONG ver=<v> build=<日期 时间> part=<app0\|app1>\n` | 版本 + `CFG_FW_BUILD` 时间戳 + 当前运行分区 |
+| 主机 → 设备 | `OTA_INFO\n` | 体检：分区状态 |
 | 设备 → 主机 | `OTA: INFO run=<p> boot=<p> state=<n>\n` | 当前运行 / 启动分区 / OTA 状态 |
-| 设备 → 主机 | `OTA: IMG app0=<v>@<日期 时间>\n`、`OTA: IMG app1=...` | 各分区镜像；空分区为 `empty` |
+| 设备 → 主机 | `OTA: IMG app0=written\|empty\n`、`OTA: IMG app1=...` | 槽里有没有有效镜像（只看镜像头 magic） |
+| 设备 → 主机 | `OTA: INFO done\n` | `OTA_INFO` 输出结束 |
 | 主机 → 设备 | `OTA_REBOOT\n` | 单独测试重启是否可用 |
 | 主机 → 设备 | `OTA_BEGIN <size> <crc32-hex>\n` | app 镜像字节数 + CRC32 |
-| 设备 → 主机 | `OTA: INFO incoming=<v> built <日期 时间>\n` | 收到第一块时读出的“你要刷的镜像” |
-| 设备 → 主机 | `OTA: INFO current=...` / `OTA: INFO same_image\n` | 与当前运行版本对比；完全相同时告警 |
+| 设备 → 主机 | `OTA: INFO incoming magic=<hex> size=<n>\n` | 收到的第一块是不是 `0xE9` 镜像头 |
 | 设备 → 主机 | `OTA: READY <size>\n` / `OTA: ERR begin ...\n` | 已调用 `Update.begin()` |
 | 主机 → 设备 | ≤4096 字节二进制块 | 每块最多 `CFG_USB_OTA_CHUNK` |
-| 设备 → 主机 | `OTA: A <received>\n` | 每块 ACK，含累计字节数 |
+| 设备 → 主机 | `OTA: A <received>\n` | 每块 ACK，含累计字节数；只驱动进度条，不写日志 |
 | 设备 → 主机 | `OTA: INFO readback=ok\n` | 回读 Flash 重算 CRC 与主机一致 |
-| 设备 → 主机 | `OTA: INFO written=<v> built <日期 时间> part=<label>\n` | 从刚写入的镜像头读出的信息 |
-| 设备 → 主机 | `OTA: OK boot=<label>\n` / `OTA: ERR crc|end|timeout|write|readback ...\n` | 最终结果 |
+| 设备 → 主机 | `OTA: INFO written size=<n> part=<label>\n` | 已落盘镜像大小 + 目标分区 |
+| 设备 → 主机 | `OTA: OK boot=<label>\n` / `OTA: ERR crc\|end\|timeout\|write\|readback ...\n` | 最终结果 |
+
+> **不要用镜像里的 `esp_app_desc` 判断版本。** 这个 PlatformIO 配置下，镜像里的
+> app desc 来自预编译的 core 库（`project=arduino-lib-builder`，日期是 core 库的
+> 构建时间），**每次编译都完全一样**。早期版本用它做“是不是同一个镜像”的对比，
+> 会误报 `same_image`，已移除。
 
 **排查“OTA 成功但没变化”**
 
-页面右上角会显示 `页面版本：ota-page-5`（不是就 Ctrl+Shift+R 强刷）。连上设备
-后会自动执行一次 `OTA_INFO`，日志里会出现三行：
+页面右上角会显示 `页面版本：ota-page-8`（不是就 Ctrl+Shift+R 强刷）。连上设备
+后会自动执行一次 `OTA_INFO`，日志里会出现：
 
 ```
 OTA: INFO run=app0 boot=app1 state=1
-OTA: IMG app0=0.1.2@Nov 18 2026 16:06:36
-OTA: IMG app1=0.1.2@Nov 18 2026 16:20:01
+OTA: IMG app0=written
+OTA: IMG app1=written
+OTA: INFO done
 ```
 
 - `run=app0 boot=app1` → otadata 已经指向 app1，但设备还在跑 app0，说明
   **重启后没换过去**（回滚或根本没重启）；点“重启设备”按钮可以单独验证重启。
-- `app0` 和 `app1` 的构建时间相同 → 两个分区里是同一版固件，看不出变化很正常。
-- 开始升级时设备还会打印 `OTA: INFO incoming=...` 和 `current=...`，直接对比
-  “你传的”和“正在跑的”是不是同一个构建；相同会额外打印 `same_image`。
+- `IMG app1=empty` → 那个槽里没有有效镜像，OTA 根本没写进去。
+- `OTA: OTADATA[0/1] ... state=ABORTED` → 新镜像启动后没来得及标记 VALID
+  就被复位了，bootloader 已把它作废并回滚。最常见的原因是**升级后立刻关闭
+  串口**：关闭 Web Serial 会让 DTR/RTS 变电平并复位 ESP32，如果这次复位落在
+  新固件 `initArduino()` 之前，就会走这条回滚路径。所以页面在 `OTA: OK`
+  之后会先保持连接 6 秒抓启动日志，再断开重连——不要在这期间手动点“断开”
+  或拔线。
+- 想知道“选的文件是不是上次那个”，看页面选择文件时的提示：按文件**大小 + CRC32**
+  与上一次成功升级的文件比对（存在浏览器 localStorage 里）。
 
 **怎么确认升级真的生效**
 
-`OTA: PONG` 里的 `build=` 是编译器自动填的编译时间戳（`__DATE__ __TIME__`），
-`part=` 是当前运行的分区。升级前记下这两个值，升级后重连再看一次：
+`OTA: PONG` 里有两个字段，**以 `part` 为准，`build` 只作参考**：
 
-- `build` 变了 → 设备确实跑上了新固件；
-- `build` 没变 → 传进去的就是同一个镜像（多半是忘了重新编译，或选错了文件）；
-- `part` 从 `app0` 变 `app1`（或反过来）→ 说明启动分区确实切换了。
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `part=` | 当前运行的分区（`app0`/`app1`） | ESP32 的 OTA 一定写"另一个槽"并从那里启动，**分区没变 = OTA 没有真正切过去**（写失败 / 没重启 / 被回滚） |
+| `build=` | `CFG_FW_BUILD`（`__DATE__ __TIME__`） | 只有用到它的源文件重新编译才会更新（改 `include/config.h` 一定会）。**它没变不代表固件没变** |
 
-网页会自动做这个对比并在日志里给出结论。
+结论：
+
+- `part` 变了 → OTA 生效（不管 `build` 变没变）；
+- `part` 没变 → OTA **没有生效**，设备还在跑升级前那个槽（这才是"重启没生效"的真正信号）。
+
+网页会在升级后自动重连并给出结论。
 
 设计要点：
 

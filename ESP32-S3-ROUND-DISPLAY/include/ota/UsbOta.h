@@ -25,6 +25,7 @@ class UsbOta {
  private:
   void handleLine(const char* line);
   void dumpInfo();
+  void dumpOtadata();
   void startTransfer(uint32_t size, uint32_t crc);
   bool readChunk(uint8_t* dst, uint32_t len, uint32_t timeoutMs);
 

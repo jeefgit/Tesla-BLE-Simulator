@@ -251,12 +251,16 @@ py tools/ota/serve.py           # 自动打开 http://localhost:8787/index.html
 
 页面握手时设备会返回 `OTA: PONG ver=… build=… part=…`：
 
-- `build=` 是编译器自动写入的编译时间戳（`__DATE__ __TIME__`）；
-- `part=` 是当前运行的分区（`app0` / `app1`），每次 OTA 会在两者之间切换。
+- `part=` 是当前运行的分区（`app0` / `app1`），每次 OTA 会在两者之间切换；
+- `build=` 是 `CFG_FW_BUILD`（`__DATE__ __TIME__`），只有用到它的源文件重新编译
+  才会更新（改 `include/config.h` 一定会），所以它没变**不代表**固件没变。
 
-升级后 `build` 应该变化、`part` 应该换到另一个分区。如果 `build` 没变，
-说明传进去的就是同一个镜像（忘了重新编译，或选错了 `firmware.bin` 路径），
-不是 OTA 没生效。
+判断以 `part` 为准：`part` 没变说明设备还在原来的槽启动，OTA 没有真正生效；
+`part` 变了就是升级成功。想知道选的文件是不是上次那个，看选择文件时的提示——
+按文件大小 + CRC32 与上一次成功升级的文件比对。
+
+> 镜像里的 `esp_app_desc`（version / date）不能用来判断版本：这个 PlatformIO
+> 配置下它来自预编译的 core 库（`arduino-lib-builder`），每次编译都一样。
 
 **注意**
 
