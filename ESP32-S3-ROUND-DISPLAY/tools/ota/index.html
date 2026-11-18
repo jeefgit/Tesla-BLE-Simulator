@@ -156,7 +156,7 @@
 
     <div class="bar"><i id="bar"></i></div>
     <div class="meta"><span id="pct">0%</span><span id="speed">--</span></div>
-    <p class="note"><b>升级期间不要拔 USB。</b>设备会写入备用 OTA 分区，CRC 校验通过后自动重启；NVS（屏幕旋转、亮度）会保留。若设备已自动休眠，先触摸或摇晃设备唤醒，再点“连接设备”。</p>
+    <p class="note"><b>升级期间不要拔 USB。</b>设备会写入备用 OTA 分区，CRC 校验通过后自动重启；升级成功后页面会等待 10 秒自动重连并核对构建时间。NVS（屏幕旋转、亮度）会保留。若设备已自动休眠，先触摸或摇晃设备唤醒，再点“连接设备”。</p>
   </section>
 
   <section class="card">
@@ -181,12 +181,15 @@
 //                "OTA: IMG app0=<v>@<date time>" / "OTA: READY <size>" /
 //                "OTA: A <received>" / "OTA: OK boot=<label>" /
 //                "OTA: ERR <reason>"
-const PAGE_VERSION = 'ota-page-4';
+const PAGE_VERSION = 'ota-page-5';
 const CHUNK_SIZE = 4096;
 const READY_TIMEOUT_MS = 10000;
 const ACK_TIMEOUT_MS = 20000;
 const RESULT_TIMEOUT_MS = 180000;
 const INFO_TIMEOUT_MS = 5000;
+// 升级成功后等待多久再自动重连（设备重启 + USB 重新枚举需要时间）。
+const AUTO_RECONNECT_DELAY_MS = 10000;
+const AUTO_RECONNECT_TRIES = 3;
 
 const $ = (id) => document.getElementById(id);
 const btnConnect = $('btnConnect');
@@ -213,6 +216,10 @@ let fwVersion = '';
 let fwInfo = { ver: '', build: '', part: '' };
 // 升级前设备的构建信息，用于重连后对比“是否真的换了固件”。
 let lastFlashedFrom = null;
+// 上次成功打开的串口，升级后自动重连时优先复用它。
+let lastPort = null;
+// 自动重连的取消令牌：用户手动点“连接/断开”就 +1，让倒计时立刻退出。
+let autoReconnectToken = 0;
 
 let file = null;
 let fileBytes = null;
@@ -433,31 +440,118 @@ async function acquirePort(forcePicker) {
   return { port: await navigator.serial.requestPort(), auto: false };
 }
 
-async function connect(ev) {
+// 自动重连时用哪个串口：优先上次连过的那个；设备重新枚举后对象可能失效，
+// 再按 VID:PID 在已授权列表里找同一个设备，最后退回“唯一的已授权串口”。
+function portKey(p) {
+  try {
+    const info = p && p.getInfo ? p.getInfo() : {};
+    return `${info.usbVendorId || 0}:${info.usbProductId || 0}`;
+  } catch (err) {
+    return '0:0';
+  }
+}
+
+async function pickAutoPort() {
+  let ports = [];
+  try {
+    if (navigator.serial.getPorts) ports = await navigator.serial.getPorts();
+  } catch (err) {
+    ports = [];
+  }
+  if (lastPort && (ports.length === 0 || ports.includes(lastPort))) return lastPort;
+  if (lastPort) {
+    const key = portKey(lastPort);
+    const match = ports.find((p) => portKey(p) === key);
+    if (match) return match;
+  }
+  if (ports.length === 1) return ports[0];
+  return null;
+}
+
+function cancelAutoReconnect() { autoReconnectToken++; }
+
+// 升级成功后：等 10 秒，自动重新连上设备并核对构建时间。
+async function autoReconnectAfterFlash() {
+  const token = ++autoReconnectToken;
+  if (!('serial' in navigator)) return;
+
+  const seconds = Math.round(AUTO_RECONNECT_DELAY_MS / 1000);
+  addLog(`设备重启中，${seconds} 秒后自动重新连接并核对构建时间…`);
+  for (let left = seconds; left > 0; left--) {
+    setStatus(`自动重连倒计时 ${left}s（点“连接设备”可立即连接）`, 'busy');
+    await sleep(1000);
+    if (token !== autoReconnectToken) {
+      addLog('已取消自动重连。');
+      return;
+    }
+  }
+
+  for (let attempt = 1; attempt <= AUTO_RECONNECT_TRIES; attempt++) {
+    if (token !== autoReconnectToken || port) return;
+    setStatus(`自动重连中（第 ${attempt}/${AUTO_RECONNECT_TRIES} 次）…`, 'busy');
+    const ok = await connect(null, { auto: true });
+    if (ok) {
+      addLog('自动重连成功。', 'ok');
+      return;
+    }
+    if (token !== autoReconnectToken) return;
+    if (attempt < AUTO_RECONNECT_TRIES) {
+      addLog(`第 ${attempt} 次自动重连失败，3 秒后重试…`, 'err');
+      await sleep(3000);
+    }
+  }
+  addLog('自动重连失败，请手动点“连接设备”。', 'err');
+  setStatus('未连接', 'err');
+}
+
+async function connect(ev, opts) {
   if (!('serial' in navigator)) {
     addLog('当前浏览器不支持 Web Serial，请使用 Chrome / Edge 89+，并通过 http://localhost 打开本页。', 'err');
-    return;
+    return false;
   }
-  if (port) return;
+  if (port) return false;
 
+  const auto = !!(opts && opts.auto);
   const forcePicker = !!(ev && ev.shiftKey);
   btnConnect.disabled = true;
-  setStatus(forcePicker ? '选择串口…' : '查找串口…', 'busy');
+  setStatus(auto ? '自动连接中…' : (forcePicker ? '选择串口…' : '查找串口…'), 'busy');
 
+  let chosen = null;
   try {
-    const picked = await acquirePort(forcePicker);
-    port = picked.port;
-    if (!picked.auto) {
-      setStatus('打开串口…', 'busy');
+    if (auto) {
+      chosen = await pickAutoPort();
+      if (!chosen) {
+        addLog('没有可用的已授权串口。', 'err');
+        btnConnect.disabled = false;
+        return false;
+      }
+    } else {
+      const picked = await acquirePort(forcePicker);
+      chosen = picked.port;
+      if (!picked.auto) {
+        setStatus('打开串口…', 'busy');
+      }
     }
-    await port.open({ baudRate: 115200 });
+    await chosen.open({ baudRate: 115200 });
   } catch (err) {
-    port = null;
+    if (auto) {
+      // 记着的 port 对象可能已经在设备重启后失效，下次重试重新枚举。
+      lastPort = null;
+    }
     btnConnect.disabled = false;
     setStatus('未连接', 'err');
-    addLog('打开串口失败：' + (err && err.message ? err.message : err), 'err');
-    return;
+    addLog((auto ? '自动重连打开串口失败：' : '打开串口失败：') +
+           (err && err.message ? err.message : err), 'err');
+    return false;
   }
+
+  return attachPort(chosen, auto);
+}
+
+// 端口已打开：挂上收发、握手、读取分区信息、开心跳。
+async function attachPort(openedPort, auto) {
+  port = openedPort;
+  lastPort = openedPort;
 
   writer = port.writable.getWriter();
   reader = port.readable.getReader();
@@ -475,9 +569,10 @@ async function connect(ev) {
   })();
 
   setStatus('等待设备响应…', 'busy');
-  addLog('串口已打开，等待设备握手（若设备已休眠，请先触摸/摇晃唤醒）');
+  addLog(auto ? '串口已重新打开，等待设备启动完成…'
+              : '串口已打开，等待设备握手（若设备已休眠，请先触摸/摇晃唤醒）');
 
-  const deadline = Date.now() + 30000;
+  const deadline = Date.now() + (auto ? 15000 : 30000);
   let ok = false;
   while (Date.now() < deadline) {
     try {
@@ -492,7 +587,7 @@ async function connect(ev) {
   if (!ok) {
     addLog('设备没有响应。请确认：串口监视器已关闭 / 设备已唤醒 / 当前固件包含 USB OTA。', 'err');
     await disconnect();
-    return;
+    return false;
   }
 
   busy = false;
@@ -512,6 +607,7 @@ async function connect(ev) {
   heartbeat = setInterval(() => {
     if (!busy && writer) sendLine('OTA_PING').catch(() => {});
   }, 5000);
+  return true;
 }
 
 async function disconnect() {
@@ -613,6 +709,9 @@ function setProgress(done, total, startMs) {
 async function flash() {
   if (!port || !fileBytes || busy) return;
   busy = true;
+  // 手动发起升级时，先取消可能还在倒计时的自动重连。
+  cancelAutoReconnect();
+  let autoReconnectPending = false;
   updateButtons();
   setStatus('升级中…', 'busy');
   $('bar').style.width = '0%';
@@ -650,11 +749,11 @@ async function flash() {
     await resultPromise;
     setProgress(total, total, startMs);
     setStatus('升级成功，设备重启中…', 'on');
-    addLog('固件已写入并通过校验，设备正在重启。约 5 秒后再点“连接设备”，' +
-           '页面会对比构建时间确认是否真的换成了新固件。', 'ok');
-    await sleep(4000);
+    addLog(`固件已写入并通过校验，设备正在重启。${AUTO_RECONNECT_DELAY_MS / 1000} 秒后` +
+           '页面会自动重连并核对构建时间。', 'ok');
+    await sleep(1500);
     await disconnect();
-    setStatus('升级完成，请重新连接核实', 'on');
+    autoReconnectPending = true;
   } catch (err) {
     lastFlashedFrom = null;
     const msg = err && err.message ? err.message : String(err);
@@ -667,11 +766,22 @@ async function flash() {
     busy = false;
     updateButtons();
   }
+
+  // 放在 finally 之后：此时 busy 已经复位，自动重连不会被自己挡住。
+  if (autoReconnectPending) {
+    autoReconnectAfterFlash();
+  }
 }
 
 // ── 事件绑定 ─────────────────────────────────────────────────
-btnConnect.addEventListener('click', connect);
-btnDisconnect.addEventListener('click', disconnect);
+btnConnect.addEventListener('click', (ev) => {
+  cancelAutoReconnect();
+  connect(ev);
+});
+btnDisconnect.addEventListener('click', () => {
+  cancelAutoReconnect();
+  disconnect();
+});
 btnInfo.addEventListener('click', () => { requestInfo(); });
 btnReboot.addEventListener('click', () => {
   if (!port || busy) return;
