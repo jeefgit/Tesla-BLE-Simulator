@@ -18,6 +18,9 @@
 // 留空 = 由 VIN 推导广播名：S + sha1(VIN) 前 16 位 hex + C
 #define CFG_TESLA_NAME ""
 
+// 1（默认）= 每轮扫描后打印所有广播的名称/地址/RSSI/VIN；0 = 只打印匹配到的目标
+// #define CFG_SCAN_LOG_RESULTS 0
+
 // 1 = 车端原始值为英里，解析时换算成公里（真车）
 #define CFG_TESLA_UNITS_MILES 1
 

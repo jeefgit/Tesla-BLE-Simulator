@@ -28,6 +28,11 @@
 // 单次 BLE 扫描时长（秒）；1s 足够发现目标，缩短等待
 #define CFG_SCAN_SECONDS 1
 #endif
+// 1 = 每轮扫描结束打印所有发现的广播（名称/地址/RSSI/VIN），排查配对问题用
+// 0 = 只打印最终匹配到的目标
+#ifndef CFG_SCAN_LOG_RESULTS
+#define CFG_SCAN_LOG_RESULTS 1
+#endif
 #ifndef CFG_RECONNECT_INTERVAL_MS
 #define CFG_RECONNECT_INTERVAL_MS 3000
 #endif
