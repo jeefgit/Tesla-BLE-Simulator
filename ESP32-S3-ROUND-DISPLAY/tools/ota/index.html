@@ -165,7 +165,7 @@
       <button id="btnClear">清空</button>
     </div>
     <pre id="log"></pre>
-    <p class="note">串口监视器 / PlatformIO monitor 会占用同一个串口，连接前请先关闭。浏览器需要 <code>navigator.serial</code>（Chrome/Edge 89+，localhost 或 https）。</p>
+    <p class="note">串口监视器 / PlatformIO monitor 会占用同一个串口，连接前请先关闭。浏览器需要 <code>navigator.serial</code>（Chrome/Edge 89+，localhost 或 https）。首次连接需在弹窗里选择串口（只需一次）；之后若只授权过一个设备，会直接连接、不再弹框。要换设备时按住 <b>Shift</b> 点“连接设备”即可重新选择。</p>
   </section>
 </main>
 
@@ -181,7 +181,7 @@
 //                "OTA: IMG app0=<v>@<date time>" / "OTA: READY <size>" /
 //                "OTA: A <received>" / "OTA: OK boot=<label>" /
 //                "OTA: ERR <reason>"
-const PAGE_VERSION = 'ota-page-3';
+const PAGE_VERSION = 'ota-page-4';
 const CHUNK_SIZE = 4096;
 const READY_TIMEOUT_MS = 10000;
 const ACK_TIMEOUT_MS = 20000;
@@ -407,17 +407,49 @@ async function rebootDevice() {
   setStatus('已发送重启，请稍后重新连接', 'busy');
 }
 
-async function connect() {
+// 浏览器出于隐私不会把系统串口列表交给页面，只会返回“用户之前授权过的串口”。
+// 所以能自动跳过选择框的前提是：之前连过，而且只授权过一个设备。
+// 返回 { port, auto }；auto=true 表示没弹选择框。
+async function acquirePort(forcePicker) {
+  let authorized = [];
+  if (!forcePicker && navigator.serial.getPorts) {
+    try {
+      authorized = await navigator.serial.getPorts();
+    } catch (err) {
+      authorized = [];
+    }
+  }
+
+  if (authorized.length === 1) {
+    addLog('检测到唯一一个已授权串口，直接连接（不弹选择框）。');
+    return { port: authorized[0], auto: true };
+  }
+  if (authorized.length > 1) {
+    addLog(`检测到 ${authorized.length} 个已授权串口，请在选择框里挑一个` +
+           '（按住 Shift 点“连接设备”可强制重新选择）。');
+  } else if (!forcePicker) {
+    addLog('首次连接需要在弹窗里选择一次串口；之后只授权过一个设备时会自动连接。');
+  }
+  return { port: await navigator.serial.requestPort(), auto: false };
+}
+
+async function connect(ev) {
   if (!('serial' in navigator)) {
     addLog('当前浏览器不支持 Web Serial，请使用 Chrome / Edge 89+，并通过 http://localhost 打开本页。', 'err');
     return;
   }
   if (port) return;
 
+  const forcePicker = !!(ev && ev.shiftKey);
   btnConnect.disabled = true;
-  setStatus('选择串口…', 'busy');
+  setStatus(forcePicker ? '选择串口…' : '查找串口…', 'busy');
+
   try {
-    port = await navigator.serial.requestPort();
+    const picked = await acquirePort(forcePicker);
+    port = picked.port;
+    if (!picked.auto) {
+      setStatus('打开串口…', 'busy');
+    }
     await port.open({ baudRate: 115200 });
   } catch (err) {
     port = null;
