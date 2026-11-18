@@ -240,9 +240,21 @@ py tools/ota/serve.py           # 自动打开 http://localhost:8787/index.html
 ```
 
 3. 用 USB 线连接设备；若已自动休眠，先触摸屏幕或摇晃唤醒。
-4. 页面点“连接设备”，选择 ESP32 串口，等待显示固件版本。
+4. 页面点“连接设备”，选择 ESP32 串口，等待显示固件版本和编译时间。
 5. 拖入 `.pio/build/waveshare_esp32_s3/firmware.bin`，点“开始升级”。
    屏幕显示 `USB OTA` 进度页，完成后自动重启。
+6. 重新点“连接设备”，页面会自动对比升级前后的编译时间并给出结论。
+
+**怎么确认“重启后真的生效”**
+
+页面握手时设备会返回 `OTA: PONG ver=… build=… part=…`：
+
+- `build=` 是编译器自动写入的编译时间戳（`__DATE__ __TIME__`）；
+- `part=` 是当前运行的分区（`app0` / `app1`），每次 OTA 会在两者之间切换。
+
+升级后 `build` 应该变化、`part` 应该换到另一个分区。如果 `build` 没变，
+说明传进去的就是同一个镜像（忘了重新编译，或选错了 `firmware.bin` 路径），
+不是 OTA 没生效。
 
 **注意**
 
@@ -251,8 +263,10 @@ py tools/ota/serve.py           # 自动打开 http://localhost:8787/index.html
 - `pio device monitor` / 串口助手会独占串口，连接前先关闭。
 - 升级期间不要拔 USB。中途取消时设备会在 10 秒超时后自动退出升级模式并
   回到仪表，不需要重启。
-- 没有启用 bootloader 自动回滚：如果新固件启动即崩溃，需要重新用 USB
-  （`pio run -t upload` / esptool）烧录。
+- 本 core 打开了 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`，Arduino 会在
+  `setup()` 之前就把新镜像标记为有效，所以正常固件不会被回滚；只有在新镜像
+  连启动早期都失败时，bootloader 才会回滚到旧固件。真遇到启动即崩溃，用
+  `pio run -t upload` / esptool 重新烧录。
 - 协议、逐块 ACK 与 CRC 细节见 `tools/ota/README.md`；开关和版本号在
   `include/config.h` 的 `CFG_USB_OTA_ENABLE` / `CFG_FW_VERSION`。
 

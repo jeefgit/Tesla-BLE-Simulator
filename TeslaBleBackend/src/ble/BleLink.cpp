@@ -15,13 +15,6 @@ bool namePrefixMatch(const String& name, const char* prefix) {
   if (name.length() < n) return false;
   return name.substring(0, n).equalsIgnoreCase(prefix);
 }
-
-// 广播名是 VIN 的截断 SHA1（"S" + sha1(VIN)[:16] + "C"），无法反推；
-// 只有名称与本地配置的目标名一致时才能确定 VIN。
-const char* vinForAdvertisedName(const String& name, const String& targetName) {
-  if (targetName.length() == 0 || name != targetName) return "?";
-  return CFG_TESLA_VIN[0] ? CFG_TESLA_VIN : "?";
-}
 }  // namespace
 
 BleLink* BleLink::s_instance = nullptr;
@@ -161,19 +154,6 @@ bool BleLink::startScan() {
 bool BleLink::scanForTarget(const NimBLEScanResults& results) {
   const int count = results.getCount();
 
-#if CFG_SCAN_LOG_RESULTS
-  CFG_LOG("本轮扫描到 %d 个广播：", count);
-  for (int i = 0; i < count; ++i) {
-    const NimBLEAdvertisedDevice* dev = results.getDevice((uint32_t)i);
-    if (!dev) continue;
-    const String name(dev->haveName() ? dev->getName().c_str() : "(未命名)");
-    const bool isTarget = m_targetName.length() > 0 && name == m_targetName;
-    CFG_LOG("  [%d] %-22s %s RSSI=%d VIN=%s%s", i, name.c_str(),
-            dev->getAddress().toString().c_str(), (int)dev->getRSSI(),
-            vinForAdvertisedName(name, m_targetName), isTarget ? " <- 目标" : "");
-  }
-#endif
-
   // 第一优先级：精确广播名匹配（特斯拉按 VIN 推导，区分大小写）
   if (m_targetName.length() > 0) {
     for (int i = 0; i < count; ++i) {
@@ -186,9 +166,8 @@ bool BleLink::scanForTarget(const NimBLEScanResults& results) {
       m_remoteName = name;
       m_hasTarget = true;
       m_failCount = 0;
-      CFG_LOG("找到目标(精确名): %s (%s) VIN=%s", m_remoteName.c_str(),
-              m_targetAddr.c_str(),
-              vinForAdvertisedName(m_remoteName, m_targetName));
+      CFG_LOG("找到目标(精确名): %s (%s)", m_remoteName.c_str(),
+              m_targetAddr.c_str());
       return true;
     }
   }
@@ -205,9 +184,7 @@ bool BleLink::scanForTarget(const NimBLEScanResults& results) {
       m_remoteName = name;
       m_hasTarget = true;
       m_failCount = 0;
-      CFG_LOG("找到目标: %s (%s) VIN=%s", m_remoteName.c_str(),
-              m_targetAddr.c_str(),
-              vinForAdvertisedName(m_remoteName, m_targetName));
+      CFG_LOG("找到目标: %s (%s)", m_remoteName.c_str(), m_targetAddr.c_str());
       return true;
     }
   }
@@ -222,9 +199,7 @@ bool BleLink::scanForTarget(const NimBLEScanResults& results) {
     m_remoteName = dev->haveName() ? String(dev->getName().c_str()) : String("(未命名)");
     m_hasTarget = true;
     m_failCount = 0;
-    CFG_LOG("按服务 UUID 找到目标: %s (%s) VIN=%s", m_remoteName.c_str(),
-            m_targetAddr.c_str(),
-            vinForAdvertisedName(m_remoteName, m_targetName));
+    CFG_LOG("按服务 UUID 找到目标: %s (%s)", m_remoteName.c_str(), m_targetAddr.c_str());
     return true;
   }
 

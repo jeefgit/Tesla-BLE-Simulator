@@ -41,12 +41,48 @@
 | 方向 | 内容 | 说明 |
 | --- | --- | --- |
 | 主机 → 设备 | `OTA_PING\n` | 握手 / 心跳 |
-| 设备 → 主机 | `OTA: PONG <version>\n` | `CFG_FW_VERSION` |
+| 设备 → 主机 | `OTA: PONG ver=<v> build=<日期 时间> part=<app0|app1>\n` | 版本 + 编译时间 + 当前运行分区 |
+| 主机 → 设备 | `OTA_INFO\n` | 体检：两个分区各是什么镜像 |
+| 设备 → 主机 | `OTA: INFO run=<p> boot=<p> state=<n>\n` | 当前运行 / 启动分区 / OTA 状态 |
+| 设备 → 主机 | `OTA: IMG app0=<v>@<日期 时间>\n`、`OTA: IMG app1=...` | 各分区镜像；空分区为 `empty` |
+| 主机 → 设备 | `OTA_REBOOT\n` | 单独测试重启是否可用 |
 | 主机 → 设备 | `OTA_BEGIN <size> <crc32-hex>\n` | app 镜像字节数 + CRC32 |
+| 设备 → 主机 | `OTA: INFO incoming=<v> built <日期 时间>\n` | 收到第一块时读出的“你要刷的镜像” |
+| 设备 → 主机 | `OTA: INFO current=...` / `OTA: INFO same_image\n` | 与当前运行版本对比；完全相同时告警 |
 | 设备 → 主机 | `OTA: READY <size>\n` / `OTA: ERR begin ...\n` | 已调用 `Update.begin()` |
 | 主机 → 设备 | ≤4096 字节二进制块 | 每块最多 `CFG_USB_OTA_CHUNK` |
 | 设备 → 主机 | `OTA: A <received>\n` | 每块 ACK，含累计字节数 |
-| 设备 → 主机 | `OTA: OK\n` / `OTA: ERR crc|end|timeout|write ...\n` | 最终结果 |
+| 设备 → 主机 | `OTA: INFO readback=ok\n` | 回读 Flash 重算 CRC 与主机一致 |
+| 设备 → 主机 | `OTA: INFO written=<v> built <日期 时间> part=<label>\n` | 从刚写入的镜像头读出的信息 |
+| 设备 → 主机 | `OTA: OK boot=<label>\n` / `OTA: ERR crc|end|timeout|write|readback ...\n` | 最终结果 |
+
+**排查“OTA 成功但没变化”**
+
+页面右上角会显示 `页面版本：ota-page-3`（不是就 Ctrl+Shift+R 强刷）。连上设备
+后会自动执行一次 `OTA_INFO`，日志里会出现三行：
+
+```
+OTA: INFO run=app0 boot=app1 state=1
+OTA: IMG app0=0.1.2@Nov 18 2026 16:06:36
+OTA: IMG app1=0.1.2@Nov 18 2026 16:20:01
+```
+
+- `run=app0 boot=app1` → otadata 已经指向 app1，但设备还在跑 app0，说明
+  **重启后没换过去**（回滚或根本没重启）；点“重启设备”按钮可以单独验证重启。
+- `app0` 和 `app1` 的构建时间相同 → 两个分区里是同一版固件，看不出变化很正常。
+- 开始升级时设备还会打印 `OTA: INFO incoming=...` 和 `current=...`，直接对比
+  “你传的”和“正在跑的”是不是同一个构建；相同会额外打印 `same_image`。
+
+**怎么确认升级真的生效**
+
+`OTA: PONG` 里的 `build=` 是编译器自动填的编译时间戳（`__DATE__ __TIME__`），
+`part=` 是当前运行的分区。升级前记下这两个值，升级后重连再看一次：
+
+- `build` 变了 → 设备确实跑上了新固件；
+- `build` 没变 → 传进去的就是同一个镜像（多半是忘了重新编译，或选错了文件）；
+- `part` 从 `app0` 变 `app1`（或反过来）→ 说明启动分区确实切换了。
+
+网页会自动做这个对比并在日志里给出结论。
 
 设计要点：
 
@@ -60,12 +96,18 @@
 ## 限制与回滚
 
 - 写入的是 `default_16MB.csv` 里的 `app0` / `app1`（各 6.25MB），分区表不用改。
-- 没有启用 bootloader 自动回滚。如果新固件启动即崩溃，需要再用 USB
-  （`pio run -t upload` 或 esptool）重新烧录。
+- 这个 core 的 sdkconfig 打开了 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`，所以
+  新镜像首次启动处于 `PENDING_VERIFY`；Arduino 的 `initArduino()` 会在执行
+  `setup()` 之前调用 `verifyOta()`（默认返回 true）并立即
+  `esp_ota_mark_app_valid_cancel_rollback()`。也就是说：只要新固件能跑到
+  `setup()`，就不会被回滚；如果它连早于 `initArduino()` 的阶段都起不来，
+  bootloader 会自动回滚到旧固件——那种情况下的表现就是“OTA 成功但版本没变”。
+  串口日志里的 `OTA: INFO boot_state=` 会显示分区状态。
 - OTA 成功后会从另一个 app 分区启动。`pio run -t upload` 会同时写入
   `boot_app0.bin`（重置 otadata 选择 app0），所以不受影响；如果用 esptool
   只手动写 `0x10000` 的 `firmware.bin`，otadata 可能仍指向 OTA 分区，
   需要一并写 `boot_app0.bin` 或擦除 `otadata`。
 - 升级期间 BLE 轮询会暂停，设备重启后自动重新扫描连接车辆。
 - 若要把 OTA 关掉：`include/config.h` 里 `CFG_USB_OTA_ENABLE` 改 0。
-- 每次发版建议同步改 `CFG_FW_VERSION`，页面握手时会显示，便于确认升级结果。
+- 每次发版建议同步改 `CFG_FW_VERSION`；但判断是否真的升级成功请看 `build=`
+  时间戳，而不是版本号。

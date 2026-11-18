@@ -2,6 +2,10 @@
 
 #include <Arduino.h>
 #include <Update.h>
+#include <esp_app_desc.h>
+#include <esp_image_format.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
 
 #include <cstdio>
 #include <cstring>
@@ -11,6 +15,22 @@
 #if CFG_USB_OTA_ENABLE
 
 namespace {
+
+const char* partLabel(const esp_partition_t* p) { return p != nullptr ? p->label : "?"; }
+
+// 从任意 app 分区读出镜像头里的 esp_app_desc（版本 / 编译日期时间）。
+// app 镜像 = image_header(24B) + 第一个 segment header(8B) + app desc(256B)，
+// 所以 desc 固定在偏移 32 处。失败时返回 false。
+bool readAppDesc(const esp_partition_t* p, esp_app_desc_t* out) {
+  if (p == nullptr || out == nullptr) {
+    return false;
+  }
+  const size_t offset = sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t);
+  if (esp_partition_read(p, offset, out, sizeof(*out)) != ESP_OK) {
+    return false;
+  }
+  return out->magic_word == ESP_APP_DESC_MAGIC_WORD;
+}
 
 // 主机每发一块就等一次 ACK：flash 写入和界面刷新期间不会有新数据在途，
 // 避免 USB CDC 默认 256B 接收缓冲在 flash 操作期间溢出丢字节。
@@ -30,7 +50,26 @@ uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len) {
 
 }  // namespace
 
-void UsbOta::begin(IDisplay* display) { m_display = display; }
+void UsbOta::begin(IDisplay* display) {
+  m_display = display;
+
+  // 启动时把“镜像自带的编译信息”和当前运行/启动分区打到串口：
+  //   running= 现在跑的是哪个 app 分区
+  //   boot=    otadata 里记录的下次启动分区
+  // 正常时两者相同；OTA 完成后 boot 会变成另一个分区。
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  const esp_partition_t* boot = esp_ota_get_boot_partition();
+
+  esp_app_desc_t desc = {};
+  if (readAppDesc(running, &desc)) {
+    CFG_LOG("[OTA] fw %s built %s %s", desc.version, desc.date, desc.time);
+  } else {
+    const esp_app_desc_t* app = esp_app_get_description();
+    CFG_LOG("[OTA] fw %s built %s %s", app != nullptr ? app->version : "?",
+            app != nullptr ? app->date : "?", app != nullptr ? app->time : "?");
+  }
+  CFG_LOG("[OTA] running=%s boot=%s", partLabel(running), partLabel(boot));
+}
 
 bool UsbOta::loop() {
   // 传输期间本函数阻塞在 startTransfer() 内，不会走到这里。
@@ -67,7 +106,22 @@ bool UsbOta::loop() {
 
 void UsbOta::handleLine(const char* line) {
   if (strcmp(line, "OTA_PING") == 0) {
-    Serial.printf("OTA: PONG %s\n", CFG_FW_VERSION);
+    // 带上编译时间戳和当前运行分区，网页握手时就能确认到底跑的是哪一版。
+    Serial.printf("OTA: PONG ver=%s build=%s part=%s\n", CFG_FW_VERSION,
+                  CFG_FW_BUILD, partLabel(esp_ota_get_running_partition()));
+    return;
+  }
+  if (strcmp(line, "OTA_INFO") == 0) {
+    dumpInfo();
+    return;
+  }
+  if (strcmp(line, "OTA_REBOOT") == 0) {
+    // 单独验证“重启”这条路径是否可用：用来区分“OTA 没写进去”和
+    // “写进去了但重启后没生效”。
+    Serial.println("OTA: INFO rebooting");
+    Serial.flush();
+    delay(200);
+    esp_restart();
     return;
   }
   if (strncmp(line, "OTA_BEGIN ", 10) == 0) {
@@ -81,6 +135,44 @@ void UsbOta::handleLine(const char* line) {
     return;
   }
   // 其他串口输入（例如串口监视器里敲的字符）一律忽略，不回显、不报错。
+}
+
+void UsbOta::dumpInfo() {
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  const esp_partition_t* boot = esp_ota_get_boot_partition();
+
+  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+  int stateValue = -1;
+  if (boot != nullptr && esp_ota_get_state_partition(boot, &state) == ESP_OK) {
+    stateValue = static_cast<int>(state);
+  }
+  Serial.printf("OTA: INFO run=%s boot=%s state=%d\n", partLabel(running),
+                partLabel(boot), stateValue);
+
+  // 两个 OTA 分区里的镜像各自带什么编译时间，是判断“到底哪一版在跑”的铁证。
+  struct Slot {
+    const char* label;
+    esp_partition_subtype_t subtype;
+  };
+  const Slot slots[] = {
+      {"app0", ESP_PARTITION_SUBTYPE_APP_OTA_0},
+      {"app1", ESP_PARTITION_SUBTYPE_APP_OTA_1},
+  };
+  for (const Slot& slot : slots) {
+    const esp_partition_t* p = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, slot.subtype, nullptr);
+    if (p == nullptr) {
+      Serial.printf("OTA: IMG %s=none\n", slot.label);
+      continue;
+    }
+    esp_app_desc_t desc = {};
+    if (readAppDesc(p, &desc)) {
+      Serial.printf("OTA: IMG %s=%s@%s %s\n", slot.label, desc.version,
+                    desc.date, desc.time);
+    } else {
+      Serial.printf("OTA: IMG %s=empty\n", slot.label);
+    }
+  }
 }
 
 void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
@@ -122,6 +214,34 @@ void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
       break;
     }
 
+    if (received == 0) {
+      // 第一块里就包含镜像头 + app desc（版本 / 编译日期时间）。直接读出来，
+      // 立刻就能看出“你传的到底是哪一版”，不用等升级完。
+      const size_t descOffset =
+          sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t);
+      esp_app_desc_t incoming = {};
+      if (want >= descOffset + sizeof(incoming)) {
+        memcpy(&incoming, s_chunk + descOffset, sizeof(incoming));
+      }
+      if (incoming.magic_word == ESP_APP_DESC_MAGIC_WORD) {
+        Serial.printf("OTA: INFO incoming=%s built %s %s\n", incoming.version,
+                      incoming.date, incoming.time);
+      } else {
+        Serial.println("OTA: INFO incoming=unknown");
+      }
+
+      esp_app_desc_t current = {};
+      if (readAppDesc(esp_ota_get_running_partition(), &current)) {
+        Serial.printf("OTA: INFO current=%s built %s %s\n", current.version,
+                      current.date, current.time);
+        if (incoming.magic_word == ESP_APP_DESC_MAGIC_WORD &&
+            strcmp(incoming.date, current.date) == 0 &&
+            strcmp(incoming.time, current.time) == 0) {
+          Serial.println("OTA: INFO same_image");
+        }
+      }
+    }
+
     runningCrc = crc32Update(runningCrc, s_chunk, want);
     if (Update.write(s_chunk, want) != want) {
       Serial.printf("OTA: ERR write %s\n", Update.errorString());
@@ -158,6 +278,76 @@ void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
     }
   }
 
+  // Update.end() 成功后 esp_ota_set_boot_partition() 应已把 otadata 指向
+  // 另一个 app 分区。这里读回来核对一次：如果 boot 仍等于 running，说明
+  // 分区根本没切换（例如分区表没有第二个 OTA 分区），直接报错而不是假装成功。
+  if (ok) {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    const esp_partition_t* boot = esp_ota_get_boot_partition();
+
+    // 回读校验：Update.end() 里的 _partitionIsBootable() 只看首字节 magic，
+    // 写坏的镜像它发现不了。这里把真正落盘的 size 字节读回来重算一次 CRC。
+    if (boot != nullptr) {
+      setOverlay("USB OTA", "100%", "Verifying...");
+      uint32_t readbackCrc = 0xFFFFFFFFu;
+      uint32_t offset = 0;
+      bool readOk = true;
+      while (offset < size) {
+        uint32_t want = size - offset;
+        if (want > CFG_USB_OTA_CHUNK) {
+          want = CFG_USB_OTA_CHUNK;
+        }
+        if (esp_partition_read(boot, offset, s_chunk, want) != ESP_OK) {
+          readOk = false;
+          break;
+        }
+        readbackCrc = crc32Update(readbackCrc, s_chunk, want);
+        offset += want;
+      }
+      readbackCrc ^= 0xFFFFFFFFu;
+
+      if (!readOk || readbackCrc != crc) {
+        Serial.printf("OTA: ERR readback (got %08lx want %08lx)\n",
+                      static_cast<unsigned long>(readbackCrc),
+                      static_cast<unsigned long>(crc));
+        // flash 内容和主机文件不一致：把启动分区改回去，别让设备去跑坏镜像。
+        if (running != nullptr) {
+          esp_ota_set_boot_partition(running);
+        }
+        ok = false;
+      } else {
+        Serial.println("OTA: INFO readback=ok");
+      }
+    }
+  }
+
+  if (ok) {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    const esp_partition_t* boot = esp_ota_get_boot_partition();
+
+    // 把刚写入的镜像自带的编译时间读出来：这是“到底传进去了哪个文件”的铁证。
+    esp_app_desc_t written = {};
+    if (boot != nullptr && readAppDesc(boot, &written)) {
+      Serial.printf("OTA: INFO written=%s built %s %s part=%s\n",
+                    written.version, written.date, written.time,
+                    partLabel(boot));
+    }
+
+    // 本 core 的 sdkconfig 打开了 CONFIG_APP_ROLLBACK_ENABLE：新镜像首次启动
+    // 处于 PENDING_VERIFY，Arduino 的 initArduino() 会立刻标记为有效。这里把
+    // 状态打出来，方便确认没有走回滚路径。
+    esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+    if (boot != nullptr && esp_ota_get_state_partition(boot, &state) == ESP_OK) {
+      Serial.printf("OTA: INFO boot_state=%d\n", static_cast<int>(state));
+    }
+
+    if (running != nullptr && boot != nullptr && boot->address == running->address) {
+      Serial.printf("OTA: ERR boot partition not switched (still %s)\n",
+                    boot->label);
+      ok = false;
+    }
+  }
+
   if (!ok) {
     if (Update.isRunning()) {
       Update.abort();
@@ -178,11 +368,15 @@ void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
     return;
   }
 
-  Serial.println("OTA: OK");
+  Serial.printf("OTA: OK boot=%s\n",
+                partLabel(esp_ota_get_boot_partition()));
   Serial.flush();
   setOverlay("USB OTA", "100%", "Rebooting...");
   delay(1200);
   ESP.restart();
+  // ESP.restart() 正常情况下不会返回；万一被中断，兜底再触发一次硬复位。
+  delay(200);
+  esp_restart();
 }
 
 bool UsbOta::readChunk(uint8_t* dst, uint32_t len, uint32_t timeoutMs) {

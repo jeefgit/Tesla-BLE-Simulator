@@ -361,6 +361,10 @@ void LvglDashboard::buildBootAnimation() {
   lv_obj_set_style_opa(m_bootEmblem, LV_OPA_TRANSP, 0);
   s_bootEmblem = m_bootEmblem;
 
+  // Firmware version, static at the bottom of the boot screen (no animation).
+  makeLabel(m_bootLayer, 0, 406, kScreenSize, 24, "v" CFG_FW_VERSION,
+            &lv_font_montserrat_18, kDim, LV_TEXT_ALIGN_CENTER);
+
   // Start the elapsed-time animation on the first lv_timer_handler() run.
   s_bootPercent = 0;
   s_bootStartMs = 0;

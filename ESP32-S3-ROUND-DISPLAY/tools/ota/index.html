@@ -2,6 +2,8 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ESP32-S3 圆屏 · USB OTA</title>
 <style>
@@ -126,9 +128,12 @@
     <div class="row">
       <button id="btnConnect" class="primary">连接设备</button>
       <button id="btnDisconnect" disabled>断开</button>
+      <button id="btnInfo" disabled>读取设备信息</button>
+      <button id="btnReboot" disabled>重启设备</button>
       <div class="grow"></div>
       <div class="status"><i id="dot" class="dot"></i><span id="status">未连接</span></div>
     </div>
+    <p class="note" id="pageVersion" style="margin-top:10px">页面版本：--</p>
   </section>
 
   <section class="card">
@@ -169,17 +174,25 @@
 
 // ── 协议常量 ────────────────────────────────────────────────
 // 与 src/ota/UsbOta.cpp 保持一致：
-//   主机 → 设备：ASCII 行 "OTA_PING\n" / "OTA_BEGIN <size> <crc32hex>\n"
-//   设备 → 主机：ASCII 行 "OTA: PONG <ver>" / "OTA: READY <size>" /
-//                "OTA: A <received>" / "OTA: OK" / "OTA: ERR <reason>"
+//   主机 → 设备：ASCII 行 "OTA_PING\n" / "OTA_INFO\n" / "OTA_REBOOT\n" /
+//                "OTA_BEGIN <size> <crc32hex>\n"
+//   设备 → 主机：ASCII 行 "OTA: PONG ver=<v> build=<date time> part=<label>" /
+//                "OTA: INFO run=<p> boot=<p> state=<n>" /
+//                "OTA: IMG app0=<v>@<date time>" / "OTA: READY <size>" /
+//                "OTA: A <received>" / "OTA: OK boot=<label>" /
+//                "OTA: ERR <reason>"
+const PAGE_VERSION = 'ota-page-3';
 const CHUNK_SIZE = 4096;
 const READY_TIMEOUT_MS = 10000;
 const ACK_TIMEOUT_MS = 20000;
 const RESULT_TIMEOUT_MS = 180000;
+const INFO_TIMEOUT_MS = 5000;
 
 const $ = (id) => document.getElementById(id);
 const btnConnect = $('btnConnect');
 const btnDisconnect = $('btnDisconnect');
+const btnInfo = $('btnInfo');
+const btnReboot = $('btnReboot');
 const btnPick = $('btnPick');
 const btnFlash = $('btnFlash');
 const btnClear = $('btnClear');
@@ -197,6 +210,9 @@ let pendingLines = [];
 let busy = false;
 let disconnecting = false;
 let fwVersion = '';
+let fwInfo = { ver: '', build: '', part: '' };
+// 升级前设备的构建信息，用于重连后对比“是否真的换了固件”。
+let lastFlashedFrom = null;
 
 let file = null;
 let fileBytes = null;
@@ -303,6 +319,11 @@ function onLine(line) {
     rejectAll(new Error(line));
     return;
   }
+  if (line.startsWith('OTA: INFO same_image')) {
+    addLog('⚠ 你选择的 firmware.bin 和设备当前运行的固件是同一个编译结果。' +
+           '这次升级不会带来任何变化，请确认重新编译（pio run）后再选文件。', 'err');
+    return;
+  }
   addLog(line, 'dev');
   dispatchLine(line);
 }
@@ -332,9 +353,58 @@ async function pingOnce(timeoutMs) {
   const p = waitFor(/^OTA: PONG/, timeoutMs, 'PING');
   await sendLine('OTA_PING');
   const line = await p;
-  const m = line.match(/^OTA: PONG\s+(.*)$/);
-  fwVersion = m ? m[1].trim() : '?';
-  $('deviceInfo').textContent = `设备固件：${fwVersion}`;
+  const rest = line.replace(/^OTA: PONG\s*/, '').trim();
+  const mv = rest.match(/ver=(\S+)/);
+  const mb = rest.match(/build=(.*?)\s+part=/);
+  const mp = rest.match(/part=(\S+)/);
+  fwVersion = mv ? mv[1] : rest;
+  fwInfo = {
+    ver: fwVersion,
+    build: mb ? mb[1].trim() : '',
+    part: mp ? mp[1] : '',
+  };
+  $('deviceInfo').textContent =
+    `设备固件：v${fwInfo.ver}` + (fwInfo.part ? ` · ${fwInfo.part}` : '') +
+    (fwInfo.build ? ` · 构建 ${fwInfo.build}` : '');
+
+  // 升级后重连时对比编译时间戳：版本号忘了改也能判断有没有真的换固件。
+  if (lastFlashedFrom && fwInfo.build) {
+    if (fwInfo.build === lastFlashedFrom.build) {
+      addLog(`注意：当前构建时间与升级前完全相同（${fwInfo.build}），` +
+             '说明设备跑的还是同一个镜像。请确认重新编译过，并选择最新的 firmware.bin。', 'err');
+    } else {
+      addLog(`升级已生效：构建时间 ${lastFlashedFrom.build} → ${fwInfo.build}` +
+             (lastFlashedFrom.part && fwInfo.part ? `，分区 ${lastFlashedFrom.part} → ${fwInfo.part}` : ''), 'ok');
+    }
+    lastFlashedFrom = null;
+  }
+}
+
+// 读取设备分区信息：两个 OTA 分区里各是哪一版固件、当前启动分区是谁。
+async function requestInfo() {
+  if (!port || busy) return;
+  try {
+    const done = waitFor(/^OTA: IMG app1=/, INFO_TIMEOUT_MS, '读取设备信息');
+    await sendLine('OTA_INFO');
+    await done;
+  } catch (err) {
+    addLog('读取设备信息失败：' + (err && err.message ? err.message : err), 'err');
+  }
+}
+
+// 单独验证“重启”这条路径：用来区分“OTA 没写进去”和“写进去了但没重启”。
+async function rebootDevice() {
+  if (!port || busy) return;
+  addLog('发送重启命令…');
+  try {
+    await sendLine('OTA_REBOOT');
+  } catch (err) {
+    addLog('发送重启命令失败：' + (err && err.message ? err.message : err), 'err');
+    return;
+  }
+  await sleep(400);
+  await disconnect();
+  setStatus('已发送重启，请稍后重新连接', 'busy');
 }
 
 async function connect() {
@@ -398,7 +468,12 @@ async function connect() {
   btnDisconnect.disabled = false;
   updateButtons();
   setStatus(`已连接（固件 ${fwVersion}）`, 'on');
-  addLog(`握手成功，设备固件 ${fwVersion}`, 'ok');
+  addLog(`握手成功，设备固件 v${fwInfo.ver}` +
+         (fwInfo.part ? ` · ${fwInfo.part}` : '') +
+         (fwInfo.build ? ` · 构建 ${fwInfo.build}` : ''), 'ok');
+
+  // 连上就先体检一次：把两个 OTA 分区各自的构建时间打出来。
+  await requestInfo();
 
   // 页面保持连接期间每 5 秒发一次 PING：既确认设备在线，也让设备端
   // 重置自动休眠计时，避免填文件的功夫设备先睡过去。
@@ -429,6 +504,7 @@ async function disconnect() {
 
     lineBuf = '';
     fwVersion = '';
+    fwInfo = { ver: '', build: '', part: '' };
     $('deviceInfo').textContent = '设备固件：--';
     btnConnect.disabled = false;
     btnDisconnect.disabled = true;
@@ -482,6 +558,8 @@ function updateButtons() {
   btnPick.disabled = busy;
   btnConnect.disabled = !!port || busy;
   btnDisconnect.disabled = !port || busy;
+  btnInfo.disabled = !port || busy;
+  btnReboot.disabled = !port || busy;
 }
 
 function setProgress(done, total, startMs) {
@@ -512,6 +590,9 @@ async function flash() {
   const startMs = Date.now();
 
   try {
+    // 记下升级前的身份，重连后对比编译时间戳判断是否真的换成了新固件。
+    lastFlashedFrom = { ...fwInfo };
+
     // 1. 进入升级模式。设备会先 Update.begin()，失败时回 OTA: ERR。
     const ready = waitFor(/^OTA: (READY|ERR)/, READY_TIMEOUT_MS, '等待设备进入升级模式');
     await sendLine(`OTA_BEGIN ${total} ${fileCrc.toString(16)}`);
@@ -537,11 +618,13 @@ async function flash() {
     await resultPromise;
     setProgress(total, total, startMs);
     setStatus('升级成功，设备重启中…', 'on');
-    addLog('升级成功，设备正在重启。重新连接后固件版本应更新。', 'ok');
-    await sleep(1500);
+    addLog('固件已写入并通过校验，设备正在重启。约 5 秒后再点“连接设备”，' +
+           '页面会对比构建时间确认是否真的换成了新固件。', 'ok');
+    await sleep(4000);
     await disconnect();
-    setStatus('升级完成', 'on');
+    setStatus('升级完成，请重新连接核实', 'on');
   } catch (err) {
+    lastFlashedFrom = null;
     const msg = err && err.message ? err.message : String(err);
     addLog('升级失败：' + msg, 'err');
     setStatus('升级失败', 'err');
@@ -557,6 +640,12 @@ async function flash() {
 // ── 事件绑定 ─────────────────────────────────────────────────
 btnConnect.addEventListener('click', connect);
 btnDisconnect.addEventListener('click', disconnect);
+btnInfo.addEventListener('click', () => { requestInfo(); });
+btnReboot.addEventListener('click', () => {
+  if (!port || busy) return;
+  if (!confirm('确定要重启设备吗？重启后需要重新点“连接设备”。')) return;
+  rebootDevice();
+});
 btnFlash.addEventListener('click', flash);
 btnPick.addEventListener('click', () => fileInput.click());
 btnClear.addEventListener('click', () => { logEl.textContent = ''; });
@@ -585,6 +674,8 @@ if ('serial' in navigator) {
 
 updateButtons();
 setStatus('未连接', '');
+$('pageVersion').textContent =
+  `页面版本：${PAGE_VERSION}（若与预期不符，请 Ctrl+Shift+R 强制刷新）`;
 </script>
 </body>
 </html>
