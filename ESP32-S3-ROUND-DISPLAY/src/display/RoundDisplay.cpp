@@ -90,7 +90,7 @@ bool RoundDisplay::begin() {
         heap_caps_malloc(bufferBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   }
   if (m_rotateBuffer == nullptr) {
-    CFG_LOG("[UI] rotation buffer unavailable, rotation disabled");
+    UI_LOG("rotation buffer unavailable, rotation disabled");
   }
 
   // 恢复上次 BOOT 键设置的旋转方向和滑动调过的亮度，开机第一帧即生效。
@@ -103,7 +103,7 @@ bool RoundDisplay::begin() {
     prefs.end();
   }
   if (m_rotation != 0) {
-    CFG_LOG("[UI] restored display rotation %u deg",
+    UI_LOG("restored display rotation %u deg",
             static_cast<unsigned>(m_rotation) * 90);
   }
 
@@ -125,7 +125,7 @@ void RoundDisplay::rotateClockwise() {
     return;
   }
   m_rotation = static_cast<uint8_t>((m_rotation + 1) & 0x03);
-  CFG_LOG("[UI] display rotation -> %u deg",
+  UI_LOG("display rotation -> %u deg",
           static_cast<unsigned>(m_rotation) * 90);
   // 立即写回 NVS，下次上电自动沿用这个方向。
   Preferences prefs;

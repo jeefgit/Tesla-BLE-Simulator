@@ -232,7 +232,7 @@ void startBootLogoAnimation() {
   lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
   lv_anim_set_exec_cb(&animation, bootLogoAnimate);
   lv_anim_start(&animation);
-  CFG_LOG("[UI] boot logo animation start");
+  UI_LOG("boot logo animation start");
 }
 
 void bootLogoFinished(lv_timer_t* timer) {
@@ -256,7 +256,7 @@ void bootRingTick(lv_timer_t* timer) {
     s_bootStartMs = millis();
     s_bootNextLogMs = 0;
     s_bootStarted = true;
-    CFG_LOG("[UI] boot ring animation start");
+    UI_LOG("boot ring animation start");
     startBootLogoAnimation();
   }
 
@@ -270,7 +270,7 @@ void bootRingTick(lv_timer_t* timer) {
   lv_arc_set_value(ring, s_bootPercent);
 
   if (elapsed >= s_bootNextLogMs) {
-    CFG_LOG("[UI] boot ring %lums fill=%ld%%",
+    UI_LOG("boot ring %lums fill=%ld%%",
             static_cast<unsigned long>(elapsed),
             static_cast<long>(s_bootPercent));
     s_bootNextLogMs = elapsed + 250;
@@ -278,7 +278,7 @@ void bootRingTick(lv_timer_t* timer) {
 
   if (s_bootPercent >= 100) {
     lv_timer_delete(timer);
-    CFG_LOG("[UI] boot ring animation finished");
+    UI_LOG("boot ring animation finished");
     lv_obj_t* layer = lv_obj_get_parent(ring);
     lv_timer_create(bootLogoFinished, kBootLogoHoldMs, layer);
   }

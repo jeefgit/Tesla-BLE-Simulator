@@ -89,7 +89,7 @@
 // 可选：定时唤醒兜底（0 = 关闭）；单位 ms。
 #define CFG_AUTO_SLEEP_TIMER_WAKE_MS 0
 
-// 后端诊断日志；Drive 请求耗时最多记录前 10 次响应。
+// 后端诊断日志（连接/握手/加密状态）。
 #define CFG_DEBUG_LOG 1
 #if CFG_DEBUG_LOG
 namespace cfglog {
@@ -112,6 +112,18 @@ bool muted();
       Serial.printf("[%.2fs] " fmt "\r\n", millis() / 1000.0f,   \
                     ##__VA_ARGS__);                              \
     }                                                            \
+  } while (0)
+#endif
+
+// [UI] 日志开关：0 = 关闭启动动画/旋转等 UI 日志（默认）；1 = 打开
+#ifndef CFG_UI_LOG
+#define CFG_UI_LOG 0
+#endif
+#if CFG_UI_LOG
+#define UI_LOG(...) CFG_LOG(__VA_ARGS__)
+#else
+#define UI_LOG(...) \
+  do {              \
   } while (0)
 #endif
 
@@ -193,4 +205,6 @@ bool muted();
 #define CFG_ELF_SOUND_BOUNCE_PX 20       // 弹跳最大行程
 #define CFG_ELF_SOUND_SWAY_PX 12         // 摇摆最大行程
 #define CFG_ELF_SOUND_LEVEL_GAIN 9       // ES7210 增益档位，每档 3dB：6=18dB，9=27dB，14=37.5dB（最大）
-#define CFG_ELF_SOUND_LOG 1              // 1 = 每 500ms 打印 level/bpm/conf
+#define CFG_ELF_SOUND_LOG 1              // 1 = 每 500ms 打印 level/bpm/conf（受下面总开关控制）
+// [AUDIO] 日志总开关：0 = 关闭全部音频日志（默认）；1 = 打开（含 ES7210 寄存器初始化、I2S 状态、运行统计）
+#define CFG_AUDIO_LOG 0

@@ -14,6 +14,19 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+// [AUDIO] 日志开关：默认关闭，避免启动/扫描时刷屏；
+// 排查麦克风或 I2S 时在 config.h 里打开 CFG_AUDIO_LOG。
+#ifndef CFG_AUDIO_LOG
+#define CFG_AUDIO_LOG 0
+#endif
+#if CFG_AUDIO_LOG
+#define AUDIO_LOG(...) CFG_LOG(__VA_ARGS__)
+#else
+#define AUDIO_LOG(...) \
+  do {                 \
+  } while (0)
+#endif
+
 // ES7210 + I2S TDM 双麦采集与特征提取（design/ELF-DESIGN.md §5.8–5.10）。
 //
 // 线程模型：
@@ -178,7 +191,7 @@ bool esWrite(uint8_t reg, uint8_t value, const char* note) {
   Wire.write(reg);
   Wire.write(value);
   const uint8_t err = Wire.endTransmission();
-  CFG_LOG("[AUDIO] es7210 0x%02X=0x%02X %-18s %s", reg, value, note,
+  AUDIO_LOG("es7210 0x%02X=0x%02X %-18s %s", reg, value, note,
           err == 0 ? "ok" : "NACK");
   return err == 0;
 }
@@ -204,7 +217,7 @@ i2s_chan_handle_t initI2s() {
   i2s_chan_handle_t rx = nullptr;
   esp_err_t err = i2s_new_channel(&chan_cfg, nullptr, &rx);
   if (err != ESP_OK) {
-    CFG_LOG("[AUDIO] i2s_new_channel failed: %s", esp_err_to_name(err));
+    AUDIO_LOG("i2s_new_channel failed: %s", esp_err_to_name(err));
     return nullptr;
   }
 
@@ -227,7 +240,7 @@ i2s_chan_handle_t initI2s() {
 
   err = i2s_channel_init_tdm_mode(rx, &cfg);
   if (err != ESP_OK) {
-    CFG_LOG("[AUDIO] i2s tdm init failed: %s", esp_err_to_name(err));
+    AUDIO_LOG("i2s tdm init failed: %s", esp_err_to_name(err));
     i2s_del_channel(rx);
     return nullptr;
   }
@@ -397,7 +410,7 @@ void logSlots(const TickStats& t, uint32_t now, Impl& s) {
   if (now - s.lastSlotLogMs < 250UL) return;
   s.lastSlotLogMs = now;
   const float inv = 1.0f / static_cast<float>(t.count);
-  CFG_LOG("[AUDIO] slot0=%d slot1=%d slot2=%d slot3=%d",
+  AUDIO_LOG("slot0=%d slot1=%d slot2=%d slot3=%d",
           static_cast<int>(sqrtf(t.slotSq[0] * inv) + 0.5f),
           static_cast<int>(sqrtf(t.slotSq[1] * inv) + 0.5f),
           static_cast<int>(sqrtf(t.slotSq[2] * inv) + 0.5f),
@@ -417,7 +430,7 @@ void analyzeTick(Impl& s, const TickStats& t, uint32_t now,
   } else if (!s.zeroLogged && now - s.startMs > 1000UL &&
              now - s.lastNonZeroMs >= 1000UL) {
     s.zeroLogged = true;
-    CFG_LOG("[AUDIO] all-zero samples (check ALDO1/MCLK=42/ES7210 regs)");
+    AUDIO_LOG("all-zero samples (check ALDO1/MCLK=42/ES7210 regs)");
   }
 
   // 32ms 滑窗 = 上一 tick + 本 tick（帧移 16ms）。
@@ -517,7 +530,7 @@ void analyzeTick(Impl& s, const TickStats& t, uint32_t now,
 #if CFG_ELF_SOUND_LOG
   if (now - s.lastLogMs >= 500UL) {
     s.lastLogMs = now;
-    CFG_LOG("[AUDIO] lvl=%u low=%u bpm=%u conf=%u beat=%u",
+    AUDIO_LOG("lvl=%u low=%u bpm=%u conf=%u beat=%u",
             static_cast<unsigned>(f.level), static_cast<unsigned>(f.low),
             static_cast<unsigned>(f.bpm), static_cast<unsigned>(f.confidence),
             s.logBeatSeen ? 1U : 0U);
@@ -554,11 +567,11 @@ void audioTask(void* arg) {
         if (now - s.lastReadFailureLogMs >= 5000UL) {
           s.lastReadFailureLogMs = now;
           if (err != ESP_OK) {
-            CFG_LOG("[AUDIO] i2s read failed: %s (%u total)",
+            AUDIO_LOG("i2s read failed: %s (%u total)",
                     esp_err_to_name(err),
                     static_cast<unsigned>(s.readFailureCount));
           } else {
-            CFG_LOG("[AUDIO] i2s short read: %u/%u bytes (%u total)",
+            AUDIO_LOG("i2s short read: %u/%u bytes (%u total)",
                     static_cast<unsigned>(bytesRead),
                     static_cast<unsigned>(kBlockBytes),
                     static_cast<unsigned>(s.readFailureCount));
@@ -589,7 +602,7 @@ bool SoundSensor::begin() {
   // 模拟模式：不初始化 ES7210、不配置 I2S，也不依赖 Wire 总线。
   m_impl = &g_impl;
   m_available = true;
-  CFG_LOG("[AUDIO] simulate mode: no ES7210/I2S, %u BPM pattern",
+  AUDIO_LOG("simulate mode: no ES7210/I2S, %u BPM pattern",
           static_cast<unsigned>(kSimBpm));
   return true;
 #else
@@ -620,18 +633,18 @@ bool SoundSensor::begin() {
 
   i2s_chan_handle_t rx = ok ? initI2s() : nullptr;
   if (rx == nullptr) {
-    CFG_LOG("[AUDIO] init failed (attempt %u/%u)",
+    AUDIO_LOG("init failed (attempt %u/%u)",
             static_cast<unsigned>(s.beginAttempts),
             static_cast<unsigned>(kMaxBeginAttempts));
     if (s.beginAttempts == kMaxBeginAttempts) {
-      CFG_LOG("[AUDIO] init retry limit reached");
+      AUDIO_LOG("init retry limit reached");
     }
     return false;
   }
 
   g_impl.rx = rx;
   m_available = true;
-  CFG_LOG("[AUDIO] es7210 ready (16k, TDM 4 slots, MCLK=GPIO42)");
+  AUDIO_LOG("es7210 ready (16k, TDM 4 slots, MCLK=GPIO42)");
   return true;
 #endif
 }
@@ -652,7 +665,7 @@ bool SoundSensor::start() {
   portEXIT_CRITICAL(&s.mux);
 
   m_running = true;
-  CFG_LOG("[AUDIO] simulate start");
+  AUDIO_LOG("simulate start");
   return true;
 #else
   if (m_running) return true;
@@ -662,7 +675,7 @@ bool SoundSensor::start() {
     s.taskRun = false;
     const esp_err_t disableErr = i2s_channel_disable(s.rx);
     if (disableErr != ESP_OK && disableErr != ESP_ERR_INVALID_STATE) {
-      CFG_LOG("[AUDIO] i2s disable failed: %s",
+      AUDIO_LOG("i2s disable failed: %s",
               esp_err_to_name(disableErr));
     }
     m_running = false;
@@ -670,14 +683,14 @@ bool SoundSensor::start() {
       vTaskDelay(pdMS_TO_TICKS(2));
     }
     if (s.task != nullptr) {
-      CFG_LOG("[AUDIO] previous task still running");
+      AUDIO_LOG("previous task still running");
       return false;
     }
   }
 
   esp_err_t err = i2s_channel_enable(s.rx);
   if (err != ESP_OK) {
-    CFG_LOG("[AUDIO] i2s enable failed: %s", esp_err_to_name(err));
+    AUDIO_LOG("i2s enable failed: %s", esp_err_to_name(err));
     return false;
   }
 
@@ -701,7 +714,7 @@ bool SoundSensor::start() {
     s.taskRun = false;
     s.task = nullptr;
     i2s_channel_disable(s.rx);
-    CFG_LOG("[AUDIO] task create failed");
+    AUDIO_LOG("task create failed");
     return false;
   }
 
@@ -726,7 +739,7 @@ void SoundSensor::stop() {
   if (m_running && s.rx != nullptr) {
     const esp_err_t err = i2s_channel_disable(s.rx);
     if (err != ESP_OK) {
-      CFG_LOG("[AUDIO] i2s disable failed: %s", esp_err_to_name(err));
+      AUDIO_LOG("i2s disable failed: %s", esp_err_to_name(err));
     }
   }
   m_running = false;
@@ -735,7 +748,7 @@ void SoundSensor::stop() {
     vTaskDelay(pdMS_TO_TICKS(2));
   }
   if (s.task != nullptr) {
-    CFG_LOG("[AUDIO] task stop timeout");
+    AUDIO_LOG("task stop timeout");
   }
 
   portENTER_CRITICAL(&s.mux);
@@ -797,7 +810,7 @@ SoundFrame SoundSensor::read() {
                                 ? "quiet"
                                 : (phase < kSimQuietMs + kSimListenMs ? "listen"
                                                                       : "beat");
-    CFG_LOG("[AUDIO][SIM] lvl=%u low=%u bpm=%u conf=%u beat=%u phase=%s",
+    AUDIO_LOG("[SIM] lvl=%u low=%u bpm=%u conf=%u beat=%u phase=%s",
             static_cast<unsigned>(f.level), static_cast<unsigned>(f.low),
             static_cast<unsigned>(f.bpm), static_cast<unsigned>(f.confidence),
             f.beat ? 1U : 0U, phaseName);
