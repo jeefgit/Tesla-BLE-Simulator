@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "config/VinStore.h"
 #include "display/RoundDisplay.h"
 #include "display/ScreenShot.h"
 #include "input/Cst9217Touch.h"
@@ -116,11 +117,22 @@ bool sameModel(const UiModel& a, const UiModel& b) {
          strcmp(a.vin, b.vin) == 0;
 }
 
+// 日志/事件只允许出现 VIN 后 6 位：长度不足时返回原串（不越界）。
+const char* vinTail(const char* vin) {
+  if (vin == nullptr) {
+    return "";
+  }
+  const size_t len = strlen(vin);
+  return len > 6 ? vin + (len - 6) : vin;
+}
+
 }  // namespace
 
 void DashboardApp::begin() {
   // 事件日志最优先初始化：后续初始化失败/复位原因都要能落盘。
   evtlog::begin();
+  // VIN 尽早加载：后续 UI 与 BLE 后端都读同一个生效值（NVS 优先）。
+  vinstore::begin();
   const esp_reset_reason_t resetReason = esp_reset_reason();
   if (resetReason != ESP_RST_POWERON && resetReason != ESP_RST_SW &&
       resetReason != ESP_RST_DEEPSLEEP) {
@@ -136,6 +148,15 @@ void DashboardApp::begin() {
   Serial.printf("Display ready, free heap: %u bytes\n", ESP.getFreeHeap());
   dashboard.begin();
   Serial.printf("UI built, free heap: %u bytes\n", ESP.getFreeHeap());
+  // VIN 编辑器取消（X 键）：只关闭并强制补一帧，不写 NVS。
+  dashboard.vinEditorSetCancelHandler([this]() {
+    dashboard.vinEditorHide();
+    m_hasRenderedModel = false;
+    m_power.notifyUserActivity();
+  });
+  // VIN 编辑器提交（OK 键）：校验已在 UI 侧完成，这里负责写 NVS 与延时重启。
+  dashboard.vinEditorSetSubmitHandler(
+      [this](const char* vin) { handleVinSubmit(vin); });
   // 浮层必须在仪表和开机动画之后建，才能盖在所有页面之上。
   m_elf.begin();
 #if !CFG_DEMO_MODE
@@ -275,14 +296,32 @@ void DashboardApp::pollTouch() {
   int16_t rawX = 0;
   int16_t rawY = 0;
   const bool pressed = m_touch.poll(rawX, rawY);
+  // VIN 编辑器打开时独占触摸：只处理按键点击，不做亮度/小精灵/截图手势。
+  const bool vinEditing = dashboard.vinEditorVisible();
   if (!pressed) {
     if (m_touchDown) {
       m_touchDown = false;
       m_touchHorizontal = false;
+      // 长按已经打开 VIN 编辑器：松手只清理手势状态，绝不触发截图/轻点/按键。
+      if (m_longPressConsumed) {
+        m_longPressConsumed = false;
+        m_swipeActive = false;
+        m_elfSwipeLatched = false;
+        return;
+      }
       // 小精灵可见时：松手 600ms 后视线回到随机游走；几乎没移动则算轻点。
       const int32_t travel =
           max(abs(m_touchLastX - m_touchStartX),
               abs(m_touchLastY - m_touchStartY));
+      if (vinEditing) {
+        // 只有轻点才交给编辑器命中测试；不触发双击截图/小精灵轻点/亮度保存。
+        if (travel < CFG_VIN_TAP_PX) {
+          dashboard.vinEditorHandleTap(m_touchLastX, m_touchLastY);
+        }
+        m_swipeActive = false;
+        m_elfSwipeLatched = false;
+        return;
+      }
       if (m_elf.visible()) {
         m_elf.touchEnd();
         if (travel < CFG_ELF_TAP_PX) {
@@ -318,10 +357,21 @@ void DashboardApp::pollTouch() {
     m_elfSwipeLatched = false;
     m_touchStartX = rawX;
     m_touchStartY = rawY;
+    m_touchStartMs = millis();
+    m_longPressConsumed = false;
+    // 编辑器打开时：按下只记录起点并 return，不呼小精灵、不启动亮度手势。
+    if (vinEditing) {
+      return;
+    }
     // 小精灵可见时，按下也算一次交互（并让眼睛立刻看向按下的位置）。
     if (m_elf.visible()) {
       m_elf.lookAt(rawX, rawY);
     }
+    return;
+  }
+
+  // 编辑器打开时：移动只算用户活动，松手才在上一分支做按键命中。
+  if (vinEditing) {
     return;
   }
 
@@ -331,6 +381,19 @@ void DashboardApp::pollTouch() {
   if (m_elf.visible()) {
     m_elf.lookAt(rawX, rawY);
   }
+#if CFG_VIN_INPUT_ENABLE
+  // 仪表页顶部静止长按 → VIN 编辑器。位移一旦超过容差就交回原有手势，
+  // 因此不会和亮度滑动（纵向 24px）/小精灵横滑（60px）互相抢占。
+  const uint32_t now = millis();
+  if (!m_longPressConsumed && m_model.link == UiLinkState::Ready &&
+      now - m_touchStartMs >= CFG_VIN_LONG_PRESS_MS &&
+      abs(dx) < CFG_VIN_TAP_PX && abs(dy) < CFG_VIN_TAP_PX &&
+      m_touchStartY < CFG_VIN_TOP_ZONE_PX) {
+    m_longPressConsumed = true;
+    openVinEditor();
+    return;
+  }
+#endif
   // 已进入亮度手势：跟手调节亮度。
   if (m_swipeActive) {
     // 上滑（画面坐标 y 减小）调亮，下滑调暗；亮度实时跟手变化。
@@ -382,6 +445,12 @@ void DashboardApp::pollTouch() {
 }
 
 void DashboardApp::handleTap(int16_t x, int16_t y) {
+  // 链接页 VIN 行热区（LVGL 逻辑坐标，见设计 5.2）：优先于双击截图判定。
+  if (dashboard.linkPageVisible() && x >= 34 && x <= 432 && y >= 344 &&
+      y <= 390) {
+    openVinEditor();
+    return;
+  }
   const uint32_t now = millis();
   const bool inWindow =
       m_lastTapValid && (now - m_lastTapMs) <= CFG_SCREENSHOT_DOUBLE_TAP_MS &&
@@ -400,6 +469,55 @@ void DashboardApp::handleTap(int16_t x, int16_t y) {
   screenshot::dumpToSerial(display.rotation());
 }
 
+void DashboardApp::openVinEditor() {
+#if !CFG_VIN_INPUT_ENABLE
+  // 设备端输入关闭：不创建编辑器对象，链接页热区与长按入口都直接失效。
+  return;
+#else
+  // Boot 动画层盖住整个屏幕，期间的点击都是盲点，不打开编辑器。
+  if (dashboard.bootAnimationRunning()) {
+    return;
+  }
+  if (m_elf.visible()) {
+    m_elf.hide();
+  }
+  // 关闭后靠这一标志强制补画一帧，避免显示编辑器期间的旧数据。
+  m_hasRenderedModel = false;
+  m_power.notifyUserActivity();
+  dashboard.vinEditorShow(vinstore::current());
+#endif
+}
+
+void DashboardApp::handleVinSubmit(const char* vin) {
+  // 已安排重启：忽略重复提交，避免再次写 NVS/重置计时。
+  if (m_vinRestartAt != 0) {
+    return;
+  }
+  if (vin == nullptr) {
+    return;
+  }
+  // 没改动：直接关闭，不写 NVS、不重启。
+  if (strcmp(vin, vinstore::current()) == 0) {
+    dashboard.vinEditorHide();
+    m_hasRenderedModel = false;
+    m_power.notifyUserActivity();
+    return;
+  }
+
+  const vinstore::Error err = vinstore::save(vin);
+  if (err != vinstore::Error::None) {
+    // 留在编辑器里显示错误，重启计时不启动。
+    dashboard.vinEditorSetError(vinstore::errorText(err));
+    EVT_LOGE("VIN", "save failed err=%u", static_cast<unsigned>(err));
+    return;
+  }
+
+  // 只记录尾号，禁止完整 VIN 进串口/事件日志。
+  EVT_LOGI("VIN", "updated tail=%s", vinTail(vin));
+  dashboard.vinEditorShowSaved();
+  m_vinRestartAt = millis() + CFG_VIN_RESTART_DELAY_MS;
+}
+
 void DashboardApp::setModel(const UiModel& model) { m_model = model; }
 
 void DashboardApp::loop() {
@@ -408,6 +526,14 @@ void DashboardApp::loop() {
   if (!m_initialized) {
     delay(1000);
     return;
+  }
+  // VIN 保存后的延时重启：放在初始化检查之后，确保每轮必达且只触发一次。
+  // 重启前编辑器保持可见、BLE 轮询仍暂停，先把事件日志完整落盘。
+  if (m_vinRestartAt != 0 &&
+      static_cast<int32_t>(millis() - m_vinRestartAt) >= 0) {
+    evtlog::flush();
+    Serial.flush();
+    ESP.restart();
   }
   pollBootButton();
   pollPowerButton();
@@ -425,12 +551,17 @@ void DashboardApp::loop() {
     m_hasRenderedModel = false;
   }
   m_elfWasVisible = elfVisible;
+  // VIN 编辑期间暂停 BLE 轮询/数据刷新与仪表重绘，每轮 notify 防自动休眠。
+  const bool vinEditing = dashboard.vinEditorVisible();
+  if (vinEditing) {
+    m_power.notifyUserActivity();
+  }
 #if !CFG_DEMO_MODE
-  if (!m_sourceStarted && !dashboard.bootAnimationRunning()) {
+  if (!vinEditing && !m_sourceStarted && !dashboard.bootAnimationRunning()) {
     m_source.begin();
     m_sourceStarted = true;
   }
-  if (m_sourceStarted && !elfVisible) {
+  if (!vinEditing && m_sourceStarted && !elfVisible) {
     // 小精灵显示期间完全停止 BLE 轮询：不再获取驾驶数据，小精灵只跑本地动画。
     // 隐藏（含 Hiding 动画结束）后恢复轮询，并靠 m_hasRenderedModel=false
     // 强制补画一帧最新数据。
@@ -440,7 +571,8 @@ void DashboardApp::loop() {
 #endif
   // 车辆状态只在仪表模式同步给浮层（阶段 4 的充电打哈欠/车速瞳孔/急减速眯眼）。
   // 小精灵显示期间不更新：m_model 已冻结，避免用陈旧数据继续驱动联动。
-  if (!elfVisible) {
+  // VIN 编辑期间同样冻结（m_model 不刷新）。
+  if (!elfVisible && !vinEditing) {
     m_elf.setVehicleState(m_model.speedKmh, m_model.speedValid, m_model.charging);
   }
 #if CFG_ELF_SOUND_ENABLE
@@ -474,8 +606,9 @@ void DashboardApp::loop() {
   const uint32_t now = millis();
   // The boot overlay hides everything, so redrawing the dashboard for its
   // duration would only compete with the ring animation and the BLE stack.
-  // 小精灵可见时同样暂停仪表重绘（数据照常更新，退出时补一帧）。
-  if (!dashboard.bootAnimationRunning() && !m_elf.visible() &&
+  // 小精灵可见时同样暂停仪表重绘（数据照常更新，退出时补一帧）；
+  // VIN 编辑期间也不重绘，避免旧数据盖到编辑层下方。
+  if (!dashboard.bootAnimationRunning() && !m_elf.visible() && !vinEditing &&
       now - m_lastRenderMs >= 50) {
     const float speedInputKmh =
         m_model.speedValid ? m_model.speedKmh : 0.0f;

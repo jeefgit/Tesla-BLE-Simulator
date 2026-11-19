@@ -4,9 +4,17 @@
 #include <string.h>
 
 #include "config.h"
+#include "config/VinStore.h"
 #include "log/EventLog.h"
 
 namespace {
+
+// 日志脱敏：只返回最后 6 个字符；不足 6 位时返回原串。禁止打印完整 VIN。
+const char* tail6(const char* vin) {
+  if (vin == nullptr) return "";
+  const size_t n = strlen(vin);
+  return n > 6 ? vin + (n - 6) : vin;
+}
 
 const char* linkName(UiLinkState link) {
   switch (link) {
@@ -79,11 +87,19 @@ UiPairingPhase toUiPairing(PairingHint::Phase phase) {
 
 void TeslaUiSource::begin() {
   m_stateSinceMs = millis();
+
+  // VIN 优先级由 vinstore 决定（NVS 覆盖 > 出厂默认），后端也注入同一个值。
+  const char* vin = vinstore::current();
   m_model.vin[0] = '\0';
-  if (strlen(CFG_TESLA_VIN) < sizeof(m_model.vin)) {
-    strncpy(m_model.vin, CFG_TESLA_VIN, sizeof(m_model.vin) - 1);
+  if (strlen(vin) < sizeof(m_model.vin)) {
+    strncpy(m_model.vin, vin, sizeof(m_model.vin) - 1);
     m_model.vin[sizeof(m_model.vin) - 1] = '\0';
   }
+  if (vin[0] != '\0') {
+    EVT_LOGI("VIN", "apply tail=%s", tail6(vin));
+  }
+
+  m_backend.setVin(vin);
   m_backend.begin();
 }
 

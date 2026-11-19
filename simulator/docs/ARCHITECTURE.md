@@ -116,6 +116,9 @@ build_flags = ${env.build_flags} -DBOARD_ESP32S3_4848S040
   `state()`、`status()`。
 - VIN、密钥和可覆盖参数通过项目 `include/tesla_backend_user_config.h` 配置；
   本仪表通过该文件转引自己的 `config.h`。
+- 圆屏固件（`ESP32-S3-ROUND-DISPLAY`）支持在设备端输入 VIN 并写入 NVS，
+  启动时用该运行期值覆盖编译期默认值；其他工程仍使用
+  `tesla_backend_user_config.h` 中的 `CFG_TESLA_VIN`。
 - 该库尚未拆成独立 Git 仓库，其他工程可复制库目录或将其父目录加入 `lib_extra_dirs`；
   发布/直接 Git 依赖需后续独立打包。
 

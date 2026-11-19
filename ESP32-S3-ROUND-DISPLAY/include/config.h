@@ -13,10 +13,23 @@
 // ---------------------------------------------------------------------------
 // TeslaBleBackend 配置（tesla_backend_user_config.h 会包含本文件）
 // ---------------------------------------------------------------------------
+// 出厂默认 VIN。设备上输入并保存后，NVS 覆盖值优先于这里。
 #define CFG_TESLA_VIN "LRWYGCFJ8RC571213"
 
 // 留空 = 由 VIN 推导广播名：S + sha1(VIN) 前 16 位 hex + C
 #define CFG_TESLA_NAME ""
+
+// ---------------------------------------------------------------------------
+// 设备端 VIN 输入（design/VIN-INPUT-DESIGN.md）
+//   NVS "tesla/vin" 覆盖 CFG_TESLA_VIN；保存后自动重启生效。
+// ---------------------------------------------------------------------------
+// 0 = 不创建编辑器、不响应入口手势；仍读取 NVS（只读）。
+#define CFG_VIN_INPUT_ENABLE 1
+#define CFG_VIN_LONG_PRESS_MS 1200   // 仪表页长按顶部进入编辑
+#define CFG_VIN_TAP_PX 20            // 轻点/长按允许的位移
+#define CFG_VIN_TOP_ZONE_PX 70       // 长按入口的顶部区域
+#define CFG_VIN_RESTART_DELAY_MS 900
+#define CFG_VIN_STRICT_ISO 0         // 1 = 拒绝 I/O/Q
 
 // 1 = 车端原始值为英里，解析时换算成公里（真车）
 #define CFG_TESLA_UNITS_MILES 1

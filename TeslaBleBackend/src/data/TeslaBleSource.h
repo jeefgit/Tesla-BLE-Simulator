@@ -20,10 +20,15 @@ class TeslaBleSource : public IVehicleSource {
   void begin() override;
   void loop() override;
 
+  // 必须在 begin() 前调用；空指针/空串则回退 CFG_TESLA_VIN。
+  void setVin(const char* vin);
+
   const VehicleState& state() const override { return g_vehicle; }
   SourceStatus status() const override;
 
  private:
   BleLink m_link;
   TeslaClient m_client;
+  // 运行期 VIN：上层（固件 vinstore）注入，后端库不直接依赖固件配置模块。
+  String m_vin;
 };

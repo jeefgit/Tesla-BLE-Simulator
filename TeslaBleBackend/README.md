@@ -53,5 +53,14 @@ Call `loop()` frequently from the Arduino main loop. `state()` and `status()`
 return read-only snapshots suitable for any board-specific UI or telemetry
 consumer.
 
+VIN is a runtime parameter:
+
+- `TeslaBleSource::setVin(const char* vin)` must be called before `begin()`.
+  A null pointer or empty string falls back to `CFG_TESLA_VIN`.
+- `TeslaClient::begin(BleLink* link, const char* vin)` receives the same VIN;
+  an empty value also falls back to `CFG_TESLA_VIN`.
+- Changing the VIN requires calling `begin()` again (typically after a reboot).
+  Hot-switching a live connection is not implemented.
+
 This library is currently kept as a subdirectory of the simulator repository.
 It is not yet a standalone PlatformIO Registry package or Git repository.

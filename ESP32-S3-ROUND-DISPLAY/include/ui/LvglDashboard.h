@@ -2,6 +2,9 @@
 
 #include <lvgl.h>
 
+#include <functional>
+#include <stdint.h>
+
 #include "core/UiModel.h"
 #include "ui/IDashboard.h"
 
@@ -14,6 +17,24 @@ class LvglDashboard : public IDashboard {
   // skip redrawing widgets nobody can see, which keeps the boot animation
   // smooth and leaves the CPU/BLE stack alone during startup.
   bool bootAnimationRunning() const;
+  // True while the link/scan page is on screen. The app uses this to decide
+  // whether a tap may fall on the VIN row.
+  bool linkPageVisible() const;
+
+  // VIN editor overlay. Pure UI: it edits a local buffer and reports submit /
+  // cancel through callbacks; NVS writes and restart stay in the app.
+  void vinEditorShow(const char* initialVin);
+  void vinEditorHide();
+  bool vinEditorVisible() const { return m_vinEditorVisible; }
+
+  // Returns true when the editor consumed the touch (hit or not).
+  bool vinEditorHandleTap(int16_t x, int16_t y);
+
+  void vinEditorSetError(const char* text);
+  void vinEditorShowSaved();
+
+  void vinEditorSetSubmitHandler(std::function<void(const char*)> handler);
+  void vinEditorSetCancelHandler(std::function<void()> handler);
 
  private:
   void buildGauge();
@@ -25,6 +46,11 @@ class LvglDashboard : public IDashboard {
   void buildPairingPage();
   void buildDoorPage();
   void buildBootAnimation();
+  void buildVinEditor();
+  void vinEditorSetLayout(bool numeric);
+  void vinEditorRefresh();
+  int vinHitKey(int16_t x, int16_t y) const;
+  void vinEditorSubmitOrError();
   void startLinkAnimation();
   void stopLinkAnimation();
   void startPairAnimation();
@@ -69,6 +95,8 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_linkTitle = nullptr;
   lv_obj_t* m_linkSubtitle = nullptr;
   lv_obj_t* m_linkMeta = nullptr;
+  lv_obj_t* m_linkVin = nullptr;
+  lv_obj_t* m_linkVinHint = nullptr;
   lv_obj_t* m_scanArcOuter = nullptr;
   lv_obj_t* m_scanArcInner = nullptr;
   lv_obj_t* m_scanPulse = nullptr;
@@ -94,4 +122,21 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_bootLayer = nullptr;
   lv_obj_t* m_bootRing = nullptr;
   lv_obj_t* m_bootEmblem = nullptr;
+
+  // VIN editor: created once in begin() above the boot layer, shown on demand.
+  lv_obj_t* m_vinEditor = nullptr;
+  lv_obj_t* m_vinTitle = nullptr;
+  lv_obj_t* m_vinText = nullptr;
+  lv_obj_t* m_vinCounter = nullptr;
+  lv_obj_t* m_vinStatus = nullptr;
+  lv_obj_t* m_vinKeys[30] = {};
+  lv_obj_t* m_vinKeyLabels[30] = {};
+  bool m_vinKeyVisible[30] = {};
+  bool m_vinEditorVisible = false;
+  bool m_vinNumericLayout = false;
+  char m_vinEdit[18] = {};
+  uint8_t m_vinEditLen = 0;
+  char m_vinStatusText[32] = {};
+  std::function<void(const char*)> m_vinSubmitHandler;
+  std::function<void()> m_vinCancelHandler;
 };

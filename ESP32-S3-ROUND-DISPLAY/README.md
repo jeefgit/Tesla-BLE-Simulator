@@ -476,13 +476,26 @@ deep sleep 下 PWR 键不能唤醒 ESP32：PWR 只接 AXP2101 / TCA9554，不在
 BLE 配置在 `include/config.h`：
 
 ```cpp
-#define CFG_TESLA_VIN "LRWYGCFJ8RC571213"
+#define CFG_TESLA_VIN "LRWYGCFJ8RC571213"  // 出厂默认 VIN，可被设备端 NVS 值覆盖
 #define CFG_TESLA_NAME ""        // 留空 = 由 VIN 推导广播名
 #define CFG_TESLA_UNITS_MILES 1  // 真车速度/续航原始单位为英里
 #define CFG_TESLA_CRYPTO 1       // 加密握手 + GetVehicleData
 #define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 100  // 驾驶状态轮询间隔
 #define CFG_DEBUG_LOG 1          // 联调日志，稳定后可改 0
 ```
+
+`CFG_TESLA_VIN` 只是**出厂默认值**。圆屏设备可以直接在机器上输入 VIN 并保存到
+NVS，保存后自动重启生效，无需重新编译：
+
+- 入口：链接页（未 Ready / 断连）点击底部 VIN 行；仪表 Ready 页顶部
+  （`y < 70`）长按约 1.2s。
+- 只接受 17 位 `A-Z`、`0-9`；保存成功后约 900ms 自动重启。
+- VIN 在断电、重启和 USB OTA 升级后保留；擦除 NVS 或恢复出厂设置后回到
+  `CFG_TESLA_VIN`。
+- 串口与事件日志只显示 VIN 后 6 位，不打印完整 VIN。
+- `CFG_TESLA_NAME` 非空时会覆盖由 VIN 推导的广播名，此时修改 VIN
+  **不会改变扫描目标**；保持留空即可让广播名跟随 VIN。
+- OTA 升级过程中不要同时编辑 VIN。
 
 串口日志会输出前 10 次 Drive 请求从发送到收到响应的耗时（毫秒）及故障码；
 请求仍保持串行，因此实际刷新间隔还受车端响应速度影响。

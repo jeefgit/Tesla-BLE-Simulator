@@ -24,7 +24,9 @@
 // ---------------------------------------------------------------------------
 class TeslaClient {
  public:
-  void begin(BleLink* link);
+  // VIN 为运行期参数：空指针/空串时回退 CFG_TESLA_VIN。
+  // Phase 2 可选热切换（setVin）本期不实现，变更 VIN 需要重新 begin()。
+  void begin(BleLink* link, const char* vin);
   void loop();
 
   // 由 BleLink 的 RxHandler 调用，喂入原始字节

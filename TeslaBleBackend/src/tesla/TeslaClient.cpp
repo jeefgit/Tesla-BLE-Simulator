@@ -31,6 +31,13 @@ void formatHexPrefix(char* out, size_t outSize, const uint8_t* p, size_t n) {
   }
 }
 
+// 日志脱敏：只返回最后 6 个字符；不足 6 位时返回原串。禁止打印完整 VIN。
+const char* tail6(const char* vin) {
+  if (vin == nullptr) return "";
+  const size_t n = strlen(vin);
+  return n > 6 ? vin + (n - 6) : vin;
+}
+
 // 诊断日志用的请求名（与 GetVehicleData 子消息一一对应）
 const char* requestName(TeslaCrypto::VehicleDataRequest r) {
   switch (r) {
@@ -326,7 +333,7 @@ bool decodeTirePressureState(pb::Reader& r) {
 
 }  // namespace
 
-void TeslaClient::begin(BleLink* link) {
+void TeslaClient::begin(BleLink* link, const char* vin) {
   m_link = link;
   m_len = 0;
   m_packets = 0;
@@ -338,7 +345,9 @@ void TeslaClient::begin(BleLink* link) {
   m_nextActionAt = 0;
   m_bypassIgnoredLogged = false;
 
-  m_crypto.begin(String(CFG_TESLA_VIN));
+  // 运行期 VIN：未提供时回退出厂默认值；TeslaCrypto::begin() 内部 reset()。
+  const char* effective = (vin && vin[0] != '\0') ? vin : CFG_TESLA_VIN;
+  m_crypto.begin(String(effective));
   m_crypto.setResponseHandler([this](const uint8_t* p, size_t n, uint32_t fault) {
     onCryptoResponse(p, n, fault);
   });
@@ -350,8 +359,9 @@ void TeslaClient::begin(BleLink* link) {
       });
 
 #if CFG_TESLA_CRYPTO
-  CFG_LOG("特斯拉加密协议栈就绪 VIN=%s（握手后改用加密 GetVehicleData 轮询）",
-          CFG_TESLA_VIN);
+  // 只打印尾号，避免完整 VIN 进入串口日志。
+  CFG_LOG("特斯拉加密协议栈就绪 VIN 尾号=%s（握手后改用加密 GetVehicleData 轮询）",
+          tail6(effective));
 #else
   CFG_LOG("特斯拉协议层就绪（加密关闭），只接收 %u 字节 SimPayload 帧",
           (unsigned)kFrame);

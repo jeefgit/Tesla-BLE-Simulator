@@ -1,6 +1,6 @@
 # 车辆 VIN 运行时输入设计（圆屏固件）
 
-> 状态：设计稿，未实现  
+> 状态：Phase 1 已实现  
 > 目标工程：`ESP32-S3-ROUND-DISPLAY`（466×466 圆屏、CST9217 触摸）  
 > 后端库：`TeslaBleBackend`（`TeslaBleSource` / `TeslaClient` / `TeslaCrypto`）  
 > 关联文档：`simulator/docs/PAIRING.md`、`simulator/docs/ARCHITECTURE.md`

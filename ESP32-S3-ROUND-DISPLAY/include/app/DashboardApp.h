@@ -26,6 +26,10 @@ class DashboardApp {
   void beginTouch();
   void pollTouch();
   void handleTap(int16_t x, int16_t y);
+  // 打开 VIN 编辑器：暂停 BLE 轮询与仪表重绘（见 VIN-INPUT-DESIGN.md 5.6）。
+  void openVinEditor();
+  // 编辑器 OK 键提交：写 NVS 并安排延时重启（见 VIN-INPUT-DESIGN.md 5.7）。
+  void handleVinSubmit(const char* vin);
 
 #if !CFG_DEMO_MODE
   TeslaUiSource m_source;
@@ -47,12 +51,17 @@ class DashboardApp {
   int16_t m_touchLastY = 0;
   int16_t m_swipeAnchorY = 0;
   uint8_t m_swipeBaseBrightness = 0;
+  // 仪表页顶部静止长按进入 VIN 编辑（见 VIN-INPUT-DESIGN.md 5.1 / 5.6）。
+  uint32_t m_touchStartMs = 0;
+  bool m_longPressConsumed = false;
   // 双击截图：记录上一次轻点的时间和位置，第二次轻点落在时间/位置窗口内
   // 就触发一次串口截图。
   bool m_lastTapValid = false;
   uint32_t m_lastTapMs = 0;
   int16_t m_lastTapX = 0;
   int16_t m_lastTapY = 0;
+  // VIN 保存成功后延时重启的时刻；0 = 无待重启（见设计 5.7）。
+  uint32_t m_vinRestartAt = 0;
   bool m_pwrAvailable = false;
   bool m_pwrArmed = false;
   bool m_pwrRawPressed = false;
