@@ -27,6 +27,10 @@
   } while (0)
 #endif
 
+#ifndef CFG_ELF_SOUND_ONSET_FULL_THRESHOLD
+#define CFG_ELF_SOUND_ONSET_FULL_THRESHOLD 0.35f
+#endif
+
 // ES7210 + I2S TDM 双麦采集与特征提取（design/ELF-DESIGN.md §5.8–5.10）。
 //
 // 线程模型：
@@ -57,9 +61,13 @@ constexpr float kLowFloorDb = -50.0f;
 // 200ms 电平平滑、1.5s 低频基线。
 constexpr float kLevelSmoothAlpha = 0.08f;
 constexpr float kBaselineAlpha = 0.011f;
+// 起音包络：快攻慢放，能抓住手机外放那种没有多少低频的鼓点。
+// attack ≈ 25ms、release ≈ 220ms（16ms tick）。
+constexpr float kEnvAttackAlpha = 0.55f;
+constexpr float kEnvReleaseAlpha = 0.07f;
 // 基线不为 0，避免静音时 onset 被放大器底噪拉爆。
-constexpr float kOnsetEps = 60.0f;
-constexpr uint32_t kWarmupMs = 3000UL;
+constexpr float kOnsetEps = 15.0f;
+constexpr uint32_t kWarmupMs = 1500UL;
 constexpr uint32_t kDiscardTicks = 8;  // 约 130ms，等偏置/高通稳定
 constexpr uint32_t kBpmSwitchMs = 1000UL;
 constexpr uint32_t kBeginRetryMs = 5000UL;
@@ -153,6 +161,11 @@ struct Impl {
   uint32_t prevCount = 0;
   float levelSmooth = 0;
   float baseline = 0;
+  // 全带起音包络 + 基线：手机外放几乎没有 180Hz 以下能量，
+  // 只靠低频会漏拍，所以再用全带包络补一路起音。
+  float lowEnv = 0;
+  float fullEnv = 0;
+  float fullBaseline = 0;
 
   bool haveOnset = false;
   float onsetPrev = 0;
@@ -257,6 +270,9 @@ void resetAnalysis(Impl& s) {
   s.prevCount = 0;
   s.levelSmooth = 0;
   s.baseline = 0;
+  s.lowEnv = 0;
+  s.fullEnv = 0;
+  s.fullBaseline = 0;
   s.haveOnset = false;
   s.onsetPrev = 0;
   s.onsetPrev2 = 0;
@@ -352,13 +368,23 @@ void updateConfidence(Impl& s) {
         static_cast<uint8_t>((s.ioiPos + 8 - 3 + i) % 8);
     v[i] = s.ioi[idx];
   }
-  const float mean = (v[0] + v[1] + v[2]) / 3.0f;
-  float maxDev = 0;
-  for (uint8_t i = 0; i < 3; ++i) {
-    const float d = fabsf(static_cast<float>(v[i]) - mean);
-    if (d > maxDev) maxDev = d;
+  // 用中位数 + 平均绝对偏差：偶发的多检/漏检（八分音符、切分）不会
+  // 像“均值 + 最大偏差”那样把置信度一次打到 0。
+  for (uint8_t i = 1; i < 3; ++i) {
+    const uint16_t key = v[i];
+    int8_t j = static_cast<int8_t>(i - 1);
+    while (j >= 0 && v[j] > key) {
+      v[j + 1] = v[j];
+      --j;
+    }
+    v[j + 1] = key;
   }
-  const float ratio = maxDev / (mean > 0.0f ? mean : 1.0f);
+  const float med = static_cast<float>(v[1]);
+  const float mad = (fabsf(static_cast<float>(v[0]) - med) +
+                     fabsf(static_cast<float>(v[1]) - med) +
+                     fabsf(static_cast<float>(v[2]) - med)) /
+                    3.0f;
+  const float ratio = mad / (med > 0.0f ? med : 1.0f);
   // ±25% 内视为“稳定”，比值越小置信度越高。
   float c;
   if (ratio <= 0.25f) {
@@ -389,8 +415,9 @@ void accumulate(Impl& s, const int16_t* buf, size_t frames, TickStats& t) {
     t.slotSq[3] += static_cast<float>(s3) * s3;
     if (s0 != 0 || s1 != 0 || s2 != 0 || s3 != 0) t.nonZero = true;
 
-    // slot0 = MIC1、slot2 = MIC2；两路平均抑制单麦被遮挡。
-    const float x = 0.5f * static_cast<float>(s0 + s2);
+    // slot0 = MIC1、slot2 = MIC2；两路相加而不是平均：
+    // 双麦时信号 +6dB，单麦被遮挡/某一路为 0 时也不会平白损失 6dB。
+    const float x = static_cast<float>(s0) + static_cast<float>(s2);
     const float y = x - s.dcX + kDcBlockR * s.dcY;
     s.dcX = x;
     s.dcY = y;
@@ -459,17 +486,30 @@ void analyzeTick(Impl& s, const TickStats& t, uint32_t now,
       clampf((lowDb - kLowFloorDb) * (255.0f / -kLowFloorDb), 0.0f, 255.0f) +
       0.5f);
 
-  // 1.5s 慢速基线 + onset。
-  s.baseline += (lowRms - s.baseline) * kBaselineAlpha;
-  float onset = lowRms / (s.baseline + kOnsetEps) - 1.0f;
-  if (onset < 0.0f) onset = 0.0f;
+  // 起音包络：快攻慢放。低频和全带各跟一路，归一化后取较大者，
+  // 这样手机外放（几乎没有 180Hz 以下能量）也能稳定抓到拍点。
+  s.lowEnv += (lowRms - s.lowEnv) *
+              (lowRms > s.lowEnv ? kEnvAttackAlpha : kEnvReleaseAlpha);
+  s.fullEnv += (fullRms - s.fullEnv) *
+               (fullRms > s.fullEnv ? kEnvAttackAlpha : kEnvReleaseAlpha);
+
+  // 1.5s 慢速基线 + onset（基线跟随包络，而不是瞬时 RMS）。
+  s.baseline += (s.lowEnv - s.baseline) * kBaselineAlpha;
+  s.fullBaseline += (s.fullEnv - s.fullBaseline) * kBaselineAlpha;
+  float onsetLow = s.lowEnv / (s.baseline + kOnsetEps) - 1.0f;
+  if (onsetLow < 0.0f) onsetLow = 0.0f;
+  float onsetFull = s.fullEnv / (s.fullBaseline + kOnsetEps) - 1.0f;
+  if (onsetFull < 0.0f) onsetFull = 0.0f;
+  // 归一化起音分数：>1 表示至少有一路超过阈值。
+  const float onset =
+      fmaxf(onsetLow / CFG_ELF_SOUND_ONSET_THRESHOLD,
+            onsetFull / CFG_ELF_SOUND_ONSET_FULL_THRESHOLD);
 
   const bool warmup = (now - s.startMs) < kWarmupMs;
   bool newBeat = false;
 
   // 延迟 1 帧峰值确认：前一帧大于更前一帧，且不小于当前帧。
-  if (!warmup && s.haveOnset &&
-      s.onsetPrev > CFG_ELF_SOUND_ONSET_THRESHOLD &&
+  if (!warmup && s.haveOnset && s.onsetPrev > 1.0f &&
       s.onsetPrev > s.onsetPrev2 && s.onsetPrev >= onset &&
       s.levelPrev > static_cast<float>(CFG_ELF_SOUND_NOISE_GATE)) {
     const uint32_t beatMs = now - CFG_ELF_SOUND_HOP_MS;

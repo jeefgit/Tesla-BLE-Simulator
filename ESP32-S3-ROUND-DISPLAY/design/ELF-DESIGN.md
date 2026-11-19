@@ -522,7 +522,8 @@ if (elfVisible) {
 #define CFG_ELF_SOUND_BEAT_REFRACTORY_MS 200UL  // 两拍最小间隔
 #define CFG_ELF_SOUND_BEAT_CONFIRM 2     // 1.2s 内至少几拍才进 Grooving
 #define CFG_ELF_SOUND_MIN_CONFIDENCE 60  // 进入 Grooving 的最低节拍置信度（0–255）
-#define CFG_ELF_SOUND_ONSET_THRESHOLD 0.30f  // 节拍起音阈值；越低越灵敏
+#define CFG_ELF_SOUND_ONSET_THRESHOLD 0.18f  // 低频起音阈值；越低越灵敏
+#define CFG_ELF_SOUND_ONSET_FULL_THRESHOLD 0.35f  // 全带起音阈值（手机外放补拍）
 #define CFG_ELF_SOUND_GROOVE_HOLD_MS 1600UL     // 无拍后保持律动的时间
 #define CFG_ELF_SOUND_BOUNCE_PX 20       // 弹跳最大行程
 #define CFG_ELF_SOUND_SWAY_PX 12         // 摇摆最大行程
@@ -587,31 +588,36 @@ if (elfVisible) {
 目标不是“识别歌曲”，而是**稳定地知道现在有没有拍子、多快、多响**。采样率 16kHz、窗口 32ms（512 点）、帧移 16ms。
 
 ```text
-I2S TDM 4ch ──取 slot0/2 平均──► DC 阻断 ──► 低通(180Hz)×2 ──► 低频能量
+I2S TDM 4ch ──取 slot0/2 相加──► DC 阻断 ──► 低通(180Hz)×2 ──► 低频能量
                                    │
-                                   └──► 全带 RMS ──► level（对数 + 平滑）
-低频能量序列 ──► 与 1.5s 慢速基线比较 ──► onset 强度
-onset 序列 ──► 局部峰值 + 200ms 不应期 ──► 拍点
+                                   ├──► 全带 RMS ──► level（对数 + 平滑）
+                                   └──► 全带包络 ──► onset（补手机外放/中高频）
+低频能量 ──► 快攻慢放包络 ──► 与 1.5s 慢速基线比较 ──► onset 强度
+两路 onset 归一化取 max ──► 局部峰值 + 200ms 不应期 ──► 拍点
 拍点间隔 ──► 中位数 + 平滑 ──► BPM / confidence
 ```
 
 1. **DC 阻断**：`y[n] = x[n] - x[n-1] + 0.995 * y[n-1]`，去掉麦克风偏置和低频漂移。
-2. **低频能量**：两级一阶低通（截止约 180Hz）后求均方；只关心底鼓/贝斯/拍手的主要能量。
-3. **全带电平**：去 DC 后的 RMS → `20log10` → 映射到 0–255；再做 200ms 慢速平滑，作为 `level`。
-4. **Onset**：
-   - 基线 `baseline` 用 1.5s 慢速 EMA；
-   - `onset = max(0, lowEnergy / (baseline + ε) - 1)`；
-   - 只有 `level > 噪声门` 且 `onset > CFG_ELF_SOUND_ONSET_THRESHOLD` 才候选。
-5. **峰值确认 + 不应期**：
+2. **双麦合并**：slot0 + slot2 直接相加（不再除以 2）：双麦 +6dB；某一路偏弱或为 0 时不损失灵敏度。
+3. **低频能量**：两级一阶低通（截止约 180Hz）后求均方；只关心底鼓/贝斯/拍手的主要能量。
+4. **全带电平**：去 DC 后的 RMS → `20log10` → 映射到 0–255；再做 200ms 慢速平滑，作为 `level`。
+5. **Onset**：
+   - 低频和全带各跟一路“快攻慢放”包络（attack ≈25ms、release ≈220ms）；
+   - 基线 `baseline` 用 1.5s 慢速 EMA 跟随包络；
+   - `onsetLow = lowEnv / (lowBaseline + ε) - 1`，`onsetFull = fullEnv / (fullBaseline + ε) - 1`；
+   - 归一化分数 `max(onsetLow / LOW_TH, onsetFull / FULL_TH)`，>1 才算候选；
+   - 全带这一路专门解决手机/小音箱几乎没有低频、只开低频检测必须很大声才能触发的问题。
+6. **峰值确认 + 不应期**：
    - 候选值必须大于前一帧与后一帧（延迟 1 帧确认，16ms）；
    - 距上一拍 < 200ms 的候选丢弃（对应最高 300 BPM，覆盖快歌）；
-   - 连续 3 拍间隔稳定（±25%）才把 `confidence` 拉高。
-6. **BPM**：
+   - 连续 3 拍间隔稳定（中位数 + 平均绝对偏差 ±25%）才把 `confidence` 拉高。
+7. **BPM**：
    - 取最近 8 个有效 IOI 的中位数 → `60000 / ioi`；
    - 折叠到 60–200（例如 240 → 120，避免把八分音符当主拍）；
    - 与上一值相差 < 8% 时平滑跟随，否则 1s 后再切换，避免显示值乱跳。
-7. **静音判定**：`level < CFG_ELF_SOUND_NOISE_GATE` 持续 2s → `Quiet`，`bpm = 0`。
-8. **可选增强（第二阶段再做）**：3 段 Goertzel（低/中/高）驱动尾巴三颗圆点做电平表；双麦时延差做左右声源（本期不做）。
+8. **静音判定**：`level < CFG_ELF_SOUND_NOISE_GATE` 持续 2s → `Quiet`，`bpm = 0`。
+9. **冷启动**：开始采集后 1.5s 内只建立基线、不触发拍点。
+10. **可选增强（第二阶段再做）**：3 段 Goertzel（低/中/高）驱动尾巴三颗圆点做电平表；双麦时延差做左右声源（本期不做）。
 
 **为什么不用 FFT**：第一版只需要低频能量包络；512 点 FFT 每 16ms 一次在 S3 上也能跑，但会引入复数运算、窗函数和频谱峰值挑选，调参成本高。等节拍稳定后，再按需加 Goertzel 频段。
 
@@ -639,7 +645,7 @@ LVGL thread: ElfOverlay 30ms lv_timer
 | 手段 | 说明 |
 | --- | --- |
 | `CFG_ELF_SOUND_LOG = 1` | 每 500ms 打印 `[AUDIO] lvl=... low=... bpm=... conf=... beat=...`；状态切换另有 `[ELF] sound ...` |
-| 静音基线 | 上电后 3s 内不触发节拍，只记录环境底噪；日志里 `lvl` 应稳定在 0–8 |
+| 静音基线 | 上电后 1.5s 内不触发节拍，只记录环境底噪；日志里 `lvl` 应稳定在 0–8 |
 | 节拍器 | 手机播放 60/90/120/150 BPM，确认 `bpm` 在 ±5 内、`beat` 与声音同步 |
 | 拍手 | 单次拍手应只产生 1 拍；连续拍手 8 次应进入 Grooving |
 | 音乐 | 低音明显的歌优先；只有人声/高频的歌允许只进 `Listening` |

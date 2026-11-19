@@ -203,11 +203,13 @@ bool muted();
 #define CFG_ELF_SOUND_BEAT_REFRACTORY_MS 200UL  // 两拍最小间隔
 #define CFG_ELF_SOUND_BEAT_CONFIRM 2     // 1.2s 内至少几拍才进 Grooving
 #define CFG_ELF_SOUND_MIN_CONFIDENCE 60  // 进入 Grooving 的最低置信度（0–255）；60 允许约第 3 拍进入
-#define CFG_ELF_SOUND_ONSET_THRESHOLD 0.30f  // 节拍起音阈值；越低越灵敏（0.45 -> 0.30）
+#define CFG_ELF_SOUND_ONSET_THRESHOLD 0.18f  // 低频起音阈值；越低越灵敏（0.30 -> 0.18）
+// 全带起音阈值：手机/小音箱几乎没有 180Hz 以下低频，用全带包络补一路拍点。
+#define CFG_ELF_SOUND_ONSET_FULL_THRESHOLD 0.35f
 #define CFG_ELF_SOUND_GROOVE_HOLD_MS 1600UL     // 无拍后保持律动的时间
 #define CFG_ELF_SOUND_BOUNCE_PX 20       // 弹跳最大行程
 #define CFG_ELF_SOUND_SWAY_PX 12         // 摇摆最大行程
-#define CFG_ELF_SOUND_LEVEL_GAIN 9       // ES7210 增益档位，每档 3dB：6=18dB，9=27dB，14=37.5dB（最大）
+#define CFG_ELF_SOUND_LEVEL_GAIN 9       // ES7210 增益档位，每档 3dB：6=18dB，9=27dB，14=37.5dB（最大）；安静环境仍不灵敏可试 11–12
 #define CFG_ELF_SOUND_LOG 1              // 1 = 每 500ms 打印 level/bpm/conf（受下面总开关控制）
 // [AUDIO] 日志总开关：0 = 关闭全部音频日志（默认）；1 = 打开（含 ES7210 寄存器初始化、I2S 状态、运行统计）
 #define CFG_AUDIO_LOG 0
