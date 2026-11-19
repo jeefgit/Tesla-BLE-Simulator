@@ -54,6 +54,8 @@ class DashboardApp {
   // 仪表页顶部静止长按进入 VIN 编辑（见 VIN-INPUT-DESIGN.md 5.1 / 5.6）。
   uint32_t m_touchStartMs = 0;
   bool m_longPressConsumed = false;
+  // 编辑器按键在按下时立即处理；松手时不再重复触发。
+  bool m_vinTapHandled = false;
   // 双击截图：记录上一次轻点的时间和位置，第二次轻点落在时间/位置窗口内
   // 就触发一次串口截图。
   bool m_lastTapValid = false;

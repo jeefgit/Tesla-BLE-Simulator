@@ -48,6 +48,8 @@ bool RoundDisplay::begin() {
   s_gfx = m_gfx;
   m_width = board.width;
   m_height = board.height;
+  m_touchFlipX = board.touchFlipX;
+  m_touchFlipY = board.touchFlipY;
 
   if (!m_gfx->begin()) {
     EVT_LOGE("DISP", "CO5300 begin failed");
@@ -107,6 +109,9 @@ bool RoundDisplay::begin() {
         prefs.getUChar(kPrefsBrightnessKey, kDefaultBrightness));
     prefs.end();
   }
+  CFG_LOG("[DISP] rotation=%u deg (touchFlipX=%d touchFlipY=%d)",
+          static_cast<unsigned>(m_rotation) * 90, m_touchFlipX ? 1 : 0,
+          m_touchFlipY ? 1 : 0);
   if (m_rotation != 0) {
     UI_LOG("restored display rotation %u deg",
             static_cast<unsigned>(m_rotation) * 90);
@@ -131,6 +136,8 @@ void RoundDisplay::rotateClockwise() {
   }
   m_rotation = static_cast<uint8_t>((m_rotation + 1) & 0x03);
   UI_LOG("display rotation -> %u deg",
+          static_cast<unsigned>(m_rotation) * 90);
+  CFG_LOG("[DISP] rotation=%u deg",
           static_cast<unsigned>(m_rotation) * 90);
   // 立即写回 NVS，下次上电自动沿用这个方向。
   Preferences prefs;
@@ -291,8 +298,10 @@ void RoundDisplay::panelSleep(bool sleep) {
 //   r=3（270°）    : panel_x = y, panel_y = W-1-x       -> x = W-1-py, y = px
 // 面板是 466x466 的正方形，宽高相等，四个方向都不存在尺寸错位问题。
 void RoundDisplay::mapTouchToScreen(int16_t& x, int16_t& y) const {
-  const int32_t px = x;
-  const int32_t py = y;
+  // Correct the board-specific touch mounting before undoing display
+  // rotation, so logical coordinates always match what the user sees.
+  const int32_t px = m_touchFlipX ? m_width - 1 - x : x;
+  const int32_t py = m_touchFlipY ? m_height - 1 - y : y;
   switch (m_rotation) {
     case 1:
       x = static_cast<int16_t>(py);
@@ -307,6 +316,8 @@ void RoundDisplay::mapTouchToScreen(int16_t& x, int16_t& y) const {
       y = static_cast<int16_t>(px);
       break;
     default:
+      x = static_cast<int16_t>(px);
+      y = static_cast<int16_t>(py);
       break;
   }
   // 触摸原始值是 12 位，偶尔会超出面板范围，钳制到画面内。

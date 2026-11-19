@@ -471,11 +471,13 @@ void LvglDashboard::vinEditorShow(const char* initialVin) {
   lv_obj_set_hidden(m_vinEditor, false);
   lv_obj_move_foreground(m_vinEditor);
   m_vinEditorVisible = true;
+  CFG_LOG("[VIN] editor show len=%u", static_cast<unsigned>(m_vinEditLen));
 }
 
 void LvglDashboard::vinEditorHide() {
   m_vinEditorVisible = false;
   if (m_vinEditor) lv_obj_set_hidden(m_vinEditor, true);
+  CFG_LOG("[VIN] editor hide");
   m_vinStatusText[0] = '\0';
   if (m_vinStatus) updateLabel(m_vinStatus, "");
 }
@@ -541,7 +543,8 @@ void LvglDashboard::vinEditorRefresh() {
 
   // Default hint; an error set afterwards stays until the next key press.
   const bool ready = m_vinEditLen >= vinstore::kLength;
-  const char* status = ready ? "READY" : "ENTER 17 CHARACTERS";
+  const char* status =
+      ready ? "READY - TYPE TO REPLACE" : "ENTER 17 CHARACTERS";
   snprintf(m_vinStatusText, sizeof(m_vinStatusText), "%s", status);
   updateLabel(m_vinStatus, m_vinStatusText);
   lv_obj_set_style_text_color(m_vinStatus, kDim, 0);
@@ -553,12 +556,15 @@ void LvglDashboard::vinEditorRefresh() {
 
 int LvglDashboard::vinHitKey(int16_t x, int16_t y) const {
   if (!m_vinEditorVisible) return -1;
+  // Use the whole 58px cell (52px key + 6px gap) so slightly-off taps still
+  // register; adjacent cells just touch without overlapping.
+  constexpr int32_t kCellPad = (kVinKeyPitch - kVinKeySize) / 2;
   for (int32_t i = 0; i < kVinKeyCount; ++i) {
     if (!m_vinKeyVisible[i]) continue;
     const int32_t keyX = kVinGridX + (i % kVinGridCols) * kVinKeyPitch;
     const int32_t keyY = kVinGridY + (i / kVinGridCols) * kVinKeyPitch;
-    if (x >= keyX && x < keyX + kVinKeySize && y >= keyY &&
-        y < keyY + kVinKeySize) {
+    if (x >= keyX - kCellPad && x < keyX + kVinKeySize + kCellPad &&
+        y >= keyY - kCellPad && y < keyY + kVinKeySize + kCellPad) {
       return static_cast<int>(i);
     }
   }
@@ -569,6 +575,8 @@ bool LvglDashboard::vinEditorHandleTap(int16_t x, int16_t y) {
   if (!m_vinEditorVisible) return false;
 
   const int key = vinHitKey(x, y);
+  CFG_LOG("[VIN-UI] tap x=%d y=%d key=%d layout=%d", x, y, key,
+          m_vinNumericLayout ? 1 : 0);
   if (key < 0) return true;  // Consume taps inside the overlay.
 
   if (key == vinCancelKeyIndex(m_vinNumericLayout)) {
@@ -597,9 +605,18 @@ bool LvglDashboard::vinEditorHandleTap(int16_t x, int16_t y) {
                       ? (key <= 8 ? static_cast<char>('1' + key)
                                   : (key == 9 ? '0' : '\0'))
                       : (key <= 25 ? static_cast<char>('A' + key) : '\0');
-  if (ch != '\0' && m_vinEditLen < vinstore::kLength) {
-    m_vinEdit[m_vinEditLen++] = ch;
-    m_vinEdit[m_vinEditLen] = '\0';
+  if (ch != '\0') {
+    if (m_vinEditLen < vinstore::kLength) {
+      m_vinEdit[m_vinEditLen++] = ch;
+      m_vinEdit[m_vinEditLen] = '\0';
+    } else {
+      // The editor always starts pre-filled with the current 17-char VIN.
+      // Typing must still give feedback, so drop the oldest character and
+      // append the new one (the common "shift left" VIN/serial behaviour).
+      memmove(m_vinEdit, m_vinEdit + 1, vinstore::kLength - 1);
+      m_vinEdit[vinstore::kLength - 1] = ch;
+      m_vinEdit[vinstore::kLength] = '\0';
+    }
     vinEditorRefresh();
   }
   return true;

@@ -18,7 +18,7 @@ constexpr size_t kReportLength = 15;
 constexpr uint8_t kAck = 0xAB;
 constexpr uint8_t kEventContact = 0x06;
 constexpr uint8_t kMaxFingerNum = 2;
-constexpr uint32_t kPollIntervalMs = 30;
+constexpr uint32_t kPollIntervalMs = 10;
 constexpr uint16_t kChipIdCst9217 = 0x9217;
 constexpr uint16_t kChipIdCst9220 = 0x9220;
 

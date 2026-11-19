@@ -45,7 +45,9 @@ bool readNvs(char out[vinstore::kCapacity]) {
   }
   const size_t n = prefs.getString(kPrefsVinKey, out, vinstore::kCapacity);
   prefs.end();
-  if (n != vinstore::kLength) {
+  // Preferences::getString() returns the stored size including the trailing
+  // '\0' (17 chars -> 18). Only n == 0 means the key is missing/unreadable.
+  if (n == 0) {
     out[0] = '\0';
     return false;
   }
@@ -175,7 +177,7 @@ Error save(const char* vin) {
   }
   const size_t n = check.getString(kPrefsVinKey, readback, kCapacity);
   check.end();
-  if (n != kLength || strcmp(readback, normalized) != 0) {
+  if (n == 0 || strcmp(readback, normalized) != 0) {
     EVT_LOGE("VIN", "save failed: verify n=%u", static_cast<unsigned>(n));
     return Error::NvsWrite;
   }
@@ -192,7 +194,10 @@ bool clear() {
     EVT_LOGE("VIN", "clear failed: nvs open");
     return false;
   }
-  const bool removed = prefs.remove(kPrefsVinKey);
+  // erase_key() reports ESP_ERR_NVS_NOT_FOUND when the key never existed
+  // (e.g. the user re-enters the factory default VIN). Treat that as success.
+  const bool existed = prefs.isKey(kPrefsVinKey);
+  const bool removed = existed ? prefs.remove(kPrefsVinKey) : true;
   prefs.end();
   if (!removed) {
     EVT_LOGE("VIN", "clear failed: remove");

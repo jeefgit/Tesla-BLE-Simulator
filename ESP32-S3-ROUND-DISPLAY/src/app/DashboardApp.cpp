@@ -309,15 +309,24 @@ void DashboardApp::pollTouch() {
         m_elfSwipeLatched = false;
         return;
       }
+      // 编辑器按键已在按下时处理：松手只清理状态，避免 X 取消后又被当成
+      // 链接页点击而重新打开编辑器。
+      if (m_vinTapHandled) {
+        m_vinTapHandled = false;
+        m_swipeActive = false;
+        m_elfSwipeLatched = false;
+        return;
+      }
       // 小精灵可见时：松手 600ms 后视线回到随机游走；几乎没移动则算轻点。
       const int32_t travel =
           max(abs(m_touchLastX - m_touchStartX),
               abs(m_touchLastY - m_touchStartY));
       if (vinEditing) {
-        // 只有轻点才交给编辑器命中测试；不触发双击截图/小精灵轻点/亮度保存。
-        if (travel < CFG_VIN_TAP_PX) {
+        // 按键已在按下时处理；这里只兜底处理漏掉按下事件的轻点。
+        if (!m_vinTapHandled && travel < CFG_VIN_TAP_PX) {
           dashboard.vinEditorHandleTap(m_touchLastX, m_touchLastY);
         }
+        m_vinTapHandled = false;
         m_swipeActive = false;
         m_elfSwipeLatched = false;
         return;
@@ -359,8 +368,19 @@ void DashboardApp::pollTouch() {
     m_touchStartY = rawY;
     m_touchStartMs = millis();
     m_longPressConsumed = false;
-    // 编辑器打开时：按下只记录起点并 return，不呼小精灵、不启动亮度手势。
+    m_vinTapHandled = false;
+    // 编辑器打开时：按下立即处理按键并 return，不呼小精灵、不启动亮度手势。
     if (vinEditing) {
+      dashboard.vinEditorHandleTap(rawX, rawY);
+      m_vinTapHandled = true;
+      return;
+    }
+    // 链接页 VIN 行：按下即打开，避免快速轻点在松手判定中被漏掉。
+    if (!m_elf.visible() && dashboard.linkPageVisible() && rawX >= 20 &&
+        rawX <= 446 && rawY >= 330 && rawY <= 405) {
+      openVinEditor();
+      // 这次按下已经用于打开编辑器，松手不要再去命中键盘按键。
+      m_vinTapHandled = true;
       return;
     }
     // 小精灵可见时，按下也算一次交互（并让眼睛立刻看向按下的位置）。
@@ -445,9 +465,13 @@ void DashboardApp::pollTouch() {
 }
 
 void DashboardApp::handleTap(int16_t x, int16_t y) {
+  CFG_LOG("[VIN] tap x=%d y=%d linkPage=%d", x, y,
+          dashboard.linkPageVisible() ? 1 : 0);
   // 链接页 VIN 行热区（LVGL 逻辑坐标，见设计 5.2）：优先于双击截图判定。
-  if (dashboard.linkPageVisible() && x >= 34 && x <= 432 && y >= 344 &&
-      y <= 390) {
+  // 比可见文字略大，容忍手指落点偏差。
+  if (dashboard.linkPageVisible() && x >= 20 && x <= 446 && y >= 330 &&
+      y <= 405) {
+    CFG_LOG("[VIN] link VIN row hit");
     openVinEditor();
     return;
   }
@@ -485,6 +509,7 @@ void DashboardApp::openVinEditor() {
   m_hasRenderedModel = false;
   m_power.notifyUserActivity();
   dashboard.vinEditorShow(vinstore::current());
+  CFG_LOG("[VIN] editor opened");
 #endif
 }
 

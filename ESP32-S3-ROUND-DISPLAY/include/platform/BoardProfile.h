@@ -29,4 +29,10 @@ struct BoardProfile {
   int8_t pinTouchInt;
   int8_t pinTouchReset;
   uint8_t touchAddress;
+
+  // Some panels mount the touch sensor 180 degrees relative to the display
+  // glass. Flip the raw touch axes before applying the software display
+  // rotation so logical coordinates match what the user sees.
+  bool touchFlipX;
+  bool touchFlipY;
 };

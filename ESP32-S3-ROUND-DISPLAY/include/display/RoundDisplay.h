@@ -67,6 +67,8 @@ class RoundDisplay : public IDisplay {
   void* m_rotateBuffer = nullptr;
   int32_t m_width = 0;
   int32_t m_height = 0;
+  bool m_touchFlipX = false;
+  bool m_touchFlipY = false;
   uint8_t m_rotation = 0;
   uint8_t m_brightness = kDefaultBrightness;
 };

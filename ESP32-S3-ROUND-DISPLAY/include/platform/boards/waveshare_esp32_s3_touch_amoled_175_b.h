@@ -24,4 +24,8 @@ inline constexpr BoardProfile kWaveshareEsp32S3TouchAmoled175B = {
     11,
     40,
     0x5A,
+    // Measured on hardware: tapping the visible X key reports the raw
+    // coordinate of A (both touch axes are 180 deg off).
+    true,
+    true,
 };

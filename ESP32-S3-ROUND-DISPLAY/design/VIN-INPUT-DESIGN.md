@@ -452,7 +452,8 @@ constexpr int32_t kVinKeyCount = 30;
 - `OK` 在长度不足 17 时样式变暗（文字 `kFaint`、边框 `kTrack`），但点击仍给出错误提示。
 - `X` 永远可用；取消不写 NVS。
 - 编辑缓冲区初始值 = 当前 VIN（方便修改，而不是从空开始）。
-- 达到 17 位后继续按字符键直接忽略，不覆盖已有内容。
+- 达到 17 位后继续按字符键：丢弃最旧的第一位并追加新字符（左移），
+  保证每次按键都有可见反馈；需要修改末位时可先按 `DEL`。
 - 键盘对象只在 `begin()` 创建一次；`show/hide` 只切换隐藏标志并更新文字，
   避免反复创建 LVGL 对象造成堆碎片。
 
@@ -817,7 +818,7 @@ void DashboardApp::handleVinSubmit(const char* vin) {
 | NVS 值长度/字符非法 | 忽略并回退默认值，记 WARN，不删除 NVS（方便排查） |
 | `CFG_TESLA_VIN` 也非法/为空 | `current()` 返回 `""`；后端退回前缀/UUID 扫描；UI 显示 `VIN NOT SET` |
 | 用户只输入 16 位按 OK | 不保存，状态行显示 `VIN MUST BE 17 CHARACTERS` |
-| 用户输入超过 17 位 | 忽略多余字符 |
+| 用户输入超过 17 位 | 丢弃最旧的第一位并追加新字符（左移） |
 | 用户输入与当前 VIN 相同 | 关闭编辑器，不写 NVS、不重启 |
 | NVS 写入失败 | 留在编辑器，显示 `SAVE FAILED`，记录 ERROR |
 | 编辑期间自动休眠 | 每轮 `notifyUserActivity()`，禁止进入 deep sleep |
