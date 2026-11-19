@@ -172,6 +172,8 @@ class ElfOverlay {
   uint32_t m_soundLastTick = 0;
   uint32_t m_lastBeatAt = 0;
   uint32_t m_lastSoundLoudAt = 0;
+  // 最近一次有效声音的时间：声音被视为互动，用于刷新困倦计时。
+  uint32_t m_lastSoundAt = 0;
   uint32_t m_beatWindowStart = 0;
   int16_t m_beatsInWindow = 0;
   int16_t m_beatInGroove = 0;

@@ -173,7 +173,7 @@ bool muted();
 #define CFG_USB_OTA_ENABLE 1
 // PING 时上报给网页的固件版本，方便确认设备端已经运行带 OTA 的固件。
 // 每次发版建议改这个号；但真正能证明“升级生效”的是编译时间戳（见下）。
-#define CFG_FW_VERSION "0.1.8"
+#define CFG_FW_VERSION "0.1.9"
 // 编译时间戳，由编译器自动填充，不需要手动改。网页握手时会显示；只要这次
 // 和上次不同，就说明设备确实换成了新固件（版本号忘了改也能看出来）。
 #define CFG_FW_BUILD __DATE__ " " __TIME__
@@ -195,6 +195,9 @@ bool muted();
 #define CFG_ELF_SOUND_HOP_MS 16          // 特征帧移（分析窗口 32ms）
 #define CFG_ELF_SOUND_NOISE_GATE 8       // level 低于此值视为静音（0–255）
 #define CFG_ELF_SOUND_QUIET_MS 2000UL    // 静音多久回 Quiet
+// 1 = 把有效声音当成互动：刷新困倦计时，并唤醒困倦/睡着的精灵；
+// 0 = 睡眠期间忽略声音（旧行为，适合夜间环境噪声大的场景）。
+#define CFG_ELF_SOUND_KEEP_AWAKE 1
 #define CFG_ELF_SOUND_BEAT_MIN_BPM 60    // 有效节拍下限
 #define CFG_ELF_SOUND_BEAT_MAX_BPM 200   // 有效节拍上限
 #define CFG_ELF_SOUND_BEAT_REFRACTORY_MS 200UL  // 两拍最小间隔

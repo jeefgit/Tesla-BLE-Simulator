@@ -17,6 +17,9 @@
 #ifndef CFG_ELF_SOUND_QUIET_MS
 #define CFG_ELF_SOUND_QUIET_MS 2000UL
 #endif
+#ifndef CFG_ELF_SOUND_KEEP_AWAKE
+#define CFG_ELF_SOUND_KEEP_AWAKE 1
+#endif
 #ifndef CFG_ELF_SOUND_BEAT_MIN_BPM
 #define CFG_ELF_SOUND_BEAT_MIN_BPM 60
 #endif
@@ -1031,7 +1034,15 @@ void ElfOverlay::onTimer() {
 #endif
 
   if (m_state == State::Idle) {
-    if (due(m_lastInteractionAt + CFG_ELF_SLEEP_MS)) {
+    bool sleepDue = due(m_lastInteractionAt + CFG_ELF_SLEEP_MS);
+#if CFG_ELF_SOUND_ENABLE && CFG_ELF_SOUND_KEEP_AWAKE
+    // 听到声音视为仍有人在旁边：从最后一次有效声音重新计时。
+    if (sleepDue && m_lastSoundAt != 0 &&
+        !due(m_lastSoundAt + CFG_ELF_SLEEP_MS)) {
+      sleepDue = false;
+    }
+#endif
+    if (sleepDue) {
       enterSleepy();
     } else if (m_charging && m_nextYawnAt != 0 && due(m_nextYawnAt)) {
       startYawn();
@@ -1197,6 +1208,7 @@ void ElfOverlay::resetSoundState() {
   m_beatWindowStart = 0;
   m_lastBeatAt = 0;
   m_lastSoundLoudAt = 0;
+  m_lastSoundAt = 0;
   m_grooveBoostUntil = 0;
   m_soundYieldUntil = 0;
   m_soundHadFrame = false;
@@ -1324,6 +1336,17 @@ void ElfOverlay::updateSoundState(uint32_t now) {
                     (level >= CFG_ELF_SOUND_NOISE_GATE || m_loudFlag);
   if (loud) {
     m_lastSoundLoudAt = now;
+#if CFG_ELF_SOUND_KEEP_AWAKE
+    // 有效声音 = 有人在旁边：刷新困倦计时；困倦/睡着的精灵直接唤醒，
+    // 醒来后由 Listening/Grooving 层自然接管。
+    m_lastSoundAt = now;
+    if (m_state == State::Sleepy || m_state == State::Sleeping) {
+      wakeFromSleep();
+      CFG_LOG("[ELF] wake by sound (bpm=%u level=%u)",
+              static_cast<unsigned>(m_bpm),
+              static_cast<unsigned>(m_level));
+    }
+#endif
   }
 
   // 拍点窗口过期，避免陈旧计数误进 Grooving。

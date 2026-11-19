@@ -20,7 +20,7 @@
 4. **成本可控**：新增对象 < 25 个，不新增全屏图层，不新增字体/图片资源，不改 `platformio.ini`。
 5. **可回退**：一个 `CFG_ELF_ENABLE` 就能整体关掉；声音功能再用一个 `CFG_ELF_SOUND_ENABLE` 单独关掉。
 6. **能听节拍**：小精灵可见时，用板载双麦感知环境音乐/拍手，提取“有没有声音、有多响、节拍多快”，驱动眼睛和身体律动。只做特征提取，不录音、不缓存音频、不上传、不播放声音。
-7. **不打扰**：没有声音时完全回到现有行为；睡眠状态下不被环境噪声吵醒；动画幅度有上限，不做全屏闪烁。
+7. **不打扰**：没有声音时完全回到现有行为；有声音时把它当成“有人陪着”，保持清醒（可用 `CFG_ELF_SOUND_KEEP_AWAKE=0` 关掉）；动画幅度有上限，不做全屏闪烁。
 
 ### 1.2 非目标（本期不做）
 
@@ -103,7 +103,7 @@ stateDiagram-v2
 | 麦克风/ES7210 初始化失败 | 打印一次 `[AUDIO] init failed`，小精灵其余功能照常，声音子状态保持 `Off` |
 | 环境持续安静 | 2s 内无有效声音 → 回到现有 Idle 呼吸/眨眼，不做任何额外动画 |
 | 环境很吵但没有节拍（说话、风噪） | 只进入 `Listening`（轻微反应），不进入 `Grooving`，避免“乱抖” |
-| 睡眠（Sleepy/Sleeping）时出现声音 | **忽略**，不唤醒；避免夜间环境噪声把设备弄醒 |
+| 睡眠（Sleepy/Sleeping）时出现声音 | **视为互动**：立即唤醒，并从最后一次有效声音重新计算困倦时间；设 `CFG_ELF_SOUND_KEEP_AWAKE=0` 可恢复“忽略声音”的旧行为 |
 | 小精灵隐藏 | 立即停止 I2S，麦克风不工作；再次呼出时重新预热（约 200ms 内出第一帧） |
 | 同时有触摸和节拍 | 触摸优先：手指追随/轻点覆盖声音律动，松手 600ms 后声音律动恢复 |
 
@@ -132,7 +132,9 @@ stateDiagram-v2
 | `Listening` | 电平超过噪声门，但节拍置信度不足 | 瞳孔略微放大、腮红随音量轻微变亮、注视方向随机轻移；不跳动 |
 | `Grooving` | 1.2s 内 ≥ 2 拍，且 BPM 在 60–200 | 跟随节拍跳动/摇摆/发光/眨眼，幅度与音量、BPM 相关 |
 
-> 声音层只在主状态为 `Idle` / `Blinking` 时生效；`Happy / Yawning / Squint / Sleepy / Sleeping / Hiding` 期间暂停声音动画（但音频特征照常更新，回到 Idle 后立即接上）。
+> 声音层只在主状态为 `Idle` / `Blinking` 时驱动动画；`Happy / Yawning / Squint / Sleepy / Sleeping / Hiding` 期间暂停声音动画（但音频特征照常更新，回到 Idle 后立即接上）。
+>
+> 例外：`CFG_ELF_SOUND_KEEP_AWAKE=1`（默认）时，有效声音会刷新困倦计时，并让 `Sleepy/Sleeping` 立即 `wakeFromSleep()`；醒来后如果仍在放歌，会自然进入 `Listening/Grooving`。
 
 ---
 
@@ -514,6 +516,7 @@ if (elfVisible) {
 #define CFG_ELF_SOUND_HOP_MS 16          // 特征帧移（分析窗口 32ms）
 #define CFG_ELF_SOUND_NOISE_GATE 8       // level 低于此值视为静音（0–255）
 #define CFG_ELF_SOUND_QUIET_MS 2000UL    // 静音多久回 Quiet
+#define CFG_ELF_SOUND_KEEP_AWAKE 1       // 1 = 有声音时保持清醒并唤醒困倦/睡眠；0 = 睡眠时忽略声音
 #define CFG_ELF_SOUND_BEAT_MIN_BPM 60    // 有效节拍范围
 #define CFG_ELF_SOUND_BEAT_MAX_BPM 200
 #define CFG_ELF_SOUND_BEAT_REFRACTORY_MS 200UL  // 两拍最小间隔
@@ -693,6 +696,7 @@ LVGL thread: ElfOverlay 30ms lv_timer
 > - 充电上升沿后 3–6s 第一次打哈欠，之后每 12–20s 一次；慢闭 500ms、停 400ms、慢睁 500ms，嘴变亮，结束回 Idle。拔掉充电立即取消排期。
 > - 车速瞳孔：20 km/h 起从 74 线性放大，100 km/h 到 86，300ms 平滑过渡；Happy 临时放大到 82，结束后回到当前车速基准。
 > - 行驶中（车速 ≥5 km/h）持续刷新交互计时，不会进入 Sleepy/Sleeping；已在睡眠中的会立即唤醒。
+> - 声音同样视为互动：`CFG_ELF_SOUND_KEEP_AWAKE=1`（默认）时，有效声音会刷新困倦计时；睡眠中出现声音会立即 `wakeFromSleep()`，声音持续时保持 `Listening/Grooving`；设为 0 可恢复睡眠时忽略声音。
 > - 急减速：同一次采样（≤450ms）降幅 ≥10 km/h 且处于 Idle → 眯眼（眼高 62）600ms，2s 冷却。
 > - 耳朵/尾巴：2 个 52px 圆 + 3 个 18/22/26px 圆，颜色 `#2A5A68`、不透明度约 78%，挂在 `m_body` 且位于眼睛之前，随呼吸一起漂移。
 > - 嘴：`#9FB4C4`，常态 120、Happy/哈欠 235，不再隐藏。
