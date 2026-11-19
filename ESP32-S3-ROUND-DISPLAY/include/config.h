@@ -173,7 +173,7 @@ bool muted();
 #define CFG_USB_OTA_ENABLE 1
 // PING 时上报给网页的固件版本，方便确认设备端已经运行带 OTA 的固件。
 // 每次发版建议改这个号；但真正能证明“升级生效”的是编译时间戳（见下）。
-#define CFG_FW_VERSION "0.1.7"
+#define CFG_FW_VERSION "0.1.8"
 // 编译时间戳，由编译器自动填充，不需要手动改。网页握手时会显示；只要这次
 // 和上次不同，就说明设备确实换成了新固件（版本号忘了改也能看出来）。
 #define CFG_FW_BUILD __DATE__ " " __TIME__
@@ -208,3 +208,21 @@ bool muted();
 #define CFG_ELF_SOUND_LOG 1              // 1 = 每 500ms 打印 level/bpm/conf（受下面总开关控制）
 // [AUDIO] 日志总开关：0 = 关闭全部音频日志（默认）；1 = 打开（含 ES7210 寄存器初始化、I2S 状态、运行统计）
 #define CFG_AUDIO_LOG 0
+
+// ---------------------------------------------------------------------------
+// 设备事件日志（可持久化，OTA 网页可读取）
+//   复用分区表自带的 spiffs 分区挂 LittleFS，不改分区表/ini。
+//   只记录事件与 WARN/ERROR，落盘走 RAM 缓冲，主循环分块写入。
+// ---------------------------------------------------------------------------
+#define CFG_EVTLOG_ENABLE 1
+#define CFG_EVTLOG_SERIAL_MIRROR 1        // 同时输出到串口（仍受 cfglog::muted 影响）
+#define CFG_EVTLOG_LEVEL_MIN 0            // 0=I 1=W 2=E：低于该级别不落盘
+#define CFG_EVTLOG_SLOTS 4                // 槽数量（2..8）
+#define CFG_EVTLOG_SLOT_BYTES 24576       // 单槽上限（字节）
+#define CFG_EVTLOG_RAM_BYTES 4096         // RAM 缓冲
+#define CFG_EVTLOG_FLUSH_MS 800           // 缓冲至少这么久就尝试落盘
+#define CFG_EVTLOG_FLUSH_BYTES 256        // 或缓冲达到这么多就落盘
+#define CFG_EVTLOG_RATE_LIMIT_MS 500
+#define CFG_EVTLOG_HEAP_WARN_BYTES 32768  // 堆低于此值记 WARN（带滞回）
+#define CFG_EVTLOG_READ_CHUNK 512         // 单次 LOG_READ 返回的原始字节数
+#define CFG_EVTLOG_TEST_CMDS 0            // 1 = 启用 LOG_TEST（压测轮转），发布前置 0

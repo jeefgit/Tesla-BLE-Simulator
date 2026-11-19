@@ -114,6 +114,22 @@
   pre#log .err { color: #ff6b70; }
   pre#log .ok { color: var(--green); }
   pre#log .dev { color: #7fb2ff; }
+
+  /* 事件日志面板：只放纯文本，绝不用 innerHTML 拼接内容。 */
+  pre#evtlog {
+    margin: 0;
+    height: 260px;
+    overflow: auto;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #0e0e10;
+    color: #b9b9c0;
+    font: 12px/1.5 Consolas, "Cascadia Mono", monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  #evtLogCap { font-variant-numeric: tabular-nums; }
   .note { color: var(--muted); font-size: 12.5px; margin: 12px 0 0; }
   .note b { color: #c9c9d0; font-weight: 600; }
   code { font-family: Consolas, monospace; color: #e6e6eb; }
@@ -160,6 +176,22 @@
   </section>
 
   <section class="card">
+    <div class="row">
+      <strong class="grow">设备事件日志</strong>
+      <span id="evtLogCap" class="file-meta">容量 -- / -- KB</span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="btnLogRead" disabled>读取日志</button>
+      <button id="btnLogDownload" disabled>下载 .txt</button>
+      <button id="btnLogClear" disabled>清空</button>
+    </div>
+    <div class="bar"><i id="logbar"></i></div>
+    <div class="meta"><span id="logpct">0%</span><span id="evtLogState">--</span></div>
+    <pre id="evtlog"></pre>
+    <p class="note">日志按 <b>boot 号 + 开机毫秒</b> 记录，设备没有 RTC，不含真实时间；<b>读取不会自动进行</b>，需要手动点“读取日志”。</p>
+  </section>
+
+  <section class="card">
     <div class="row" style="margin-bottom:10px">
       <strong class="grow">日志</strong>
       <button id="btnClear">清空</button>
@@ -175,21 +207,27 @@
 // ── 协议常量 ────────────────────────────────────────────────
 // 与 src/ota/UsbOta.cpp 保持一致：
 //   主机 → 设备：ASCII 行 "OTA_PING\n" / "OTA_INFO\n" / "OTA_REBOOT\n" /
-//                "OTA_BEGIN <size> <crc32hex>\n"
+//                "OTA_BEGIN <size> <crc32hex>\n" /
+//                "LOG_INFO\n" / "LOG_LIST\n" / "LOG_READ <index> <off> <len>\n" /
+//                "LOG_CLEAR\n" / "LOG_MARK <text>\n"
 //   设备 → 主机：ASCII 行 "OTA: PONG ver=<v> build=<date time> part=<label>" /
 //                "OTA: INFO run=<p> boot=<p> state=<n>" /
 //                "OTA: IMG app0=written|empty" / "OTA: READY <size>" /
 //                "OTA: A <received>" / "OTA: OK boot=<label>" /
-//                "OTA: ERR <reason>"
+//                "OTA: ERR <reason>" /
+//                "OTA: LOG INFO|FILE|LIST done|DATA|READ end|CLEAR ok|MARK ok|ERR ..."
 // 注意：OTA: A 只用来驱动进度条，不写进日志（一个固件会有几百条）。
 // 镜像里的 app desc 不要用：这个 PlatformIO 配置下它来自预编译的 core 库
 // （project=arduino-lib-builder），所有构建都一样，没法区分版本。
-const PAGE_VERSION = 'ota-page-9';
+const PAGE_VERSION = 'ota-page-10';
 const CHUNK_SIZE = 4096;
 const READY_TIMEOUT_MS = 10000;
 const ACK_TIMEOUT_MS = 20000;
 const RESULT_TIMEOUT_MS = 180000;
 const INFO_TIMEOUT_MS = 5000;
+// 事件日志：设备端把单块钳制到 512 字节，页面按同样大小请求。
+const LOG_CHUNK = 512;
+const LOG_TIMEOUT_MS = 3000;
 // 升级成功后先保持串口连接这么久，把新固件的启动日志抓下来。
 // 关键：不要在这一秒内关闭串口——关闭 Web Serial 会让 DTR/RTS 变电平，
 // ESP32-S3 会因此复位；如果这次复位落在新固件调用
@@ -208,9 +246,13 @@ const btnReboot = $('btnReboot');
 const btnPick = $('btnPick');
 const btnFlash = $('btnFlash');
 const btnClear = $('btnClear');
+const btnLogRead = $('btnLogRead');
+const btnLogDownload = $('btnLogDownload');
+const btnLogClear = $('btnLogClear');
 const fileInput = $('file');
 const drop = $('drop');
 const logEl = $('log');
+const evtLogEl = $('evtlog');
 
 let port = null;
 let reader = null;
@@ -233,6 +275,14 @@ let flashStartMs = 0;
 let flashAckCount = 0;
 // 自动重连的取消令牌：用户手动点“连接/断开”就 +1，让倒计时立刻退出。
 let autoReconnectToken = 0;
+
+// 事件日志读取状态。evtLogTmpFiles 是本次 LOG_LIST 的临时结果，
+// 只在一次读取流程内有效，避免把上一次的文件列表混进来。
+let evtLogFiles = [];
+let evtLogText = '';
+let evtLogBusy = false;
+let evtLogInfo = null;
+let evtLogTmpFiles = [];
 
 let file = null;
 let fileBytes = null;
@@ -283,6 +333,61 @@ function crc32(bytes) {
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
+// ── 事件日志解析 ─────────────────────────────────────────────
+// 设备响应用 "OTA: LOG xxx k=v ..." 的文本格式；这里只解析，不做 DOM 更新
+// 以外的副作用，方便复用。
+function parseLogFile(line) {
+  const slot = /slot=(\d+)/.exec(line);
+  const seq = /seq=(\d+)/.exec(line);
+  const size = /size=(\d+)/.exec(line);
+  if (!slot || !seq || !size) return null;
+  return { slot: Number(slot[1]), seq: Number(seq[1]), size: Number(size[1]) };
+}
+
+function applyLogInfo(line) {
+  const info = {};
+  const re = /([A-Za-z_]+)=([^\s]+)/g;
+  let m;
+  while ((m = re.exec(line)) !== null) info[m[1]] = m[2];
+  evtLogInfo = info;
+
+  const used = parseInt(info.used, 10) || 0;
+  const slots = parseInt(info.slots, 10) || 0;
+  const slotBytes = parseInt(info.slotBytes, 10) || 0;
+  const cap = slots * slotBytes;
+  let text = `容量 ${(used / 1024).toFixed(1)} / ${(cap / 1024).toFixed(1)} KB`;
+  if (info.mount && info.mount !== 'ok') text += ' · 未挂载';
+  else if (info.enabled === '0') text += ' · 已禁用';
+  $('evtLogCap').textContent = text;
+}
+
+function parseLogData(line) {
+  const m = line.match(
+    /^OTA: LOG DATA slot=(\d+) offset=(\d+) len=(\d+) crc=([0-9a-fA-F]+)\s?(.*)$/);
+  if (!m) return null;
+  return {
+    slot: Number(m[1]),
+    offset: Number(m[2]),
+    len: Number(m[3]),
+    crc: parseInt(m[4], 16) >>> 0,
+    b64: m[5] || '',
+  };
+}
+
+// atob 得到的是 latin1 字符串，逐字节取 charCode 才能还原原始数据。
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function setLogProgress(done, total) {
+  const pct = total > 0 ? Math.min(100, Math.floor((done * 100) / total)) : 0;
+  $('logbar').style.width = pct + '%';
+  $('logpct').textContent = pct + '%';
+}
+
 // ── 行分发 / 等待 ───────────────────────────────────────────
 function dispatchLine(line) {
   for (let i = 0; i < pendingLines.length; i++) {
@@ -322,6 +427,30 @@ function onLine(line) {
   if (!line.startsWith('OTA:')) {
     // 设备正常运行的调试日志，保留下来便于排查。
     addLog(line, '');
+    return;
+  }
+  // 事件日志的行必须放在通用 OTA: 分支之前，否则 LOG DATA 会把面板刷爆。
+  // 顺序：DATA → FILE → INFO → 其余 LOG。
+  if (line.startsWith('OTA: LOG DATA ')) {
+    // 一次读取有几百条，只交给 waitFor，不写串口日志面板。
+    dispatchLine(line);
+    return;
+  }
+  if (line.startsWith('OTA: LOG FILE ')) {
+    const f = parseLogFile(line);
+    if (f) evtLogTmpFiles.push(f);
+    dispatchLine(line);
+    return;
+  }
+  if (line.startsWith('OTA: LOG INFO ')) {
+    applyLogInfo(line);
+    dispatchLine(line);
+    return;
+  }
+  if (line.startsWith('OTA: LOG ')) {
+    // LIST done / READ end / CLEAR ok / MARK ok / ERR：每个文件最多一条，可以记日志。
+    addLog(line, line.startsWith('OTA: LOG ERR') ? 'err' : 'dev');
+    dispatchLine(line);
     return;
   }
   if (line.startsWith('OTA: PONG')) {
@@ -424,7 +553,7 @@ async function pingOnce(timeoutMs) {
 
 // 读取设备分区信息：当前运行/启动分区、OTA 状态、两个槽里有没有有效镜像。
 async function requestInfo() {
-  if (!port || busy) return;
+  if (!port || busy || evtLogBusy) return;
   try {
     const done = waitFor(/^OTA: (INFO done|IMG app1=)/, INFO_TIMEOUT_MS, '读取设备信息');
     await sendLine('OTA_INFO');
@@ -434,9 +563,221 @@ async function requestInfo() {
   }
 }
 
+// 单独查询事件日志状态（容量/挂载）。用独立正则，避免把 DATA/FILE 当响应吞掉。
+async function refreshLogInfo(timeoutMs) {
+  if (!port) return;
+  const done = waitFor(/^OTA: LOG INFO(?:\s|$)/, timeoutMs || LOG_TIMEOUT_MS, '读取日志状态');
+  // 先挂空 catch：断开会 reject 等待者，避免出现“未处理的 Promise 拒绝”。
+  done.catch(() => {});
+  await sendLine('LOG_INFO');
+  await done;
+}
+
+// 读取设备事件日志：LOG_LIST → 逐文件逐块 LOG_READ → 按槽拼接。
+// 全程串行（一次只有一个未完成请求），并且可被“断开”通过 rejectAll 打断。
+async function readEventLog() {
+  if (!port || busy || evtLogBusy) return;
+
+  const myPort = port;
+  evtLogBusy = true;
+  evtLogTmpFiles = [];
+  evtLogFiles = [];
+  evtLogText = '';
+  updateButtons();
+  setLogProgress(0, 1);
+  $('evtLogState').textContent = '正在读取…';
+  evtLogEl.textContent = '';
+
+  try {
+    // 1. 先列文件。FILE 行由 onLine 收集到 evtLogTmpFiles。
+    const listDone = waitFor(/^OTA: LOG LIST done(?:\s|$)/, LOG_TIMEOUT_MS, '读取日志列表');
+    listDone.catch(() => {});
+    await sendLine('LOG_LIST');
+    await listDone;
+    if (port !== myPort) return;
+
+    const files = evtLogTmpFiles.slice().sort((a, b) => a.seq - b.seq);
+    evtLogFiles = files;
+
+    // 2. 顺便刷新容量显示；失败不影响读取正文。
+    try {
+      await refreshLogInfo(LOG_TIMEOUT_MS);
+    } catch (err) {
+      if (port !== myPort) return;
+    }
+    if (port !== myPort) return;
+
+    if (files.length === 0) {
+      setLogProgress(0, 1);
+      $('logpct').textContent = '0%';
+      $('evtLogState').textContent = '没有日志文件';
+      evtLogEl.textContent = '（设备没有事件日志）';
+      addLog('设备上没有可读取的事件日志。', 'ok');
+      return;
+    }
+
+    const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+    let doneBytes = 0;
+    setLogProgress(0, totalBytes);
+    $('evtLogState').textContent = `0 / ${fmtBytes(totalBytes)}`;
+
+    const loaded = [];
+    // 3. 逐文件读取。offset 只按设备回传的 DATA len 推进，不依赖 READ end。
+    // 注意：LOG_READ 的第一个参数是“按 seq 升序的文件索引”，不是槽号。
+    for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+      const f = files[fileIndex];
+      const buf = new Uint8Array(f.size);
+      let off = 0;
+      while (off < f.size) {
+        if (port !== myPort) return;
+        const want = Math.min(LOG_CHUNK, f.size - off);
+        let bytes = null;
+        let lastErr = null;
+        // 每个块允许重试一次：CRC 不符时重新请求同一块。
+        for (let attempt = 0; attempt < 2 && !bytes; attempt++) {
+          const p = waitFor(/^OTA: LOG (?:DATA|ERR) /, LOG_TIMEOUT_MS, '读取日志');
+          p.catch(() => {});
+          await sendLine(`LOG_READ ${fileIndex} ${off} ${want}`);
+          const line = await p;
+          if (line.startsWith('OTA: LOG ERR')) {
+            throw new Error(line.replace(/^OTA: LOG ERR\s*/, '') || line);
+          }
+          const rec = parseLogData(line);
+          if (!rec) {
+            lastErr = new Error('无法解析日志块');
+            continue;
+          }
+          if (rec.slot !== f.slot || rec.offset !== off) {
+            lastErr = new Error(`日志块位置不匹配（slot=${rec.slot} offset=${rec.offset}）`);
+            continue;
+          }
+          const raw = (() => {
+            try { return b64ToBytes(rec.b64); } catch (e) { return null; }
+          })();
+          if (!raw) {
+            lastErr = new Error('日志块 base64 解码失败');
+            continue;
+          }
+          if (raw.length !== rec.len) {
+            lastErr = new Error(`日志块长度不符（${raw.length}/${rec.len}）`);
+            continue;
+          }
+          if (crc32(raw) !== rec.crc) {
+            lastErr = new Error('日志块 CRC 校验失败');
+            if (attempt === 0) {
+              addLog(`slot ${f.slot} offset ${off} CRC 校验失败，重试一次…`, 'err');
+            }
+            continue;
+          }
+          bytes = raw;
+        }
+        if (!bytes) throw lastErr || new Error('读取日志块失败');
+        if (off + bytes.length > f.size) {
+          throw new Error(`日志块超出文件范围（offset=${off} len=${bytes.length} size=${f.size}）`);
+        }
+        buf.set(bytes, off);
+        off += bytes.length;
+        doneBytes += bytes.length;
+        setLogProgress(doneBytes, totalBytes);
+        $('evtLogState').textContent = `${fmtBytes(doneBytes)} / ${fmtBytes(totalBytes)}`;
+        if (bytes.length === 0) break; // 防御：设备回 len=0，避免死循环
+      }
+      loaded.push({ meta: f, buf });
+    }
+    if (port !== myPort) return;
+
+    // 4. 拼接：每个槽先插一行分隔；统一按 UTF-8 解码（fatal=false，避免中文/坏字节截断）。
+    const decoder = new TextDecoder('utf-8', { fatal: false });
+    const blocks = loaded.map(({ meta, buf }) =>
+      `---- slot ${meta.slot} (seq=${meta.seq}) ----\n${decoder.decode(buf)}`);
+    evtLogText = blocks.join('\n\n');
+    evtLogEl.textContent = evtLogText;
+    setLogProgress(totalBytes, totalBytes);
+    $('evtLogState').textContent = `完成 · ${fmtBytes(totalBytes)} · ${files.length} 个文件`;
+    addLog(`事件日志已读取：${files.length} 个文件，共 ${fmtBytes(totalBytes)}。` +
+           (evtLogInfo && evtLogInfo.seq ? ` seq=${evtLogInfo.seq}` : ''), 'ok');
+  } catch (err) {
+    // 断开会通过 rejectAll 打断 waitFor，这里统一收尾，不再碰已失效的 DOM 状态。
+    if (port === myPort) {
+      $('evtLogState').textContent = '读取失败';
+      addLog('读取事件日志失败：' + (err && err.message ? err.message : err), 'err');
+    }
+  } finally {
+    // 只有端口没换过才复位；断开时 disconnect() 已经复位过，避免误改新连接的状态。
+    if (port === myPort) {
+      evtLogBusy = false;
+      updateButtons();
+    }
+  }
+}
+
+// 下载已读取的文本。文件名用主机本地时间：设备没有 RTC，日志里只有 boot+开机毫秒。
+function downloadEventLog() {
+  if (!evtLogText) {
+    addLog('还没有读取日志，请先点“读取日志”。', 'err');
+    return;
+  }
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const name = `tesla-log-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+               `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.txt`;
+  const blob = new Blob([evtLogText], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // 留一点时间给浏览器发起下载，再释放。
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  addLog(`已导出 ${name}（${evtLogText.length} 字符）`);
+}
+
+async function clearEventLog() {
+  if (!port || busy || evtLogBusy) return;
+  if (!confirm('确定要清空设备上的全部事件日志吗？此操作不可恢复。')) return;
+
+  const myPort = port;
+  evtLogBusy = true;
+  updateButtons();
+  $('evtLogState').textContent = '正在清空…';
+
+  try {
+    const done = waitFor(/^OTA: LOG (?:CLEAR ok|ERR)(?:\s|$)/, 5000, '清空日志');
+    done.catch(() => {});
+    await sendLine('LOG_CLEAR');
+    const line = await done;
+    if (!line.startsWith('OTA: LOG CLEAR ok')) throw new Error(line);
+    evtLogText = '';
+    evtLogEl.textContent = '';
+    evtLogFiles = [];
+    setLogProgress(0, 1);
+    $('logpct').textContent = '0%';
+    $('evtLogState').textContent = '已清空';
+    addLog('设备事件日志已清空。', 'ok');
+    try {
+      await refreshLogInfo(LOG_TIMEOUT_MS);
+    } catch (err) {
+      if (port === myPort) addLog('刷新日志容量失败：' +
+        (err && err.message ? err.message : err), 'err');
+    }
+  } catch (err) {
+    if (port === myPort) {
+      $('evtLogState').textContent = '清空失败';
+      addLog('清空事件日志失败：' + (err && err.message ? err.message : err), 'err');
+    }
+  } finally {
+    if (port === myPort) {
+      evtLogBusy = false;
+      updateButtons();
+    }
+  }
+}
+
 // 单独验证“重启”这条路径：用来区分“OTA 没写进去”和“写进去了但没重启”。
 async function rebootDevice() {
-  if (!port || busy) return;
+  if (!port || busy || evtLogBusy) return;
   addLog('发送重启命令…');
   try {
     await sendLine('OTA_REBOOT');
@@ -637,10 +978,14 @@ async function attachPort(openedPort, auto) {
   // 连上就先体检一次：把两个 OTA 分区各自的构建时间打出来。
   await requestInfo();
 
+  // 静默刷新一次事件日志容量：失败不打扰用户，也不自动读取日志。
+  refreshLogInfo(2000).catch(() => {});
+
   // 页面保持连接期间每 5 秒发一次 PING：既确认设备在线，也让设备端
   // 重置自动休眠计时，避免填文件的功夫设备先睡过去。
+  // 读日志/升级期间不发 PING，避免和 LOG_*/OTA_BEGIN 的请求交错。
   heartbeat = setInterval(() => {
-    if (!busy && writer) sendLine('OTA_PING').catch(() => {});
+    if (!busy && !evtLogBusy && writer) sendLine('OTA_PING').catch(() => {});
   }, 5000);
   return true;
 }
@@ -655,6 +1000,9 @@ async function disconnect() {
     }
     rejectAll(new Error('已断开连接'));
     busy = false;
+    // 读取日志的 waitFor 已被 rejectAll 打断；这里复位，避免断开后按钮永久禁用。
+    evtLogBusy = false;
+    evtLogTmpFiles = [];
 
     try { if (reader) await reader.cancel(); } catch (err) {}
     if (readTask) { try { await readTask; } catch (err) {} readTask = null; }
@@ -747,12 +1095,17 @@ function updateFileMeta() {
 }
 
 function updateButtons() {
-  btnFlash.disabled = !(port && fileBytes && !busy);
-  btnPick.disabled = busy;
+  const logLocked = !port || busy || evtLogBusy;
+  btnFlash.disabled = !(port && fileBytes && !busy && !evtLogBusy);
+  btnPick.disabled = busy || evtLogBusy;
   btnConnect.disabled = !!port || busy;
+  // 读取途中保留“断开”可用：这是打断卡住流程的最后手段。
   btnDisconnect.disabled = !port || busy;
-  btnInfo.disabled = !port || busy;
-  btnReboot.disabled = !port || busy;
+  btnInfo.disabled = !port || busy || evtLogBusy;
+  btnReboot.disabled = !port || busy || evtLogBusy;
+  btnLogRead.disabled = logLocked;
+  btnLogDownload.disabled = logLocked;
+  btnLogClear.disabled = logLocked;
 }
 
 function setProgress(done, total, startMs) {
@@ -785,7 +1138,7 @@ function applyDeviceProgress(received) {
 
 // ── 升级主流程 ───────────────────────────────────────────────
 async function flash() {
-  if (!port || !fileBytes || busy) return;
+  if (!port || !fileBytes || busy || evtLogBusy) return;
   busy = true;
   // 手动发起升级时，先取消可能还在倒计时的自动重连。
   cancelAutoReconnect();
@@ -875,13 +1228,22 @@ btnDisconnect.addEventListener('click', () => {
 });
 btnInfo.addEventListener('click', () => { requestInfo(); });
 btnReboot.addEventListener('click', () => {
-  if (!port || busy) return;
+  if (!port || busy || evtLogBusy) return;
   if (!confirm('确定要重启设备吗？重启后需要重新点“连接设备”。')) return;
   rebootDevice();
 });
 btnFlash.addEventListener('click', flash);
 btnPick.addEventListener('click', () => fileInput.click());
 btnClear.addEventListener('click', () => { logEl.textContent = ''; });
+btnLogRead.addEventListener('click', () => {
+  readEventLog().catch((err) => addLog('读取事件日志失败：' +
+    (err && err.message ? err.message : err), 'err'));
+});
+btnLogDownload.addEventListener('click', downloadEventLog);
+btnLogClear.addEventListener('click', () => {
+  clearEventLog().catch((err) => addLog('清空事件日志失败：' +
+    (err && err.message ? err.message : err), 'err'));
+});
 
 fileInput.addEventListener('change', () => setFile(fileInput.files && fileInput.files[0]));
 

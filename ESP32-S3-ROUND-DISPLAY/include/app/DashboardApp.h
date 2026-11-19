@@ -65,6 +65,9 @@ class DashboardApp {
   UiModel m_model;
   bool m_initialized = false;
   uint32_t m_lastRenderMs = 0;
+  // 事件日志堆采样：5 秒一次，并用滞回保证每次 boot 只报进入/恢复各一次。
+  uint32_t m_lastHeapSampleMs = 0;
+  bool m_heapLow = false;
   UiModel m_lastRenderedModel;
   bool m_hasRenderedModel = false;
   ElfOverlay m_elf;

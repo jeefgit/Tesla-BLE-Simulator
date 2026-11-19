@@ -1,10 +1,41 @@
 #include "data/TeslaUiSource.h"
 
+#include <Arduino.h>
 #include <string.h>
 
 #include "config.h"
+#include "log/EventLog.h"
 
 namespace {
+
+const char* linkName(UiLinkState link) {
+  switch (link) {
+    case UiLinkState::Idle:
+      return "Idle";
+    case UiLinkState::Scanning:
+      return "Scanning";
+    case UiLinkState::Connecting:
+      return "Connecting";
+    case UiLinkState::Syncing:
+      return "Syncing";
+    case UiLinkState::Ready:
+      return "Ready";
+    case UiLinkState::Reconnecting:
+      return "Reconnecting";
+    case UiLinkState::Error:
+      return "Error";
+  }
+  return "?";
+}
+
+// 进入 Error / 配对失败时补一行上下文：字段全部取自已有快照，不新增 BLE 请求。
+// 用于事后区分是信号问题、配对被拒，还是堆不足/长时间运行后异常。
+void logLinkContext(const UiModel& model) {
+  EVT_LOGI("CTX", "link=%s heap=%u uptime=%lus speed=%.0f soc=%ld pairing=%d",
+           linkName(model.link), static_cast<unsigned>(ESP.getFreeHeap()),
+           static_cast<unsigned long>(millis() / 1000), model.speedKmh,
+           static_cast<long>(model.soc), static_cast<int>(model.pairing));
+}
 
 UiLinkState toUiLink(LinkState link, bool encrypted, bool pairing) {
   switch (link) {
@@ -68,9 +99,20 @@ void TeslaUiSource::loop() {
 void TeslaUiSource::mapStatus(const SourceStatus& status, uint32_t now) {
   const bool pairing = status.pairing.phase != PairingHint::Idle;
   const UiLinkState link = toUiLink(status.link, status.encrypted, pairing);
+  bool needContext = false;
   if (link != m_lastLink) {
+    // 只在状态切换时记录，上游再快也不会刷屏（evtlog 本身还有 500ms 限频）。
+    EVT_LOGI("BLE", "link %s -> %s", linkName(m_lastLink), linkName(link));
     m_lastLink = link;
     m_stateSinceMs = now;
+    if (link == UiLinkState::Error) {
+      EVT_LOGE("BLE", "link Error encrypted=%d pairing=%d attempt=%u/%u",
+               status.encrypted ? 1 : 0,
+               static_cast<unsigned>(status.pairing.phase),
+               static_cast<unsigned>(status.pairing.attempt),
+               static_cast<unsigned>(status.pairing.maxAttempts));
+      needContext = true;
+    }
   }
 
   m_model.link = link;
@@ -83,6 +125,28 @@ void TeslaUiSource::mapStatus(const SourceStatus& status, uint32_t now) {
     m_model.pairingMaxAttempts = status.pairing.maxAttempts;
   }
   m_model.elapsedSeconds = (now - m_stateSinceMs) / 1000;
+
+  if (status.pairing.attempt > 0 &&
+      status.pairing.attempt != m_lastPairingAttempt) {
+    EVT_LOGW("PAIR", "attempt=%u/%u phase=%u",
+             static_cast<unsigned>(status.pairing.attempt),
+             static_cast<unsigned>(status.pairing.maxAttempts),
+             static_cast<unsigned>(status.pairing.phase));
+    m_lastPairingAttempt = status.pairing.attempt;
+  }
+  if (m_model.pairing == UiPairingPhase::Failed &&
+      m_lastPairingPhase != UiPairingPhase::Failed) {
+    EVT_LOGE("PAIR", "failed info=%lu attempt=%u/%u",
+             static_cast<unsigned long>(status.pairing.info),
+             static_cast<unsigned>(status.pairing.attempt),
+             static_cast<unsigned>(status.pairing.maxAttempts));
+    needContext = true;
+  }
+  m_lastPairingPhase = m_model.pairing;
+
+  if (needContext) {
+    logLinkContext(m_model);
+  }
 }
 
 void TeslaUiSource::mapVehicle(const VehicleState& vehicle) {

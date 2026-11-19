@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "display/IDisplay.h"
+#include "log/EventLog.h"
 
 #if CFG_USB_OTA_ENABLE
 
@@ -68,6 +69,8 @@ void UsbOta::begin(IDisplay* display) {
   // 如果升级后这里出现 ABORTED，说明新镜像启动后没来得及调用
   // esp_ota_mark_app_valid_cancel_rollback() 就被复位了（被回滚）。
   dumpOtadata();
+  EVT_LOGI("OTA", "begin fw=%s part=%s", CFG_FW_VERSION,
+           partLabel(esp_ota_get_running_partition()));
 }
 
 bool UsbOta::loop() {
@@ -104,6 +107,10 @@ bool UsbOta::loop() {
 }
 
 void UsbOta::handleLine(const char* line) {
+  // LOG_* 串口命令统一交给 EventLog 处理；未识别时继续走原有 OTA_* 分发。
+  if (evtlog::handleCommand(line)) {
+    return;
+  }
   if (strcmp(line, "OTA_PING") == 0) {
     // 带上编译时间戳和当前运行分区，网页握手时就能确认到底跑的是哪一版。
     Serial.printf("OTA: PONG ver=%s build=%s part=%s\n", CFG_FW_VERSION,
@@ -229,6 +236,11 @@ void UsbOta::dumpInfo() {
 }
 
 void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
+  // 传输期间暂停落盘：Update.write() 和日志文件写同一片 flash，抢总线会拖慢
+  // 升级甚至导致写入失败。事件先进 RAM，结束/失败后再统一落盘。
+  evtlog::setPaused(true);
+  EVT_LOGI("OTA", "start size=%lu crc=%08lx", static_cast<unsigned long>(size),
+           static_cast<unsigned long>(crc));
 #if CFG_DEBUG_LOG
   CFG_LOG("[OTA] begin size=%lu crc=%08lx",
           static_cast<unsigned long>(size),
@@ -237,6 +249,9 @@ void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
 
   if (!Update.begin(size, U_FLASH)) {
     Serial.printf("OTA: ERR begin %s\n", Update.errorString());
+    EVT_LOGE("OTA", "begin failed %s", Update.errorString());
+    evtlog::setPaused(false);
+    evtlog::flush();
     return;
   }
 
@@ -263,6 +278,9 @@ void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
     }
     if (!readChunk(s_chunk, want, CFG_USB_OTA_RX_TIMEOUT_MS)) {
       Serial.println("OTA: ERR timeout");
+      EVT_LOGE("OTA", "timeout got=%lu/%lu",
+               static_cast<unsigned long>(received),
+               static_cast<unsigned long>(size));
       ok = false;
       break;
     }
@@ -279,6 +297,9 @@ void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
     runningCrc = crc32Update(runningCrc, s_chunk, want);
     if (Update.write(s_chunk, want) != want) {
       Serial.printf("OTA: ERR write %s\n", Update.errorString());
+      EVT_LOGE("OTA", "write failed at=%lu/%lu %s",
+               static_cast<unsigned long>(received),
+               static_cast<unsigned long>(size), Update.errorString());
       ok = false;
       break;
     }
@@ -305,9 +326,13 @@ void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
       Serial.printf("OTA: ERR crc (got %08lx want %08lx)\n",
                     static_cast<unsigned long>(finalCrc),
                     static_cast<unsigned long>(crc));
+      EVT_LOGE("OTA", "crc got=%08lx want=%08lx",
+               static_cast<unsigned long>(finalCrc),
+               static_cast<unsigned long>(crc));
       ok = false;
     } else if (!Update.end()) {
       Serial.printf("OTA: ERR end %s\n", Update.errorString());
+      EVT_LOGE("OTA", "end failed %s", Update.errorString());
       ok = false;
     }
   }
@@ -344,6 +369,9 @@ void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
         Serial.printf("OTA: ERR readback (got %08lx want %08lx)\n",
                       static_cast<unsigned long>(readbackCrc),
                       static_cast<unsigned long>(crc));
+        EVT_LOGE("OTA", "readback got=%08lx want=%08lx err=%d",
+                 static_cast<unsigned long>(readbackCrc),
+                 static_cast<unsigned long>(crc), readOk ? 0 : 1);
         // flash 内容和主机文件不一致：把启动分区改回去，别让设备去跑坏镜像。
         if (running != nullptr) {
           esp_ota_set_boot_partition(running);
@@ -379,6 +407,7 @@ void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
     if (running != nullptr && boot != nullptr && boot->address == running->address) {
       Serial.printf("OTA: ERR boot partition not switched (still %s)\n",
                     boot->label);
+      EVT_LOGE("OTA", "boot not switched %s", boot->label);
       ok = false;
     }
   }
@@ -398,6 +427,10 @@ void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
 #if CFG_DEBUG_LOG
     cfglog::setMuted(false);
 #endif
+    // 失败事件是在暂停期间写进 RAM 的，这里恢复落盘并强制刷一次，保证重启/
+    // 继续运行后还能看到失败原因。
+    evtlog::setPaused(false);
+    evtlog::flush();
     m_transferring = false;
     m_lineLen = 0;
     return;
@@ -405,6 +438,11 @@ void UsbOta::startTransfer(uint32_t size, uint32_t crc) {
 
   Serial.printf("OTA: OK boot=%s\n",
                 partLabel(esp_ota_get_boot_partition()));
+  EVT_LOGI("OTA", "ok boot=%s size=%lu",
+           partLabel(esp_ota_get_boot_partition()),
+           static_cast<unsigned long>(size));
+  evtlog::setPaused(false);
+  evtlog::flush();
   Serial.flush();
   setOverlay("USB OTA", "100%", "Rebooting...");
   delay(1200);

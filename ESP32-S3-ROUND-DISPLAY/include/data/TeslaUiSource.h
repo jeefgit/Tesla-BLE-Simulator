@@ -20,4 +20,7 @@ class TeslaUiSource : public IUiModelSource {
   UiModel m_model;
   UiLinkState m_lastLink = UiLinkState::Idle;
   uint32_t m_stateSinceMs = 0;
+  // 配钥尝试/阶段的上一轮快照，只在变化时落一条事件，避免每轮 loop 重复。
+  uint8_t m_lastPairingAttempt = 0;
+  UiPairingPhase m_lastPairingPhase = UiPairingPhase::Idle;
 };

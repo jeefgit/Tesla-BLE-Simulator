@@ -7,6 +7,7 @@
 
 #include "display/RoundDisplay.h"
 #include "input/Qmi8658.h"
+#include "log/EventLog.h"
 
 namespace {
 
@@ -41,6 +42,11 @@ void PowerManager::detectWakeReason() {
   if (cause != ESP_SLEEP_WAKEUP_UNDEFINED) {
     CFG_LOG("[PWR] wake cause=%s motion=%d", wakeCauseName(cause),
             m_wokeByMotion ? 1 : 0);
+    EVT_LOGI("PWR", "wake cause=%s motion=%d", wakeCauseName(cause),
+             m_wokeByMotion ? 1 : 0);
+  } else {
+    // 电源上电没有 wake cause，单独记一条，方便区分“复位”和“唤醒”。
+    EVT_LOGI("PWR", "wake=power-on");
   }
 }
 
@@ -165,6 +171,7 @@ void PowerManager::update(const UiModel& model, bool bootAnimationRunning,
       m_lastMotionMs = now;
     } else if (static_cast<int32_t>(now - m_wakeConfirmDeadline) >= 0) {
       CFG_LOG("[PWR] no motion after wake; sleeping again");
+      EVT_LOGW("PWR", "no motion after wake; sleeping again");
       m_wakeConfirmPending = false;
       enterDeepSleep();
       return;
@@ -185,6 +192,8 @@ void PowerManager::enterDeepSleep() {
     return;
   }
   m_enteringSleep = true;
+  EVT_LOGI("PWR", "idle sleep idle=%lums",
+           static_cast<unsigned long>(CFG_AUTO_SLEEP_IDLE_MS));
 
   const uint8_t savedBrightness =
       m_display != nullptr ? m_display->brightness() : 0;
@@ -199,6 +208,7 @@ void PowerManager::enterDeepSleep() {
   if (!m_imu->configureWakeOnMotion(CFG_AUTO_SLEEP_WOM_THRESHOLD_MG,
                                     CFG_AUTO_SLEEP_WOM_BLANKING)) {
     CFG_LOG("[PWR] WoM config failed; stay awake");
+    EVT_LOGW("PWR", "WoM config failed; stay awake");
     if (m_display != nullptr) {
       m_display->panelSleep(false);
       m_display->setBrightnessRaw(savedBrightness);
@@ -219,6 +229,7 @@ void PowerManager::enterDeepSleep() {
   }
   if (digitalRead(CFG_AUTO_SLEEP_WAKE_GPIO) == HIGH) {
     CFG_LOG("[PWR] INT2 still high; abort sleep to avoid wake loop");
+    EVT_LOGW("PWR", "INT2 still high; abort sleep");
     if (m_display != nullptr) {
       m_display->panelSleep(false);
       m_display->setBrightnessRaw(savedBrightness);
@@ -235,6 +246,8 @@ void PowerManager::enterDeepSleep() {
   if (wakeErr != ESP_OK) {
     CFG_LOG("[PWR] ext1 wakeup config failed (%d); stay awake",
             static_cast<int>(wakeErr));
+    EVT_LOGW("PWR", "ext1 wakeup config failed (%d); stay awake",
+             static_cast<int>(wakeErr));
     if (m_display != nullptr) {
       m_display->panelSleep(false);
       m_display->setBrightnessRaw(savedBrightness);
@@ -249,6 +262,9 @@ void PowerManager::enterDeepSleep() {
 #endif
 
   CFG_LOG("[PWR] entering deep sleep; move device to wake");
+  EVT_LOGI("PWR", "entering deep sleep");
+  // 深睡后不再返回，必须先把日志写进 Flash。
+  evtlog::flush();
   Serial.flush();
   esp_deep_sleep_start();  // 不返回
 }

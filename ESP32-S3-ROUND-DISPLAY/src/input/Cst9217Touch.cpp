@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "config.h"
+#include "log/EventLog.h"
 
 namespace {
 
@@ -96,6 +97,7 @@ bool Cst9217Touch::initController() {
   write[1] = 0x01;
   if (!writeBytes(write, 2)) {
     CFG_LOG("[TOUCH] failed to enter command mode");
+    EVT_LOGE("TOUCH", "enter command mode failed");
     return false;
   }
   delay(10);
@@ -104,6 +106,7 @@ bool Cst9217Touch::initController() {
   write[1] = 0xFC;
   if (!writeThenRead(write, 2, read, 4)) {
     CFG_LOG("[TOUCH] failed to read firmware info (0xD1FC)");
+    EVT_LOGE("TOUCH", "read fw info failed");
     return false;
   }
   CFG_LOG("[TOUCH] firmware info: %02X %02X %02X %02X", read[0], read[1],
@@ -111,6 +114,7 @@ bool Cst9217Touch::initController() {
   // 固件信息校验码高 16 位固定为 CACA，读不到说明固件没起来。
   if (read[2] != 0xCA || read[3] != 0xCA) {
     CFG_LOG("[TOUCH] checkcode mismatch");
+    EVT_LOGE("TOUCH", "checkcode %02X%02X", read[2], read[3]);
     return false;
   }
 
@@ -118,6 +122,7 @@ bool Cst9217Touch::initController() {
   write[1] = 0xF8;
   if (!writeThenRead(write, 2, read, 4)) {
     CFG_LOG("[TOUCH] failed to read resolution (0xD1F8)");
+    EVT_LOGE("TOUCH", "read resolution failed");
     return false;
   }
   const uint16_t resX = static_cast<uint16_t>((read[1] << 8) | read[0]);
@@ -127,12 +132,14 @@ bool Cst9217Touch::initController() {
   write[1] = 0x04;
   if (!writeThenRead(write, 2, read, 4)) {
     CFG_LOG("[TOUCH] failed to read chip id (0xD204)");
+    EVT_LOGE("TOUCH", "read chip id failed");
     return false;
   }
   // 芯片类型是 16 位大端：高字节在后（SensorLib 写法 buffer[3]<<8 | buffer[2]）。
   const uint16_t chipId = static_cast<uint16_t>((read[3] << 8) | read[2]);
   if (chipId != kChipIdCst9217 && chipId != kChipIdCst9220) {
     CFG_LOG("[TOUCH] unexpected chip id 0x%04X", chipId);
+    EVT_LOGE("TOUCH", "chip id 0x%04X", chipId);
     return false;
   }
 

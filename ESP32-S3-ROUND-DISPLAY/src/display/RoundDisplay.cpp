@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "log/EventLog.h"
 #include "platform/boards/waveshare_esp32_s3_touch_amoled_175_b.h"
 
 namespace {
@@ -49,6 +50,7 @@ bool RoundDisplay::begin() {
   m_height = board.height;
 
   if (!m_gfx->begin()) {
+    EVT_LOGE("DISP", "CO5300 begin failed");
     return false;
   }
 
@@ -63,6 +65,7 @@ bool RoundDisplay::begin() {
   lv_tick_set_cb(getLvglTick);
   m_display = lv_display_create(board.width, board.height);
   if (m_display == nullptr) {
+    EVT_LOGE("DISP", "lv_display_create failed");
     return false;
   }
 
@@ -78,6 +81,7 @@ bool RoundDisplay::begin() {
         heap_caps_malloc(bufferBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   }
   if (m_drawBuffer == nullptr) {
+    EVT_LOGE("DISP", "draw buffer allocation failed");
     return false;
   }
 
@@ -91,6 +95,7 @@ bool RoundDisplay::begin() {
   }
   if (m_rotateBuffer == nullptr) {
     UI_LOG("rotation buffer unavailable, rotation disabled");
+    EVT_LOGW("DISP", "rotation buffer unavailable");
   }
 
   // 恢复上次 BOOT 键设置的旋转方向和滑动调过的亮度，开机第一帧即生效。

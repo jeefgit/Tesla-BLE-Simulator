@@ -36,10 +36,13 @@ ESP32-S3-ROUND-DISPLAY/
 │   ├── config.h
 │   ├── app/
 │   │   └── DashboardApp.h
+│   ├── audio/
+│   │   └── SoundSensor.h        # 声音传感器
 │   ├── core/
 │   │   └── UiModel.h
 │   ├── data/
-│   │   └── IVehicleSource.h
+│   │   ├── IUiModelSource.h
+│   │   └── TeslaUiSource.h      # VehicleState / SourceStatus → UiModel
 │   ├── display/
 │   │   ├── IDisplay.h
 │   │   ├── RoundDisplay.h
@@ -47,33 +50,44 @@ ESP32-S3-ROUND-DISPLAY/
 │   ├── input/
 │   │   ├── Cst9217Touch.h       # CST9217 触摸轮询驱动
 │   │   └── Qmi8658.h            # QMI8658 IMU 最小驱动（加速度 / WoM）
+│   ├── log/
+│   │   └── EventLog.h           # 设备事件日志：RAM 缓冲 + LittleFS 槽轮转
+│   ├── ota/
+│   │   └── UsbOta.h              # USB CDC 网页 OTA：写备用分区 + 进度页
 │   ├── platform/
 │   │   ├── BoardProfile.h
 │   │   └── boards/
 │   │       └── waveshare_esp32_s3_touch_amoled_175_b.h
-│   ├── ota/
-│   │   └── UsbOta.h              # USB CDC 网页 OTA：写备用分区 + 进度页
 │   ├── power/
 │   │   └── PowerManager.h       # 静止自动休眠 / 运动唤醒状态机
 │   └── ui/
+│       ├── ElfOverlay.h
 │       ├── IDashboard.h
 │       └── LvglDashboard.h
 ├── src/
-    ├── app/
-    │   └── DashboardApp.cpp
-    ├── display/
-    │   ├── RoundDisplay.cpp
-    │   └── ScreenShot.cpp
-    ├── input/
-    │   ├── Cst9217Touch.cpp
-    │   └── Qmi8658.cpp
-    ├── power/
-    │   └── PowerManager.cpp
-    ├── ota/
-    │   └── UsbOta.cpp             # 串口协议 + Update.h 写 OTA 分区
-    ├── ui/
-    │   └── LvglDashboard.cpp
-    └── main.cpp
+│   ├── app/
+│   │   └── DashboardApp.cpp
+│   ├── audio/
+│   │   └── SoundSensor.cpp
+│   ├── data/
+│   │   └── TeslaUiSource.cpp
+│   ├── display/
+│   │   ├── RoundDisplay.cpp
+│   │   └── ScreenShot.cpp
+│   ├── input/
+│   │   ├── Cst9217Touch.cpp
+│   │   └── Qmi8658.cpp
+│   ├── log/
+│   │   └── EventLog.cpp         # 挂载 / 轮转 / meta / LOG_* 串口命令
+│   ├── ota/
+│   │   └── UsbOta.cpp             # 串口协议 + Update.h 写 OTA 分区
+│   ├── power/
+│   │   └── PowerManager.cpp
+│   ├── ui/
+│   │   ├── ElfOverlay.cpp
+│   │   ├── LvglDashboard.cpp
+│   │   └── TeslaBootLogo.cpp
+│   └── main.cpp
 └── tools/
     ├── decode_screenshot.py       # 从串口日志还原 .bmp
     └── ota/                       # 本地网页 OTA（index.html + serve.py）
@@ -275,6 +289,129 @@ py tools/ota/serve.py           # 自动打开 http://localhost:8787/index.html
   `pio run -t upload` / esptool 重新烧录。
 - 协议、逐块 ACK 与 CRC 细节见 `tools/ota/README.md`；开关和版本号在
   `include/config.h` 的 `CFG_USB_OTA_ENABLE` / `CFG_FW_VERSION`。
+
+### 设备事件日志（EventLog）
+
+设备长时间无人值守时，断连、配对失败、异常复位、堆内存不足、显示/触摸初始化
+失败等事件往往发生在一瞬间，人不在现场、串口监视器也没开，日志就丢了。事件日志
+把这类关键事件自动写入板载 Flash，**不依赖 WiFi，也不依赖电脑**；事后通过 USB
+连上设备即可读取。
+
+**存储位置**
+
+复用 `default_16MB.csv` 自带的 `spiffs` 分区（起始 `0xC90000`，大小
+`0x360000`，约 3.375 MB），在其上挂载 LittleFS，**不需要改分区表，也不需要改
+`platformio.ini`**。日志文件：
+
+```text
+/littlefs/logs/evt0.log   槽 0
+/littlefs/logs/evt1.log   槽 1
+/littlefs/logs/evt2.log   槽 2
+/littlefs/logs/evt3.log   槽 3
+/littlefs/logs/meta.bin   当前槽、全局序号等元数据
+```
+
+默认 4 个槽 × 24 KB，硬上限 96 KB（不到分区容量的 3%）。写满后自动轮转覆盖
+最旧的槽，**任何情况下都不会把 Flash 写满**；每个槽首行是
+`#slot=<n> seq=<n> boot=<n>` 文件头，单独拷出也能看清顺序。
+
+**记录格式**
+
+```text
+[000123] 00:12:34.567 W BLE link Ready
+[000124] 00:12:35.001 E BLE pairing failed code=5 attempts=3/3
+[000125] 00:13:01.220 W HEAP free=28640 min=19200 largest=16384
+```
+
+- `[000123]`：全局递增序号，轮转覆盖后也不清零，便于判断先后。
+- `00:12:34.567`：本次 boot 的开机毫秒（时:分:秒.毫秒）。设备没有 RTC，所以
+  这不是真实时间；**下载文件名用主机当前时间**，方便和现场情况对照。
+- `W` / `I` / `E`：级别，`tag` 为来源模块（最长 6 字符），单行上限 160 字节。
+- 每次启动写一组 boot banner：boot 号、reset reason、固件版本/编译时间、当前
+  运行分区、free heap、wake cause。示例：
+
+```text
+===== boot=7 reset=BROWNOUT fw=0.1.7 build=Nov 19 2026 12:00:00 part=app0 heap=182000
+[000001] 00:00:00.412 I BOOT wake=ext1 gpio=21
+```
+
+**如何读取**
+
+1. 用 USB 连接设备，打开 `tools/ota` 页面（Chrome / Edge，必须是
+   `http://localhost`，不能直接双击 `index.html`），点“连接设备”。
+2. 在“设备事件日志”卡片点“读取日志”，进度条到 100% 后按 `seq` 从旧到新
+   显示各槽内容，槽之间用 `---- slot n (seq=x) ----` 分隔。
+3. 点“下载 .txt”保存为 `tesla-log-YYYYMMDD-HHMMSS.txt`（主机本地时间，
+   UTF-8 纯文本）；点“清空”二次确认后删除全部日志。
+
+也可以在串口命令行使用同一套命令：
+
+```text
+LOG_INFO                              查询挂载状态、容量、当前 seq
+LOG_LIST                              列出所有有效槽（按 seq 升序）
+LOG_READ <index> <offset> <len>       读一块，len 由设备钳制到 512 字节
+LOG_CLEAR                             清空全部日志
+LOG_MARK <text>                       手动打一个标记（≤60 字节）
+```
+
+读取按 512 字节分块、由页面逐块请求，**不会在连接后自动读取**，避免打扰 OTA
+心跳；读取和固件升级不要同时进行（页面会自动互相禁用按钮）。
+
+**埋点范围**
+
+只记录事件，不做全量日志轮询：
+
+- 开机、异常复位（panic / watchdog / brownout 等）；
+- BLE 链路状态变化与进入 `Error`，附带加密/配对/重连上下文；
+- 配对尝试与失败（`attempts=n/max`）；
+- 堆不足（低于阈值记一次，恢复再记一次，带滞回，避免刷屏）；
+- 显示、触摸、扩展 IO（TCA9554）初始化失败；
+- 自动休眠与唤醒（空闲时长、唤醒源）；
+- PWR 长按重启；
+- OTA 开始、成功、失败（大小、CRC、失败原因）；
+- 手动标记（`LOG_MARK`，现场复现时打时间点）。
+
+**可靠性设计**
+
+- `log()` 只写 4 KB RAM 环形缓冲，不做任何文件 IO；主循环 `evtlog::loop()`
+  分块落盘，单次不超过 20 ms（每轮最多 512 字节），不阻塞 LVGL 和 BLE。
+- OTA 传输期间暂停落盘，只保留 RAM 缓冲，避免与 `Update.write()` 抢 Flash。
+- 直接拔电最多丢最后约 4 KB 未落盘数据；`meta.bin` 用“临时文件 + rename”
+  写入，启动时校验失败会自动扫描各槽文件头恢复，不阻塞启动。
+- 重复事件按 `tag + 内容` 在 500 ms 内限频，缓冲满时丢弃最旧数据并计数。
+- LittleFS 挂载失败时降级为“串口镜像 + 仅 RAM”，`LOG_INFO` 会报告
+  `mount=fail`，**不会重启设备**，仪表功能不受影响。
+
+**配置**（`include/config.h`）
+
+```cpp
+#define CFG_EVTLOG_ENABLE 1               // 0 = 完全关闭（宏退化为空操作）
+#define CFG_EVTLOG_SERIAL_MIRROR 1        // 同时输出到串口
+#define CFG_EVTLOG_LEVEL_MIN 0            // 0=I 1=W 2=E
+#define CFG_EVTLOG_SLOTS 4                // 槽数量（2..8）
+#define CFG_EVTLOG_SLOT_BYTES 24576       // 单槽上限
+#define CFG_EVTLOG_RAM_BYTES 4096         // RAM 环形缓冲
+#define CFG_EVTLOG_FLUSH_MS 800           // 缓冲超过该时长尝试落盘
+#define CFG_EVTLOG_FLUSH_BYTES 256        // 或缓冲达到该字节数落盘
+#define CFG_EVTLOG_RATE_LIMIT_MS 500      // 相同事件限频窗口
+#define CFG_EVTLOG_HEAP_WARN_BYTES 32768  // 低堆告警阈值
+#define CFG_EVTLOG_READ_CHUNK 512         // 单次读取块大小
+#define CFG_EVTLOG_TEST_CMDS 0            // 1 = 启用 LOG_TEST 压测，发布保持 0
+```
+
+`CFG_EVTLOG_TEST_CMDS` 默认 `0`，只有做轮转/掉电压测时才临时改为 `1`
+（启用 `LOG_TEST <n>`），验证完记得改回。
+
+**验证要点**
+
+- 正常上电后读取日志，第一组是 boot banner，包含 boot 号、reset reason、
+  `part=` 和 wake cause。
+- 关闭车端电源或车辆模拟器：出现 `Reconnecting` / `Error` 及上下文行，且一分钟
+  内只有少量条目，不刷屏。
+- 长按 PWR 重启后再读取，重启前的最后一条日志仍在。
+- 触发自动休眠：睡眠前有休眠记录；运动唤醒后新 boot 日志里有 `wake=ext1`。
+- 网页读取进度到 100%，下载的 `.txt` 用记事本/VSCode 打开中文与换行正常。
+- 清空后 `LOG_INFO` 返回 `used=0`，再次读取只剩空槽。
 
 ### 静止自动休眠 / 运动唤醒
 

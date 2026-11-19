@@ -40,6 +40,33 @@
 6. 升级成功后页面会自动断开，**等 10 秒**再自动重连（最多重试 3 次），并在
    日志里给出“升级是否生效”的结论。想立刻连接可以随时点“连接设备”打断倒计时。
 
+## 读取设备事件日志
+
+设备把事件日志写在板载 Flash 的 `spiffs` 分区（LittleFS，最多 4 个槽 × 24 KB =
+96 KB），**不需要 WiFi，也不改分区表**。时间戳是 **boot 号 + 开机毫秒**
+（设备没有 RTC），不是真实时间。
+
+1. 连接设备（同上面的步骤 4）。
+2. “设备事件日志”卡片会显示当前容量（`used / 总容量`）。连接后只静默刷新一次；
+   需要最新数据可重新连接或再读一次。
+3. 点“读取日志”：页面先发 `LOG_LIST` 拿到文件列表，再逐文件、逐块
+   （每块 512 字节）发送 `LOG_READ`；进度条到 100% 后，按 `seq` 从旧到新把
+   各槽文本拼到面板，槽之间用 `---- slot n (seq=x) ----` 分隔。
+4. 点“下载 .txt”：保存为 `tesla-log-YYYYMMDD-HHMMSS.txt`（**主机本地时间**），
+   内容为 UTF-8 纯文本。
+5. 点“清空”：二次确认后发送 `LOG_CLEAR`，成功后自动刷新容量。
+
+注意：
+
+- **读取不会自动进行**，避免影响 OTA 心跳/升级。
+- 读取期间会禁用“读取 / 下载 / 清空”和“开始升级”，避免命令交错；升级期间
+  同样禁用日志按钮。读取大日志时页面可能在收块时略有卡顿。
+- 读取中途点“断开”会立即中断（等待中的请求被拒绝），页面不会崩，也不会留下
+  未处理的 Promise。
+- 单槽上限 24 KB，总计 4 槽；写满后最旧的槽被覆盖。
+- `LOG_MARK <text>`（text ≤ 60 字节）用于串口命令行手动打时间点，页面暂未提供
+  输入框。
+
 ## 协议（`src/ota/UsbOta.cpp`）
 
 串口为 USB CDC，文本命令 + 二进制数据块，`\n` 结尾：
@@ -61,6 +88,24 @@
 | 设备 → 主机 | `OTA: INFO readback=ok\n` | 回读 Flash 重算 CRC 与主机一致 |
 | 设备 → 主机 | `OTA: INFO written size=<n> part=<label>\n` | 已落盘镜像大小 + 目标分区 |
 | 设备 → 主机 | `OTA: OK boot=<label>\n` / `OTA: ERR crc\|end\|timeout\|write\|readback ...\n` | 最终结果 |
+| 主机 → 设备 | `LOG_INFO\n` | 查询事件日志状态（容量 / 挂载 / seq） |
+| 设备 → 主机 | `OTA: LOG INFO enabled=1 mount=ok slots=4 slotBytes=24576 used=3120 seq=42 cur=2 dropped=0 err=0\n` | 日志状态；`mount=fail` 表示日志不可用 |
+| 主机 → 设备 | `LOG_LIST\n` | 列出所有有效槽（按 `seq` 升序） |
+| 设备 → 主机 | `OTA: LOG FILE slot=0 seq=39 size=24576\n` | 一个有效日志文件，可能有多条 |
+| 设备 → 主机 | `OTA: LOG LIST done files=2\n` | 列表结束 |
+| 主机 → 设备 | `LOG_READ <index> <offset> <len>\n` | 读一块；`len` 由设备钳制到 512 |
+| 设备 → 主机 | `OTA: LOG DATA slot=2 offset=0 len=512 crc=89abcdef <base64>\n` | 块数据 + 块内 CRC32（与页面 `crc32()` 同算法） |
+| 设备 → 主机 | `OTA: LOG READ end\n` | 该文件读完时在最后一块 `DATA` 后紧跟一条；页面只按 `DATA` 的 `len` 推进，不依赖它 |
+| 主机 → 设备 | `LOG_CLEAR\n` | 清空全部日志 |
+| 设备 → 主机 | `OTA: LOG CLEAR ok\n` | 清空成功 |
+| 主机 → 设备 | `LOG_MARK <text>\n` | 写一条用户标记，`text` ≤ 60 字节 |
+| 设备 → 主机 | `OTA: LOG MARK ok\n` | 标记写入成功 |
+| 设备 → 主机 | `OTA: LOG ERR <reason>\n` | 日志操作失败（**不会**用 `OTA: ERR`，避免中断正在进行的升级） |
+| 主机 → 设备 | `LOG_TEST <n>\n` | 仅 `CFG_EVTLOG_TEST_CMDS=1` 的固件可用，生成 n 行测试日志 |
+
+> `LOG_*` 命令由 `UsbOta::handleLine()` 转发给事件日志模块，所以和 OTA 共用同一个
+> 串口、同一套 `OTA:` 前缀；日志错误一律是 `OTA: LOG ERR ...`，不会触发页面
+> `rejectAll()` 把升级流程一起中断。`LOG_*` 响应必须是单行（base64 无换行）。
 
 > **不要用镜像里的 `esp_app_desc` 判断版本。** 这个 PlatformIO 配置下，镜像里的
 > app desc 来自预编译的 core 库（`project=arduino-lib-builder`，日期是 core 库的
@@ -69,7 +114,7 @@
 
 **排查“OTA 成功但没变化”**
 
-页面右上角会显示 `页面版本：ota-page-8`（不是就 Ctrl+Shift+R 强刷）。连上设备
+页面右上角会显示 `页面版本：ota-page-10`（不是就 Ctrl+Shift+R 强刷）。连上设备
 后会自动执行一次 `OTA_INFO`，日志里会出现：
 
 ```
@@ -119,6 +164,8 @@ OTA: INFO done
 ## 限制与回滚
 
 - 写入的是 `default_16MB.csv` 里的 `app0` / `app1`（各 6.25MB），分区表不用改。
+- 事件日志写在板载 Flash 的 `spiffs` 分区（LittleFS），同样不需要 WiFi，也不动
+  分区表；只有手动读取 / 清空时才会访问，平时只做小批量追加写。
 - 这个 core 的 sdkconfig 打开了 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`，所以
   新镜像首次启动处于 `PENDING_VERIFY`；Arduino 的 `initArduino()` 会在执行
   `setup()` 之前调用 `verifyOta()`（默认返回 true）并立即

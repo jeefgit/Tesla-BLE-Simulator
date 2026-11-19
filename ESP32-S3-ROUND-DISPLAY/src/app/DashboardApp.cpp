@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <esp_system.h>
 #include <string.h>
 
 #include "config.h"
@@ -9,6 +10,7 @@
 #include "display/ScreenShot.h"
 #include "input/Cst9217Touch.h"
 #include "input/Qmi8658.h"
+#include "log/EventLog.h"
 #include "platform/boards/waveshare_esp32_s3_touch_amoled_175_b.h"
 #include "power/PowerManager.h"
 #include "ui/LvglDashboard.h"
@@ -59,6 +61,38 @@ bool writeExpanderReg(uint8_t reg, uint8_t value) {
   return Wire.endTransmission() == 0;
 }
 
+// 事件日志：堆采样 5 秒一次；低水位告警与恢复之间留 8 KB 滞回。
+constexpr uint32_t kHeapSampleMs = 5000;
+constexpr uint32_t kHeapRecoverMarginBytes = 8192;
+
+// 异常复位时把 ESP-IDF 的原因码转成短字符串，便于日志直接阅读。
+const char* resetReasonName(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_POWERON:
+      return "POWERON";
+    case ESP_RST_EXT:
+      return "EXT";
+    case ESP_RST_SW:
+      return "SW";
+    case ESP_RST_PANIC:
+      return "PANIC";
+    case ESP_RST_INT_WDT:
+      return "INT_WDT";
+    case ESP_RST_TASK_WDT:
+      return "TASK_WDT";
+    case ESP_RST_WDT:
+      return "WDT";
+    case ESP_RST_DEEPSLEEP:
+      return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:
+      return "BROWNOUT";
+    case ESP_RST_SDIO:
+      return "SDIO";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 RoundDisplay display;
 LvglDashboard dashboard;
 
@@ -85,10 +119,18 @@ bool sameModel(const UiModel& a, const UiModel& b) {
 }  // namespace
 
 void DashboardApp::begin() {
+  // 事件日志最优先初始化：后续初始化失败/复位原因都要能落盘。
+  evtlog::begin();
+  const esp_reset_reason_t resetReason = esp_reset_reason();
+  if (resetReason != ESP_RST_POWERON && resetReason != ESP_RST_SW &&
+      resetReason != ESP_RST_DEEPSLEEP) {
+    EVT_LOGE("RESET", "reason=%s", resetReasonName(resetReason));
+  }
   // 先读唤醒原因，供休眠/唤醒确认逻辑使用。
   m_power.detectWakeReason();
   if (!display.begin()) {
     Serial.println("Display initialization failed.");
+    EVT_LOGE("DISP", "initialization failed");
     return;
   }
   Serial.printf("Display ready, free heap: %u bytes\n", ESP.getFreeHeap());
@@ -127,6 +169,7 @@ void DashboardApp::beginTouch() {
   if (!m_touch.begin(Wire, board.touchAddress, board.pinTouchReset,
                      board.pinTouchInt)) {
     CFG_LOG("[TOUCH] CST9217 not found; swipe brightness disabled");
+    EVT_LOGE("TOUCH", "CST9217 not found");
   }
 }
 
@@ -140,6 +183,7 @@ void DashboardApp::beginPowerButton() {
   const int16_t config = readExpanderReg(kPwrExpanderConfigReg);
   if (config < 0) {
     CFG_LOG("[BTN] TCA9554 not found; PWR long-press disabled");
+    EVT_LOGE("IO", "TCA9554 not found");
     return;
   }
   // 配置寄存器里 1 = 输入。EXIO4 必须保持输入才能读回 PWR 状态。
@@ -147,6 +191,7 @@ void DashboardApp::beginPowerButton() {
     if (!writeExpanderReg(kPwrExpanderConfigReg,
                           static_cast<uint8_t>(config | kPwrButtonMask))) {
       CFG_LOG("[BTN] failed to configure TCA9554 EXIO4 as input");
+      EVT_LOGE("IO", "TCA9554 EXIO4 config failed");
       return;
     }
   }
@@ -198,6 +243,10 @@ void DashboardApp::pollPowerButton() {
   if (m_pwrPressed && m_pwrArmed &&
       now - m_pwrPressStartMs >= kPwrLongPressMs) {
     CFG_LOG("[BTN] PWR long press -> restart");
+    EVT_LOGW("BTN", "restart by user hold=%ums",
+             static_cast<unsigned>(kPwrLongPressMs));
+    // 重启前把最后一条日志完整落盘，否则重启后就看不到了。
+    evtlog::flush();
     Serial.flush();
     ESP.restart();
   }
@@ -354,6 +403,8 @@ void DashboardApp::handleTap(int16_t x, int16_t y) {
 void DashboardApp::setModel(const UiModel& model) { m_model = model; }
 
 void DashboardApp::loop() {
+  // 事件日志先跑：即使显示初始化失败停在下面的分支，缓冲也能落盘。
+  evtlog::loop();
   if (!m_initialized) {
     delay(1000);
     return;
@@ -458,6 +509,24 @@ void DashboardApp::loop() {
     }
     dashboard.updateSpeedLabel(m_displaySpeedKmh, m_model.speedValid);
     m_lastRenderMs = now;
+  }
+  // 堆采样放在主循环末尾的低频位置：5 秒一次，只在越过阈值时记录。
+  const uint32_t heapNow = millis();
+  if (heapNow - m_lastHeapSampleMs >= kHeapSampleMs) {
+    m_lastHeapSampleMs = heapNow;
+    const uint32_t freeHeap = ESP.getFreeHeap();
+    const uint32_t minHeap = ESP.getMinFreeHeap();
+    const uint32_t largestHeap = ESP.getMaxAllocHeap();
+    if (!m_heapLow && freeHeap < CFG_EVTLOG_HEAP_WARN_BYTES) {
+      m_heapLow = true;
+      EVT_LOGW("HEAP", "free=%u min=%u largest=%u", freeHeap, minHeap,
+               largestHeap);
+    } else if (m_heapLow &&
+               freeHeap > CFG_EVTLOG_HEAP_WARN_BYTES + kHeapRecoverMarginBytes) {
+      m_heapLow = false;
+      EVT_LOGI("HEAP", "recovered free=%u min=%u largest=%u", freeHeap,
+               minHeap, largestHeap);
+    }
   }
   display.loop();
 }
