@@ -53,8 +53,10 @@ void BleLink::loop() {
 
     case State::Scanning:
       if (!m_scanStarted) {
+        // 扫描重试退避：还没扫到车不算断线，保持 Scanning，
+        // 避免 UI 在未连接阶段就显示 RECONNECTING。
+        if ((int32_t)(millis() - m_nextAttemptAt) < 0) break;
         if (!startScan()) {
-          m_state = State::Reconnecting;
           m_nextAttemptAt = millis() + CFG_RECONNECT_INTERVAL_MS;
         }
         break;
@@ -65,7 +67,7 @@ void BleLink::loop() {
       if (scanForTarget(NimBLEDevice::getScan()->getResults())) {
         m_state = State::Connecting;
       } else {
-        m_state = State::Reconnecting;
+        // 本轮没扫到：稍后重扫，状态留在 Scanning
         m_nextAttemptAt = millis() + CFG_RECONNECT_INTERVAL_MS;
       }
       break;
