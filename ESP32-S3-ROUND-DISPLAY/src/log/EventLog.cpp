@@ -1,4 +1,5 @@
 #include "log/EventLog.h"
+#include "fw_version.h"
 
 #if CFG_EVTLOG_ENABLE
 

@@ -1,4 +1,5 @@
 #include "ota/UsbOta.h"
+#include "fw_version.h"
 
 #include <Arduino.h>
 #include <Update.h>

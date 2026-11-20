@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "fw_version.h"
 #include "config/VinStore.h"
 
 extern const lv_image_dsc_t teslaBootLogo;

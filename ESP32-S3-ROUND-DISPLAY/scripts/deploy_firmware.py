@@ -6,8 +6,8 @@ firmware.bin 编译完成后，复制到
     <仓库根>/firmware/ESP32-S3-ROUND-DISPLAY/v<版本号>/firmware.bin
 并生成同目录 SHA256SUMS.txt（大写哈希，格式与既有发布目录一致）。
 
-版本号从 include/config.h 的 CFG_FW_VERSION 读取（由 bump_version.py 在
-编译前写入，因此 bin 里的版本与目录名一定一致）。clean / erase 等目标不触发。
+版本号从 include/fw_version.h 的 CFG_FW_VERSION 读取（由 bump_version.py 在
+编译前生成，因此 bin 里的版本与目录名一定一致）。clean / erase 等目标不触发。
 """
 
 Import("env")
@@ -17,12 +17,12 @@ import re
 import shutil
 from pathlib import Path
 
-CONFIG = Path(env["PROJECT_DIR"]) / "include" / "config.h"
+HEADER = Path(env["PROJECT_DIR"]) / "include" / "fw_version.h"
 SKIP_TARGETS = {"clean", "erase", "erase_flash", "menuconfig", "uploadfs"}
 
 
 def deploy(source, target, env):
-    with open(CONFIG, "r", encoding="utf-8", newline="") as f:
+    with open(HEADER, "r", encoding="utf-8", newline="") as f:
         m = re.search(r'#define CFG_FW_VERSION "([^"]*)"', f.read())
     if not m:
         print("[deploy] ERROR: CFG_FW_VERSION not found in config.h")

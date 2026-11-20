@@ -3,6 +3,8 @@
 .idea/
 include/secrets/*
 !include/secrets/tesla_client_key.h
+# 编译时由 scripts/bump_version.py 生成的版本头
+include/fw_version.h
 *.log
 *.elf
 *.bin
