@@ -35,6 +35,8 @@ struct UiModel {
   bool doorsValid = false;
   bool doors[6] = {};
   float speedKmh = 128.0f;
+  // 车速获取延迟：从发出 Drive 请求到解析完回包的耗时（ms），backend 实测。
+  uint32_t speedLatencyMs = 0;
   float motorPowerKw = 44.0f;
   float chargePowerKw = 11.2f;
   int32_t soc = 78;

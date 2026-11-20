@@ -34,6 +34,9 @@ struct VehicleState {
   uint32_t updatedAt = 0;  // 最近一次更新的 millis()
 
   float speedKmh = 0;
+  // 车速获取延迟：Drive 类 GetVehicleData 从发出到解析完成的耗时（ms）。
+  // 只统计 Drive 请求，辅助状态（SOC/胎压等）不参与。
+  uint32_t speedLatencyMs = 0;
 
   // 特斯拉 SimPayload 数据源
   float motorPowerKw = 0;

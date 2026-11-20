@@ -178,6 +178,7 @@ void TeslaUiSource::mapVehicle(const VehicleState& vehicle) {
   }
 
   m_model.speedKmh = vehicle.speedKmh;
+  m_model.speedLatencyMs = vehicle.speedLatencyMs;
   m_model.motorPowerKw = vehicle.motorPowerKw;
   m_model.chargePowerKw = vehicle.chargePowerKw;
   m_model.soc = vehicle.soc;

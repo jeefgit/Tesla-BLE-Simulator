@@ -96,6 +96,8 @@ class TeslaClient {
   uint32_t m_catLogged = 0;
   uint32_t m_reqLogged = 0;
   uint32_t m_emptyLogged = 0;
+  // 最近一次 Drive 类 GetVehicleData 的发出时刻，回包解析后算车速延迟。
+  uint32_t m_driveRequestAtMs = 0;
 
   // 每个辅助轮询周期连续请求 4 类状态；整轮完成后等待
   // CFG_TESLA_AUX_POLL_INTERVAL_MS 再开始下一轮。

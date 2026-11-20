@@ -609,6 +609,8 @@ void TeslaClient::sendPoll() {
     if (request == TeslaCrypto::VehicleDataRequest::Drive) {
       // 驾驶状态（车速、档位等）按 CFG_TESLA_DRIVE_POLL_INTERVAL_MS 刷新。
       m_nextDrivePollAt = now + CFG_TESLA_DRIVE_POLL_INTERVAL_MS;
+      // 记录发出时刻，回包解析成功后据此计算车速获取延迟。
+      m_driveRequestAtMs = now;
     } else {
       // 每轮连续请求辅助状态（胎压/车门可单独关闭）；完整一轮结束后
       // 再等待 AUX 周期。
@@ -877,6 +879,10 @@ void TeslaClient::onCryptoResponse(const uint8_t* plaintext, size_t len,
 
   bool decoded = decodeVehicleData(plaintext, len);
   if (decoded) {
+    // Drive 请求的回包解析完成：发出 → 解析完成即为车速获取延迟。
+    if (m_lastRequest == TeslaCrypto::VehicleDataRequest::Drive) {
+      g_vehicle.speedLatencyMs = millis() - m_driveRequestAtMs;
+    }
     // 每类状态首次成功解析时打一条，现场可直接看出车端到底回了哪几类数据。
     const uint32_t catBit = 1u << static_cast<uint8_t>(m_lastRequest);
     if (!(m_catLogged & catBit)) {

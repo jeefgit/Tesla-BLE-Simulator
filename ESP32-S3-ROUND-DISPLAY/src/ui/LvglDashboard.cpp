@@ -794,6 +794,12 @@ void LvglDashboard::buildDriving() {
   makeLabel(m_speedGroup, 0, 218, 466, 18, "KM/H",
             &lv_font_montserrat_14, kGaugeColor, LV_TEXT_ALIGN_CENTER);
 
+  // 车速获取延迟（请求发出 → 解析完成）。放在状态栏上方的空闲区，
+  // 只在驾驶页随 m_speedGroup 一起显示。
+  m_speedLatencyLabel = makeLabel(m_speedGroup, 0, 24, 466, 14, "LATENCY -- MS",
+                                  &lv_font_montserrat_10, kFaint,
+                                  LV_TEXT_ALIGN_CENTER);
+
   const char* gears[] = {"P", "R", "N", "D"};
   const int32_t gearX[] = {155, 197, 239, 281};
   lv_obj_t* gearTrack = lv_obj_create(m_speedGroup);
@@ -1459,6 +1465,18 @@ void LvglDashboard::render(const UiModel& model) {
                              LV_PART_MAIN);
 
   updateSpeedLabel(model.speedKmh, model.speedValid);
+
+  // 车速获取延迟：超过 500ms（Drive 轮询周期 300ms + BLE 抖动余量）变琥珀色。
+  if (model.speedValid) {
+    char latency[24];
+    snprintf(latency, sizeof(latency), "LATENCY %u MS",
+             static_cast<unsigned>(model.speedLatencyMs));
+    updateLabel(m_speedLatencyLabel, latency);
+    lv_obj_set_style_text_color(m_speedLatencyLabel,
+                                model.speedLatencyMs > 500 ? kAmber : kFaint, 0);
+  } else {
+    updateLabel(m_speedLatencyLabel, "LATENCY -- MS");
+  }
 
   const char gears[] = {'P', 'R', 'N', 'D'};
   bool selectedGearVisible = false;

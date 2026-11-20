@@ -70,6 +70,7 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_lockLabel = nullptr;
   lv_obj_t* m_speedGroup = nullptr;
   lv_obj_t* m_speedLabel = nullptr;
+  lv_obj_t* m_speedLatencyLabel = nullptr;
   lv_obj_t* m_gearHighlight = nullptr;
   lv_obj_t* m_gearLabels[4] = {};
   lv_obj_t* m_powerLabel = nullptr;
