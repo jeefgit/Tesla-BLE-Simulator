@@ -246,3 +246,18 @@ bool muted();
 #define CFG_EVTLOG_HEAP_WARN_BYTES 32768  // 堆低于此值记 WARN（带滞回）
 #define CFG_EVTLOG_READ_CHUNK 512         // 单次 LOG_READ 返回的原始字节数
 #define CFG_EVTLOG_TEST_CMDS 0            // 1 = 启用 LOG_TEST（压测轮转），发布前置 0
+
+// ---------------------------------------------------------------------------
+// 网页配置管理（WiFi AP + HTTP）
+//   设备自建热点，手机连上后浏览器打开 http://192.168.4.1 即可：
+//     - 上传 firmware.bin 进行 OTA 升级
+//     - 设置 VIN
+//     - 查看 / 清空事件日志
+//   热点常驻；有客户端连接时重置自动休眠计时，避免配置中途熄屏。
+//   实现见 src/net/WebConfigServer.cpp。
+// ---------------------------------------------------------------------------
+#define CFG_WEB_CONFIG_ENABLE 1
+#define CFG_WEB_AP_SSID_PREFIX "TeslaDash"   // 热点名 = 前缀 + 芯片 MAC 后 4 位
+#define CFG_WEB_AP_PASSWORD "12345678"        // 至少 8 位
+#define CFG_WEB_AP_CHANNEL 1
+#define CFG_WEB_PORT 80

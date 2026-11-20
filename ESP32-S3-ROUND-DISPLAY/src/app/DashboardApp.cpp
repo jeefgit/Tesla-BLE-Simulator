@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "config/ConfigMode.h"
 #include "config/VinStore.h"
 #include "display/RoundDisplay.h"
 #include "display/ScreenShot.h"
@@ -23,6 +24,7 @@ constexpr uint32_t kSpeedTransitionMs = 30;
 // BOOT 键接 GPIO0，板上有外部上拉，按下为低电平。
 constexpr uint8_t kBootButtonPin = 0;
 constexpr uint32_t kBootDebounceMs = 30;
+constexpr uint32_t kBootLongPressMs = 2000;  // 长按切换配置模式
 
 // PWR 键不在 ESP32 的 GPIO 上，而是经板载 TCA9554（I2C 0x20）的
 // EXIO4 读取：高电平表示按下，低电平表示松开。
@@ -133,6 +135,9 @@ void DashboardApp::begin() {
   evtlog::begin();
   // VIN 尽早加载：后续 UI 与 BLE 后端都读同一个生效值（NVS 优先）。
   vinstore::begin();
+  // 配置模式标志也尽早读：决定本次是跑 BLE 仪表还是只开配置热点。
+  configmode::begin();
+  m_configMode = configmode::active();
   const esp_reset_reason_t resetReason = esp_reset_reason();
   if (resetReason != ESP_RST_POWERON && resetReason != ESP_RST_SW &&
       resetReason != ESP_RST_DEEPSLEEP) {
@@ -175,6 +180,7 @@ void DashboardApp::begin() {
   beginTouch();
   m_power.begin(&m_imu, &display);
   m_ota.begin(&display);
+  // 网页配置热点只在配置模式开启（见 loop()），与 BLE 互斥，避免内存冲突。
 
 #if CFG_ELF_SOUND_ENABLE
   // 麦克风放在最后：ES7210 挂在 15/14 的 Wire 总线上，必须等
@@ -281,14 +287,36 @@ void DashboardApp::pollBootButton() {
     m_bootLastChangeMs = now;
     return;
   }
-  // 电平稳定 kBootDebounceMs 后才算一次有效按下，避免抖动触发多次旋转。
+  // 电平稳定 kBootDebounceMs 后才算一次有效按下，避免抖动。
   if (rawPressed != m_bootPressed &&
       now - m_bootLastChangeMs >= kBootDebounceMs) {
     m_bootPressed = rawPressed;
     if (m_bootPressed) {
+      m_bootPressStartMs = now;
+      m_bootLongPressFired = false;
       m_power.notifyUserActivity();
+    } else if (!m_bootLongPressFired) {
+      // 松手且未触发长按 -> 短按，旋转画面。
       display.rotateClockwise();
     }
+  }
+  // 长按 BOOT：切换配置模式（写 NVS 后重启生效）。两种模式互斥，
+  // 重启后 BLE 与 WiFi AP 只会启动其中一个，避免内存冲突。
+  if (m_bootPressed && !m_bootLongPressFired &&
+      now - m_bootPressStartMs >= kBootLongPressMs) {
+    m_bootLongPressFired = true;
+    if (m_configMode) {
+      configmode::exit();
+      CFG_LOG("[BTN] BOOT long press -> exit config mode, restart");
+      EVT_LOGW("BTN", "exit config mode by hold");
+    } else {
+      configmode::enter();
+      CFG_LOG("[BTN] BOOT long press -> enter config mode, restart");
+      EVT_LOGW("BTN", "enter config mode by hold");
+    }
+    evtlog::flush();
+    Serial.flush();
+    ESP.restart();
   }
 }
 
@@ -569,6 +597,10 @@ void DashboardApp::loop() {
   if (m_ota.loop()) {
     m_power.notifyUserActivity();
   }
+  // 网页配置：有手机连上热点 / 正在请求时重置自动休眠计时。
+  if (m_web.loop()) {
+    m_power.notifyUserActivity();
+  }
   // 小精灵可能在内部计时器里自动隐藏：检测可见性下降沿，强制补画一帧。
   // （自动隐藏默认关闭，这里也覆盖横滑退出后的补画。）
   const bool elfVisible = m_elf.visible();
@@ -582,7 +614,8 @@ void DashboardApp::loop() {
     m_power.notifyUserActivity();
   }
 #if !CFG_DEMO_MODE
-  if (!vinEditing && !m_sourceStarted && !dashboard.bootAnimationRunning()) {
+  if (!vinEditing && !m_sourceStarted && !dashboard.bootAnimationRunning() &&
+      !m_configMode) {
     m_source.begin();
     m_sourceStarted = true;
   }
@@ -594,6 +627,14 @@ void DashboardApp::loop() {
     m_model = m_source.model();
   }
 #endif
+  // 配置模式：只开 WiFi 热点（BLE 不启动）并保持常醒；正常/演示模式不开热点。
+  if (m_configMode) {
+    m_power.notifyUserActivity();
+    if (!m_webStarted) {
+      m_web.begin();
+      m_webStarted = true;
+    }
+  }
   // 车辆状态只在仪表模式同步给浮层（阶段 4 的充电打哈欠/车速瞳孔/急减速眯眼）。
   // 小精灵显示期间不更新：m_model 已冻结，避免用陈旧数据继续驱动联动。
   // VIN 编辑期间同样冻结（m_model 不刷新）。

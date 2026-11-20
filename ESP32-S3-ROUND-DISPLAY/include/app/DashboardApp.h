@@ -5,6 +5,7 @@
 #include "core/UiModel.h"
 #include "input/Cst9217Touch.h"
 #include "input/Qmi8658.h"
+#include "net/WebConfigServer.h"
 #include "ota/UsbOta.h"
 #include "power/PowerManager.h"
 #include "ui/ElfOverlay.h"
@@ -38,6 +39,10 @@ class DashboardApp {
   bool m_bootRawPressed = false;
   bool m_bootPressed = false;
   uint32_t m_bootLastChangeMs = 0;
+  uint32_t m_bootPressStartMs = 0;
+  bool m_bootLongPressFired = false;
+  // 本次运行是否处于配置模式（BOOT 长按/网页切换，重启后生效）。
+  bool m_configMode = false;
   // 触摸滑动手势状态（坐标均已换算成 LVGL 画面坐标）。
   Cst9217Touch m_touch;
   bool m_touchDown = false;
@@ -73,6 +78,8 @@ class DashboardApp {
   Qmi8658 m_imu;
   PowerManager m_power;
   UsbOta m_ota;
+  WebConfigServer m_web;
+  bool m_webStarted = false;
   UiModel m_model;
   bool m_initialized = false;
   uint32_t m_lastRenderMs = 0;

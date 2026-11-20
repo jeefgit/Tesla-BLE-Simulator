@@ -21,7 +21,13 @@ BleLink* BleLink::s_instance = nullptr;
 
 void BleLink::begin() {
   s_instance = this;
-  NimBLEDevice::init("TESLA-DASH");
+  // init 失败必须提前返回：此时 BLE host 未初始化，后续 setMTU 会命中
+  // ble_hs 未初始化互斥量而断言崩溃。WiFi 先于 BLE 初始化是常见诱因。
+  if (!NimBLEDevice::init("TESLA-DASH")) {
+    CFG_LOG("[BLE] NimBLEDevice::init 失败（请确认 WiFi 未先于 BLE 初始化）");
+    m_state = State::Idle;
+    return;
+  }
   NimBLEDevice::setMTU(CFG_MTU);  // 请求更大的 MTU，53 字节帧一次推完
   m_txQueue = xQueueCreate(1, sizeof(TxPacket));
   if (!m_txQueue) {
