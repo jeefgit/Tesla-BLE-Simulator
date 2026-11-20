@@ -186,7 +186,8 @@ bool muted();
 #define CFG_USB_OTA_ENABLE 1
 // PING 时上报给网页的固件版本：CFG_FW_VERSION 已移到 include/fw_version.h，
 // 由编译脚本 scripts/bump_version.py 按编译时刻（年.月.日.时分，如 2026.11.20.1419）
-// 自动生成；这里不再定义，避免每次编译改 config.h 引发大范围增量重编。
+// 自动生成；业务代码统一通过 fw_version_api.h 的 fwVersion() 获取，不要直接
+// include fw_version.h，这样每次改版本号只重编 src/fw_version.cpp 一个文件。
 // 真正能证明“升级生效”的是编译时间戳（见下）。
 // 编译时间戳，由编译器自动填充，不需要手动改。网页握手时会显示；只要这次
 // 和上次不同，就说明设备确实换成了新固件（版本号忘了改也能看出来）。

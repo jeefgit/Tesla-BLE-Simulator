@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "config.h"
-#include "fw_version.h"
+#include "fw_version_api.h"
 #include "config/VinStore.h"
 
 extern const lv_image_dsc_t teslaBootLogo;
@@ -385,7 +385,9 @@ void LvglDashboard::buildBootAnimation() {
   s_bootEmblem = m_bootEmblem;
 
   // Firmware version, static at the bottom of the boot screen (no animation).
-  makeLabel(m_bootLayer, 0, 406, kScreenSize, 24, "v" CFG_FW_VERSION,
+  char verText[32];
+  snprintf(verText, sizeof(verText), "v%s", fwVersion());
+  makeLabel(m_bootLayer, 0, 406, kScreenSize, 24, verText,
             &lv_font_montserrat_18, kDim, LV_TEXT_ALIGN_CENTER);
 
   // Start the elapsed-time animation on the first lv_timer_handler() run.

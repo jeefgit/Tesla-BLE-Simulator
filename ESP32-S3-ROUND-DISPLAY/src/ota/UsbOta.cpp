@@ -1,5 +1,5 @@
 #include "ota/UsbOta.h"
-#include "fw_version.h"
+#include "fw_version_api.h"
 
 #include <Arduino.h>
 #include <Update.h>
@@ -64,13 +64,13 @@ void UsbOta::begin(IDisplay* display) {
   // 这个 PlatformIO 配置下镜像里的 app desc 来自预编译的 core 库
   // （project=arduino-lib-builder，日期是 core 库的构建时间），
   // 所有构建都一模一样。用 config.h 里的编译时间戳才靠谱。
-  CFG_LOG("[OTA] fw %s built %s", CFG_FW_VERSION, CFG_FW_BUILD);
+  CFG_LOG("[OTA] fw %s built %s", fwVersion(), CFG_FW_BUILD);
   CFG_LOG("[OTA] running=%s boot=%s", partLabel(esp_ota_get_running_partition()),
           partLabel(esp_ota_get_boot_partition()));
   // 如果升级后这里出现 ABORTED，说明新镜像启动后没来得及调用
   // esp_ota_mark_app_valid_cancel_rollback() 就被复位了（被回滚）。
   dumpOtadata();
-  EVT_LOGI("OTA", "begin fw=%s part=%s", CFG_FW_VERSION,
+  EVT_LOGI("OTA", "begin fw=%s part=%s", fwVersion(),
            partLabel(esp_ota_get_running_partition()));
 }
 
@@ -114,7 +114,7 @@ void UsbOta::handleLine(const char* line) {
   }
   if (strcmp(line, "OTA_PING") == 0) {
     // 带上编译时间戳和当前运行分区，网页握手时就能确认到底跑的是哪一版。
-    Serial.printf("OTA: PONG ver=%s build=%s part=%s\n", CFG_FW_VERSION,
+    Serial.printf("OTA: PONG ver=%s build=%s part=%s\n", fwVersion(),
                   CFG_FW_BUILD, partLabel(esp_ota_get_running_partition()));
     return;
   }

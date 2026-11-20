@@ -1,5 +1,5 @@
 #include "log/EventLog.h"
-#include "fw_version.h"
+#include "fw_version_api.h"
 
 #if CFG_EVTLOG_ENABLE
 
@@ -844,7 +844,7 @@ void writeBootBanner() {
   snprintf(banner, sizeof(banner),
            "===== boot=%lu reset=%s fw=%s build=%s part=%s heap=%lu",
            static_cast<unsigned long>(s_boot),
-           resetReasonName(esp_reset_reason()), CFG_FW_VERSION, CFG_FW_BUILD,
+           resetReasonName(esp_reset_reason()), fwVersion(), CFG_FW_BUILD,
            part, static_cast<unsigned long>(ESP.getFreeHeap()));
   emitRawLine(banner);
 
