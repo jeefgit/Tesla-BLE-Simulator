@@ -17,8 +17,10 @@ constexpr uint32_t kPairingWindowMs = 30000;
 constexpr int32_t kArcMaxValue = 1000;
 constexpr float kGaugeMaxSpeedKmh = 150.0f;
 // Motor power bar: the track is 268px wide with the zero mark at x=134, so
-// each direction has 134px of travel. Clamp at +/-100kW for a livelier bar.
-constexpr float kPowerMaxKw = 100.0f;
+// each direction has 134px of travel. Asymmetric range: -100kW regen (green,
+// left) and +150kW output (red, right), each scaled to fill its half.
+constexpr float kPowerRegenMaxKw = 100.0f;
+constexpr float kPowerOutMaxKw = 150.0f;
 constexpr float kPowerHalfWidthPx = 134.0f;
 constexpr uint32_t kBootRingDurationMs = 1500;
 const lv_color_t kScreen = lv_color_hex(0x020406);
@@ -1547,10 +1549,10 @@ void LvglDashboard::render(const UiModel& model) {
              model.motorPowerKw < 0 ? "-" : "",
              fabsf(model.motorPowerKw));
     updateLabel(m_powerLabel, powerText);
-    const int32_t fillWidth = static_cast<int32_t>(
-        fminf(fabsf(model.motorPowerKw), kPowerMaxKw) *
-        kPowerHalfWidthPx / kPowerMaxKw);
     const bool regen = model.motorPowerKw < 0;
+    const float maxKw = regen ? kPowerRegenMaxKw : kPowerOutMaxKw;
+    const int32_t fillWidth = static_cast<int32_t>(
+        fminf(fabsf(model.motorPowerKw), maxKw) * kPowerHalfWidthPx / maxKw);
     lv_obj_set_size(m_powerFill, fillWidth, 5);
     lv_obj_set_pos(m_powerFill, regen ? 134 - fillWidth : 134, 0);
     lv_obj_set_style_bg_color(m_powerFill, regen ? kGreen : kRed, 0);
