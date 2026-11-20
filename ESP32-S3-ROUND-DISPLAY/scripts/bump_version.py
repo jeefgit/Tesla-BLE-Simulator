@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 CONFIG = Path(env["PROJECT_DIR"]) / "include" / "config.h"
-VERSION_RE = re.compile(r'#define CFG_FW_VERSION "[^"]*"')
+VERSION_RE = re.compile(r'#define CFG_FW_VERSION "([^"]*)"')
 SKIP_TARGETS = {"clean", "erase", "erase_flash", "menuconfig", "uploadfs"}
 
 targets = set(env.get("COMMAND_LINE_TARGETS", []))
