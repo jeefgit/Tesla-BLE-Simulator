@@ -110,6 +110,13 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_pairBarFill = nullptr;
   lv_obj_t* m_pairCardGlow = nullptr;
   lv_obj_t* m_pairPulse = nullptr;
+  lv_obj_t* m_pairCard = nullptr;
+  lv_obj_t* m_pairChip = nullptr;
+  lv_obj_t* m_pairStripe1 = nullptr;
+  lv_obj_t* m_pairStripe2 = nullptr;
+  lv_obj_t* m_pairSuccess = nullptr;   // 成功态绿色对勾徽章（默认隐藏）
+  lv_obj_t* m_pairNfcLabel = nullptr;  // "NFC READY"
+  lv_obj_t* m_pairHint = nullptr;      // "WINDOW CLOSES AUTOMATICALLY"
   bool m_pairAnimationRunning = false;
   lv_obj_t* m_doorPage = nullptr;
   lv_obj_t* m_doorTitle = nullptr;

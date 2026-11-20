@@ -1076,6 +1076,7 @@ void LvglDashboard::buildPairingPage() {
 
   lv_obj_t* card = lv_obj_create(m_pairPage);
   lv_obj_remove_style_all(card);
+  m_pairCard = card;
   lv_obj_set_pos(card, 183, 201);
   lv_obj_set_size(card, 100, 58);
   lv_obj_set_style_radius(card, 10, 0);
@@ -1087,6 +1088,7 @@ void LvglDashboard::buildPairingPage() {
 
   lv_obj_t* chip = lv_obj_create(card);
   lv_obj_remove_style_all(chip);
+  m_pairChip = chip;
   lv_obj_set_pos(chip, 12, 14);
   lv_obj_set_size(chip, 18, 24);
   lv_obj_set_style_radius(chip, 4, 0);
@@ -1097,6 +1099,7 @@ void LvglDashboard::buildPairingPage() {
 
   lv_obj_t* cardStripe = lv_obj_create(card);
   lv_obj_remove_style_all(cardStripe);
+  m_pairStripe1 = cardStripe;
   lv_obj_set_pos(cardStripe, 39, 17);
   lv_obj_set_size(cardStripe, 43, 3);
   lv_obj_set_style_radius(cardStripe, 2, 0);
@@ -1104,6 +1107,7 @@ void LvglDashboard::buildPairingPage() {
   lv_obj_set_style_bg_opa(cardStripe, LV_OPA_COVER, 0);
   lv_obj_t* cardStripe2 = lv_obj_create(card);
   lv_obj_remove_style_all(cardStripe2);
+  m_pairStripe2 = cardStripe2;
   lv_obj_set_pos(cardStripe2, 39, 26);
   lv_obj_set_size(cardStripe2, 32, 2);
   lv_obj_set_style_radius(cardStripe2, 1, 0);
@@ -1118,8 +1122,9 @@ void LvglDashboard::buildPairingPage() {
   lv_obj_set_style_bg_color(m_pairPulse, kScanCyan, 0);
   lv_obj_set_style_bg_opa(m_pairPulse, LV_OPA_COVER, 0);
   lv_obj_set_clickable(m_pairPulse, false);
-  makeLabel(m_pairPage, 179, 269, 108, 16, "NFC  READY",
-            &lv_font_montserrat_10, kScanCyan, LV_TEXT_ALIGN_CENTER);
+  m_pairNfcLabel = makeLabel(m_pairPage, 179, 269, 108, 16, "NFC  READY",
+                             &lv_font_montserrat_10, kScanCyan,
+                             LV_TEXT_ALIGN_CENTER);
 
   m_pairCount = makeScaledLabel(m_pairPage, 233, 315, "30",
                                 &lv_font_montserrat_48, kText, 440);
@@ -1146,9 +1151,51 @@ void LvglDashboard::buildPairingPage() {
                            "WAITING FOR KEY CARD",
                            &lv_font_montserrat_10, kAmber,
                            LV_TEXT_ALIGN_CENTER);
-  makeLabel(m_pairPage, 30, 428, 406, 16,
-            "WINDOW CLOSES AUTOMATICALLY",
-            &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
+  m_pairHint = makeLabel(m_pairPage, 30, 428, 406, 16,
+                         "WINDOW CLOSES AUTOMATICALLY",
+                         &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
+
+  // 成功态徽章：绿色圆环 + 对勾，位于原倒计时数字的位置，默认隐藏。
+  m_pairSuccess = lv_obj_create(m_pairPage);
+  lv_obj_remove_style_all(m_pairSuccess);
+  lv_obj_set_pos(m_pairSuccess, 191, 273);
+  lv_obj_set_size(m_pairSuccess, 84, 84);
+  lv_obj_set_clickable(m_pairSuccess, false);
+  lv_obj_add_flag(m_pairSuccess, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t* halo = lv_obj_create(m_pairSuccess);
+  lv_obj_remove_style_all(halo);
+  lv_obj_set_pos(halo, 3, 3);
+  lv_obj_set_size(halo, 78, 78);
+  lv_obj_set_style_radius(halo, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(halo, 1, 0);
+  lv_obj_set_style_border_color(halo, kGreen, 0);
+  lv_obj_set_style_border_opa(halo, LV_OPA_40, 0);
+  lv_obj_set_style_bg_opa(halo, LV_OPA_TRANSP, 0);
+  lv_obj_set_clickable(halo, false);
+
+  lv_obj_t* ring = lv_obj_create(m_pairSuccess);
+  lv_obj_remove_style_all(ring);
+  lv_obj_set_pos(ring, 10, 10);
+  lv_obj_set_size(ring, 64, 64);
+  lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(ring, 2, 0);
+  lv_obj_set_style_border_color(ring, kGreen, 0);
+  lv_obj_set_style_bg_color(ring, lv_color_hex(0x0A2415), 0);
+  lv_obj_set_style_bg_opa(ring, LV_OPA_COVER, 0);
+  lv_obj_set_clickable(ring, false);
+
+  // 对勾用一条折线画出；lv_line 只保存指针，数组必须静态存活。
+  static const lv_point_precise_t checkPoints[] = {
+      {0, 14}, {9, 23}, {28, 0},
+  };
+  lv_obj_t* check = lv_line_create(m_pairSuccess);
+  lv_line_set_points(check, checkPoints, 3);
+  lv_obj_set_pos(check, 28, 31);
+  lv_obj_set_style_line_width(check, 5, 0);
+  lv_obj_set_style_line_color(check, kGreen, 0);
+  lv_obj_set_style_line_rounded(check, true, 0);
+  lv_obj_set_clickable(check, false);
 }
 
 void LvglDashboard::buildDoorPage() {
@@ -1706,25 +1753,70 @@ void LvglDashboard::render(const UiModel& model) {
     }
     updateLabel(m_pairTitle, title);
     updateLabel(m_pairStatus, status);
-    lv_obj_set_style_text_color(m_pairTitle,
-                                model.pairing == UiPairingPhase::Failed
-                                    ? kRed
-                                    : kAmber,
-                                0);
-    char count[12];
-    snprintf(count, sizeof(count), "%lu",
-             static_cast<unsigned long>((model.pairingRemainMs + 999) / 1000));
-    updateLabel(m_pairCount, count);
+    const bool pairSuccess = model.pairing == UiPairingPhase::Success;
+    const bool pairFailed = model.pairing == UiPairingPhase::Failed;
+    const lv_color_t pairAccent =
+        pairFailed ? kRed : (pairSuccess ? kGreen : kAmber);
+    lv_obj_set_style_text_color(m_pairTitle, pairAccent, 0);
+    lv_obj_set_style_text_color(m_pairStatus, pairAccent, 0);
+
+    // 卡片、芯片、读卡点随状态变色：等待=琥珀，成功=绿，失败=红。
+    lv_obj_set_style_border_color(m_pairCardGlow, pairAccent, 0);
+    lv_obj_set_style_border_color(m_pairCard, pairAccent, 0);
+    lv_obj_set_style_border_color(m_pairChip, pairAccent, 0);
+    lv_obj_set_style_bg_color(m_pairStripe1,
+                              pairSuccess ? lv_color_hex(0x2E7A44)
+                                          : lv_color_hex(0x695127),
+                              0);
+    lv_obj_set_style_bg_color(m_pairStripe2,
+                              pairSuccess ? lv_color_hex(0x2E7A44)
+                                          : lv_color_hex(0x695127),
+                              0);
+    lv_obj_set_style_bg_color(m_pairPulse, pairAccent, 0);
+
+    if (pairSuccess) {
+      lv_obj_clear_flag(m_pairSuccess, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(m_pairNfcLabel, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(m_pairTry, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(m_pairHint, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(m_pairSuccess, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_clear_flag(m_pairNfcLabel, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_clear_flag(m_pairTry, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_clear_flag(m_pairHint, LV_OBJ_FLAG_HIDDEN);
+    }
+    // 倒计时只在有效等待阶段显示；窗口结束或 Success/Failed 时 remainMs=0，
+    // 会出现孤零零的大号 "0"，很难看，直接隐藏。
+    const bool countVisible =
+        model.pairing != UiPairingPhase::Success &&
+        model.pairing != UiPairingPhase::Failed &&
+        model.pairing != UiPairingPhase::Idle && model.pairingRemainMs > 0;
+    if (countVisible) {
+      char count[12];
+      snprintf(count, sizeof(count), "%lu",
+               static_cast<unsigned long>((model.pairingRemainMs + 999) / 1000));
+      updateLabel(m_pairCount, count);
+      lv_obj_clear_flag(m_pairCount, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(m_pairCount, LV_OBJ_FLAG_HIDDEN);
+    }
     char attempt[24];
     snprintf(attempt, sizeof(attempt), "TRY %u / %u",
              model.pairingAttempt, model.pairingMaxAttempts);
     updateLabel(m_pairTry, attempt);
-    const uint32_t remain = model.pairingRemainMs > kPairingWindowMs
-                                ? kPairingWindowMs
-                                : model.pairingRemainMs;
-    lv_obj_set_size(m_pairBarFill,
-                    static_cast<int32_t>(
-                        280U * remain / kPairingWindowMs),
-                    7);
+    // 成功时进度条保持满格绿色；其余阶段按剩余窗口缩短。
+    if (pairSuccess) {
+      lv_obj_set_style_bg_color(m_pairBarFill, kGreen, 0);
+      lv_obj_set_size(m_pairBarFill, 280, 7);
+    } else {
+      lv_obj_set_style_bg_color(m_pairBarFill, kAmber, 0);
+      const uint32_t remain = model.pairingRemainMs > kPairingWindowMs
+                                  ? kPairingWindowMs
+                                  : model.pairingRemainMs;
+      lv_obj_set_size(m_pairBarFill,
+                      static_cast<int32_t>(
+                          280U * remain / kPairingWindowMs),
+                      7);
+    }
   }
 }
