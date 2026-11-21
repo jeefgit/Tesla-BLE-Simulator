@@ -99,6 +99,8 @@ class DashboardApp {
   bool m_soundStartFailed = false;
 #endif
   bool m_speedInitialized = false;
+  // 上一帧车速是否有效：无效/刚恢复时直接贴目标值，不做过渡。
+  bool m_speedWasValid = false;
   float m_speedInputKmh = 0;
   float m_displaySpeedKmh = 0;
   float m_speedFromKmh = 0;

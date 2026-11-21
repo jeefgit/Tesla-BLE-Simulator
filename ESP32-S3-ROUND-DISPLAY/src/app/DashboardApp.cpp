@@ -19,7 +19,9 @@
 
 namespace {
 
-constexpr uint32_t kSpeedTransitionMs = 30;
+// 车速数字/弧线的过渡时长。重绘节流是 50ms，原来 30ms 会让过渡在下一帧之前
+// 就结束，肉眼看到的是 20 → 17 的瞬间跳变；400ms 约跨 8 帧，数值逐步逼近目标。
+constexpr uint32_t kSpeedTransitionMs = 400;
 
 // BOOT 键接 GPIO0，板上有外部上拉，按下为低电平。
 constexpr uint8_t kBootButtonPin = 0;
@@ -693,9 +695,17 @@ void DashboardApp::loop() {
       m_displaySpeedKmh = speedInputKmh;
     } else if (speedInputKmh != m_speedInputKmh) {
       m_speedInputKmh = speedInputKmh;
-      m_speedFromKmh = m_displaySpeedKmh;
-      m_speedTransitionAt = now;
+      if (!m_model.speedValid || !m_speedWasValid) {
+        // 丢速或刚恢复有效速度：直接贴到目标值，不要从 0 慢慢扫过去。
+        m_displaySpeedKmh = speedInputKmh;
+        m_speedFromKmh = speedInputKmh;
+      } else {
+        // 从当前显示值出发，避免连续更新时回跳。
+        m_speedFromKmh = m_displaySpeedKmh;
+        m_speedTransitionAt = now;
+      }
     }
+    m_speedWasValid = m_model.speedValid;
 
     UiModel renderModel = m_model;
     if (m_speedInitialized) {
