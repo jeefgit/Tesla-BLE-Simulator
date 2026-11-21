@@ -15,6 +15,11 @@ class WebConfigServer {
   // 请求），调用方可借此重置自动休眠计时。
   bool loop();
 
+  // 当前热点名称与 IP（begin() 后有效；AP 启动失败时保持 "--"）。
+  // 供仪表盘在配置模式页面上显示。
+  const char* ssid() const { return m_ssid; }
+  const char* ip() const { return m_ip; }
+
  private:
   void registerRoutes();
 
@@ -33,6 +38,8 @@ class WebConfigServer {
   bool m_started = false;
   bool m_otaError = false;
   char m_otaErrorText[64] = {};
+  char m_ssid[33] = "--";
+  char m_ip[16] = "--";
   // 成功写入 VIN / 升级后延时重启的时刻；0 = 无待重启。
   uint32_t m_restartAt = 0;
 };

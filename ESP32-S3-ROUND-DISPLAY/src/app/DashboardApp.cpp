@@ -168,6 +168,14 @@ void DashboardApp::begin() {
   m_sourceStarted = false;
   m_model.link = UiLinkState::Scanning;
 #endif
+  // 配置模式：这里就把热点开好，第一帧配置页才能显示真实的 SSID / IP。
+  // （之前在 loop() 里开热点，配置页只会一直显示扫描画面。）
+  if (m_configMode) {
+    m_web.begin();
+    m_webStarted = true;
+    dashboard.setConfigMode(true);
+    dashboard.setConfigInfo(m_web.ssid(), m_web.ip());
+  }
   dashboard.render(m_model);
   Serial.printf("First frame, free heap: %u bytes\n", ESP.getFreeHeap());
   m_lastRenderedModel = m_model;
@@ -180,7 +188,8 @@ void DashboardApp::begin() {
   beginTouch();
   m_power.begin(&m_imu, &display);
   m_ota.begin(&display);
-  // 网页配置热点只在配置模式开启（见 loop()），与 BLE 互斥，避免内存冲突。
+  // 网页配置热点只在配置模式开启（见上面 m_configMode 分支），与 BLE 互斥，
+  // 避免内存冲突。
 
 #if CFG_ELF_SOUND_ENABLE
   // 麦克风放在最后：ES7210 挂在 15/14 的 Wire 总线上，必须等

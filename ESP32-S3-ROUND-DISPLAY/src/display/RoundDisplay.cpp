@@ -71,16 +71,20 @@ bool RoundDisplay::begin() {
     return false;
   }
 
-  // 50 行与 Waveshare BSP 默认一致；优先放内部 SRAM（LVGL 软件渲染写
-  // PSRAM 会明显变慢），空间不足再退回 PSRAM。
+  // 50 行与 Waveshare BSP 默认一致，但必须放 PSRAM：
+  // 466x50x2 = 46.6KB 内部 SRAM，而内部 SRAM 还要留给 NimBLE / WiFi——
+  // BLE 连接任务是 8KB 连续内部内存，绘制缓冲占内部时任务创建会失败。
+  // Arduino_ESP32QSPI::writePixels 会先拷进自己的 DMA 缓冲再发屏，所以
+  // 绘制缓冲在 PSRAM 不影响刷屏，只是 LVGL 软渲染写 PSRAM 稍慢一点。
+  // 没有 PSRAM 的板子才退回内部 SRAM。
   constexpr uint32_t kBufferLines = 50;
   const uint32_t bufferBytes =
       static_cast<uint32_t>(board.width) * kBufferLines * sizeof(uint16_t);
   m_drawBuffer =
-      heap_caps_malloc(bufferBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+      heap_caps_malloc(bufferBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (m_drawBuffer == nullptr) {
     m_drawBuffer =
-        heap_caps_malloc(bufferBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        heap_caps_malloc(bufferBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   }
   if (m_drawBuffer == nullptr) {
     EVT_LOGE("DISP", "draw buffer allocation failed");

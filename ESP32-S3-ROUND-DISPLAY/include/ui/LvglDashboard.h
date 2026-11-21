@@ -21,6 +21,11 @@ class LvglDashboard : public IDashboard {
   // whether a tap may fall on the VIN row.
   bool linkPageVisible() const;
 
+  // 配置模式页面：显示热点 SSID / 密码 / 网页地址，替代 SCANNING 链接页。
+  // setConfigMode 必须在 render() 之前调用；setConfigInfo 更新 SSID/IP 文本。
+  void setConfigMode(bool active);
+  void setConfigInfo(const char* ssid, const char* ip);
+
   // VIN editor overlay. Pure UI: it edits a local buffer and reports submit /
   // cancel through callbacks; NVS writes and restart stay in the app.
   void vinEditorShow(const char* initialVin);
@@ -43,6 +48,7 @@ class LvglDashboard : public IDashboard {
   void buildCharging();
   void buildCards();
   void buildLinkPage();
+  void buildConfigPage();
   void buildPairingPage();
   void buildDoorPage();
   void buildBootAnimation();
@@ -98,6 +104,10 @@ class LvglDashboard : public IDashboard {
   lv_obj_t* m_linkMeta = nullptr;
   lv_obj_t* m_linkVin = nullptr;
   lv_obj_t* m_linkVinHint = nullptr;
+  bool m_configMode = false;
+  lv_obj_t* m_configPage = nullptr;
+  lv_obj_t* m_configSsidLabel = nullptr;
+  lv_obj_t* m_configIpLabel = nullptr;
   lv_obj_t* m_scanArcOuter = nullptr;
   lv_obj_t* m_scanArcInner = nullptr;
   lv_obj_t* m_scanPulse = nullptr;

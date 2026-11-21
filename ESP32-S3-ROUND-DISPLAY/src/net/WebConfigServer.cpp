@@ -161,6 +161,7 @@ void WebConfigServer::begin() {
   char ssid[32];
   snprintf(ssid, sizeof(ssid), "%s-%04X", CFG_WEB_AP_SSID_PREFIX,
            static_cast<unsigned>(mac & 0xFFFFu));
+  snprintf(m_ssid, sizeof(m_ssid), "%s", ssid);
 
   WiFi.mode(WIFI_AP);
   if (!WiFi.softAP(ssid, CFG_WEB_AP_PASSWORD, CFG_WEB_AP_CHANNEL)) {
@@ -168,6 +169,8 @@ void WebConfigServer::begin() {
     return;
   }
   m_started = true;
+  snprintf(m_ip, sizeof(m_ip), "%s",
+           WiFi.softAPIP().toString().c_str());
   registerRoutes();
   s_server.begin();
 

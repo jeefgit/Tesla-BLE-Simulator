@@ -445,6 +445,27 @@ void LvglDashboard::buildVinEditor() {
 
 bool LvglDashboard::bootAnimationRunning() const { return s_bootRunning; }
 
+void LvglDashboard::setConfigMode(bool active) {
+  if (m_configMode == active) return;
+  m_configMode = active;
+  if (!active) return;
+  // 按需构建：配置页十几个控件常驻会占掉几 KB 系统堆（LVGL 走 malloc），
+  // 而正常仪表模式下 BLE 连接任务需要 8KB 连续内存，差一点就创建失败。
+  // 配置模式下 BLE 不启动，所以只在进入配置模式时才建页面。
+  buildConfigPage();
+  // 页面要盖在仪表之上，但不能盖住开机动画层，重新把开机层提到最前。
+  lv_obj_move_foreground(m_bootLayer);
+}
+
+void LvglDashboard::setConfigInfo(const char* ssid, const char* ip) {
+  if (m_configSsidLabel == nullptr || m_configIpLabel == nullptr) return;
+  char line[40];
+  snprintf(line, sizeof(line), "%s", ssid ? ssid : "--");
+  updateLabel(m_configSsidLabel, line);
+  snprintf(line, sizeof(line), "http://%s", ip ? ip : "--");
+  updateLabel(m_configIpLabel, line);
+}
+
 bool LvglDashboard::linkPageVisible() const {
   return m_linkPage != nullptr &&
          !lv_obj_has_flag(m_linkPage, LV_OBJ_FLAG_HIDDEN);
@@ -1026,6 +1047,45 @@ void LvglDashboard::buildLinkPage() {
                             kFaint, LV_TEXT_ALIGN_CENTER);
 }
 
+void LvglDashboard::buildConfigPage() {
+  lv_obj_t* screen = lv_screen_active();
+  m_configPage = lv_obj_create(screen);
+  lv_obj_remove_style_all(m_configPage);
+  lv_obj_set_size(m_configPage, 466, 466);
+  lv_obj_set_scrollable(m_configPage, false);
+
+  makeLabel(m_configPage, 0, 64, 466, 18, "CONFIG MODE",
+            &lv_font_montserrat_10, kBootRingColor, LV_TEXT_ALIGN_CENTER);
+  makeScaledLabel(m_configPage, 233, 138, "CONFIG",
+                  &lv_font_montserrat_48, kText, 300);
+  makeLabel(m_configPage, 0, 186, 466, 18, "JOIN THE HOTSPOT ON YOUR PHONE",
+            &lv_font_montserrat_10, kDim, LV_TEXT_ALIGN_CENTER);
+
+  // 信息面板：SSID / 密码 / 网页地址三行。
+  lv_obj_t* panel = makePanel(m_configPage, 78, 214, 310, 112, 16);
+  makeLabel(panel, 20, 14, 56, 16, "SSID", &lv_font_montserrat_10, kFaint,
+            LV_TEXT_ALIGN_LEFT);
+  m_configSsidLabel = makeLabel(panel, 80, 8, 210, 24, "--",
+                                &lv_font_montserrat_18, kText,
+                                LV_TEXT_ALIGN_LEFT);
+  makeLabel(panel, 20, 48, 56, 16, "PASS", &lv_font_montserrat_10, kFaint,
+            LV_TEXT_ALIGN_LEFT);
+  makeLabel(panel, 80, 42, 210, 24, CFG_WEB_AP_PASSWORD,
+            &lv_font_montserrat_18, kText, LV_TEXT_ALIGN_LEFT);
+  makeLabel(panel, 20, 82, 56, 16, "URL", &lv_font_montserrat_10, kFaint,
+            LV_TEXT_ALIGN_LEFT);
+  m_configIpLabel = makeLabel(panel, 80, 76, 210, 24, "http://--",
+                              &lv_font_montserrat_18, kScanCyan,
+                              LV_TEXT_ALIGN_LEFT);
+
+  makeLabel(m_configPage, 0, 350, 466, 18, "OPEN THE PAGE TO SET VIN / OTA",
+            &lv_font_montserrat_10, kDim, LV_TEXT_ALIGN_CENTER);
+  makeLabel(m_configPage, 0, 424, 466, 18, "LONG PRESS BOOT TO EXIT",
+            &lv_font_montserrat_10, kFaint, LV_TEXT_ALIGN_CENTER);
+
+  lv_obj_set_hidden(m_configPage, true);
+}
+
 void LvglDashboard::startLinkAnimation() {
   if (m_linkAnimationRunning) return;
   m_linkAnimationRunning = true;
@@ -1398,7 +1458,8 @@ void LvglDashboard::render(const UiModel& model) {
       model.link == UiLinkState::Ready &&
       model.pairing != UiPairingPhase::Idle;
   const bool ready = model.link == UiLinkState::Ready;
-  const bool showLinkPage = !pairing && !ready;
+  // 配置模式独占屏幕：不显示链接/扫描页，只显示配置信息页。
+  const bool showLinkPage = !pairing && !ready && !m_configMode;
   uint8_t openDoorCount = 0;
   int8_t firstOpenDoor = -1;
   for (uint8_t i = 0; i < 6; ++i) {
@@ -1426,6 +1487,10 @@ void LvglDashboard::render(const UiModel& model) {
   setHidden(m_gaugeMaxLabel, pairing || showDoorPage);
   setHidden(m_topGroup, pairing);
   setHidden(m_linkPage, !showLinkPage);
+  // 配置页按需构建：正常模式下不存在（m_configPage 为空），跳过即可。
+  if (m_configPage != nullptr) {
+    setHidden(m_configPage, !m_configMode);
+  }
   setHidden(m_pairPage, !pairing);
   setHidden(m_doorPage, !showDoorPage);
   if (showDoorPage) {
