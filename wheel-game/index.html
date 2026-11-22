@@ -1,0 +1,1399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="color-scheme" content="light">
+<title>滚一滚 · 小动物</title>
+<style>
+  :root{
+    --accent:#ffd08a;
+    --ink:#4a3a2f;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{
+    margin:0;padding:0;height:100%;overflow:hidden;
+    font-family:ui-rounded,"SF Pro Rounded","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    background:#dff3ff;color:var(--ink);
+    user-select:none;-webkit-user-select:none;
+    overscroll-behavior:none;
+    touch-action:none;
+  }
+
+  /* ---------- 天空 ---------- */
+  #sky{
+    position:fixed;inset:0;
+    background:linear-gradient(180deg,#c9ecff 0%,#e6f8ff 42%,#f6fdf2 68%,#dff5cc 100%);
+    overflow:hidden;
+  }
+  .sun{
+    position:absolute;top:6vmin;right:8vmin;width:16vmin;height:16vmin;border-radius:50%;
+    background:radial-gradient(circle at 40% 38%,#fff8c4,#ffd93d 60%,#ffc107 100%);
+    box-shadow:0 0 8vmin rgba(255,214,61,.55);
+    animation:sunPulse 5s ease-in-out infinite;
+  }
+  @keyframes sunPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+
+  .cloud{
+    position:absolute;background:#fff;border-radius:50%;
+    filter:blur(.2vmin);opacity:.9;
+  }
+  .cloud::before,.cloud::after{
+    content:"";position:absolute;background:#fff;border-radius:50%;
+  }
+  .cloud.c1{width:22vmin;height:9vmin;top:14vmin;left:-30vmin;animation:drift 46s linear infinite}
+  .cloud.c1::before{width:12vmin;height:12vmin;top:-5vmin;left:4vmin}
+  .cloud.c1::after{width:9vmin;height:9vmin;top:-3.5vmin;left:13vmin}
+  .cloud.c2{width:30vmin;height:11vmin;top:34vmin;left:-40vmin;animation:drift 64s linear infinite;animation-delay:-18s;opacity:.75}
+  .cloud.c2::before{width:15vmin;height:15vmin;top:-6vmin;left:5vmin}
+  .cloud.c2::after{width:11vmin;height:11vmin;top:-4vmin;left:17vmin}
+  .cloud.c3{width:16vmin;height:7vmin;top:52vmin;left:-25vmin;animation:drift 80s linear infinite;animation-delay:-40s;opacity:.6}
+  .cloud.c3::before{width:9vmin;height:9vmin;top:-4vmin;left:3vmin}
+  .cloud.c3::after{width:7vmin;height:7vmin;top:-3vmin;left:9vmin}
+  @keyframes drift{from{transform:translateX(0)}to{transform:translateX(140vw)}}
+
+  .hill{position:absolute;bottom:-14vmin;border-radius:50%;}
+  .hill.h1{left:-20vmin;width:90vmin;height:46vmin;background:#c8ebae}
+  .hill.h2{right:-25vmin;width:100vmin;height:52vmin;background:#b4e496;bottom:-18vmin}
+  .hill.h3{left:50%;transform:translateX(-50%);width:130vmin;height:44vmin;background:#a3dd85;bottom:-22vmin}
+
+  /* ---------- 舞台 ---------- */
+  #stage{
+    position:fixed;inset:0;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:1vmin;padding:3vmin;pointer-events:none;
+  }
+
+  #bubble{
+    height:clamp(46px,11vmin,96px);
+    display:flex;align-items:center;justify-content:center;
+    opacity:0;transform:scale(.5);
+    transition:opacity .18s ease,transform .18s ease;
+  }
+  #bubble span{
+    position:relative;
+    display:inline-block;
+    background:#fff;
+    color:#4a3a2f;
+    font-size:clamp(22px,6.2vmin,58px);
+    font-weight:900;
+    letter-spacing:.02em;
+    padding:.16em .85em .22em;
+    border-radius:999px;
+    box-shadow:0 1.2vmin 3vmin rgba(80,120,150,.18);
+    white-space:nowrap;
+  }
+  #bubble span::after{
+    content:"";position:absolute;left:50%;bottom:-.55vmin;
+    width:2.4vmin;height:2.4vmin;background:#fff;border-radius:.5vmin;
+    transform:translateX(-50%) rotate(45deg);
+  }
+  #bubble.show{opacity:1;transform:scale(1)}
+  #bubble.pop{animation:bubblePop .5s cubic-bezier(.34,1.56,.64,1)}
+  @keyframes bubblePop{
+    0%{transform:scale(.4) rotate(-6deg)}
+    60%{transform:scale(1.12) rotate(3deg)}
+    100%{transform:scale(1) rotate(0)}
+  }
+
+  #glow{
+    position:absolute;left:50%;top:50%;
+    width:min(92vmin,760px);height:min(92vmin,760px);
+    transform:translate(-50%,-46%);
+    border-radius:50%;
+    background:radial-gradient(circle,currentColor 0%,transparent 66%);
+    color:var(--accent);
+    opacity:.55;
+    transition:color .55s ease;
+    filter:blur(1vmin);
+    z-index:0;
+  }
+
+  #ring{
+    position:absolute;inset:0;margin:auto;
+    width:min(52vmin,400px);height:min(52vmin,400px);
+    border-radius:50%;
+    border:.9vmin solid var(--accent);
+    opacity:0;
+    z-index:1;
+    transition:border-color .4s ease;
+  }
+  #ring.pulse{animation:ringPulse .75s ease-out}
+  @keyframes ringPulse{
+    0%{opacity:.85;transform:scale(.62)}
+    100%{opacity:0;transform:scale(1.5)}
+  }
+
+  #shadow{
+    position:absolute;left:50%;top:50%;
+    width:min(38vmin,290px);height:5vmin;
+    transform:translate(-50%,20vmin);
+    background:radial-gradient(ellipse at center,rgba(90,120,70,.24),transparent 70%);
+    border-radius:50%;
+    z-index:1;
+  }
+
+  #actor{
+    position:relative;z-index:2;
+    width:min(54vmin,420px);height:min(54vmin,420px);
+    display:flex;align-items:center;justify-content:center;
+    transform-origin:50% 80%;
+    will-change:transform;
+  }
+  #actor svg{width:100%;height:100%;display:block;filter:drop-shadow(0 1.4vmin 1.6vmin rgba(70,110,90,.18))}
+  #actor.bob svg{animation:bob 2.8s ease-in-out infinite}
+  @keyframes bob{
+    0%,100%{transform:translateY(0) rotate(0)}
+    50%{transform:translateY(-1.6%) rotate(-1.2deg)}
+  }
+  #actor.pop{animation:pop .62s cubic-bezier(.34,1.56,.64,1)}
+  @keyframes pop{
+    0%{transform:scale(.3) rotate(-14deg);opacity:0}
+    55%{transform:scale(1.14) rotate(5deg);opacity:1}
+    78%{transform:scale(.95) rotate(-2deg)}
+    100%{transform:scale(1) rotate(0)}
+  }
+
+  /* ---------- 提示 / 按钮 ---------- */
+  #hint{
+    position:fixed;left:50%;bottom:2.4vmin;transform:translateX(-50%);
+    padding:.7em 1.4em;border-radius:999px;
+    background:rgba(255,255,255,.72);
+    backdrop-filter:blur(6px);
+    font-size:clamp(13px,2.1vmin,19px);font-weight:700;color:#5c7a68;
+    white-space:nowrap;
+    opacity:0;transition:opacity .5s ease;
+    pointer-events:none;
+  }
+  #hint.show{opacity:1}
+  #hint .arrow{display:inline-block;animation:arrowBob 1.4s ease-in-out infinite}
+  @keyframes arrowBob{0%,100%{transform:translateY(-2px)}50%{transform:translateY(2px)}}
+
+  #tools{
+    position:fixed;top:1.6vmin;left:1.6vmin;display:flex;gap:1vmin;z-index:20;
+  }
+  #tools button{
+    width:5.4vmin;height:5.4vmin;min-width:38px;min-height:38px;
+    border:none;border-radius:50%;
+    background:rgba(255,255,255,.72);
+    box-shadow:0 .4vmin 1.4vmin rgba(70,110,90,.16);
+    font-size:2.2vmin;line-height:1;
+    display:grid;place-items:center;
+    cursor:pointer;opacity:.55;transition:opacity .2s,transform .2s;
+    color:#4a3a2f;
+  }
+  #tools button:hover{opacity:1;transform:scale(1.08)}
+  #tools button.off{opacity:.28;filter:grayscale(1)}
+
+  #soundHint{
+    position:fixed;left:50%;bottom:9vmin;
+    transform:translate(-50%,16px);
+    padding:.72em 1.4em;border-radius:999px;
+    background:#fff;color:#3f6b52;
+    font-size:clamp(15px,2.6vmin,23px);font-weight:800;
+    box-shadow:0 1vmin 3vmin rgba(60,100,80,.22);
+    opacity:0;visibility:hidden;pointer-events:none;white-space:nowrap;
+    transition:opacity .3s ease,transform .3s ease,visibility .3s;
+    z-index:25;
+  }
+  #soundHint.show{
+    opacity:1;visibility:visible;
+    animation:hintPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes hintPulse{
+    0%,100%{transform:translate(-50%,0) scale(1)}
+    50%{transform:translate(-50%,0) scale(1.06)}
+  }
+
+  /* ---------- 开始页 ---------- */
+  #splash{
+    position:fixed;inset:0;z-index:30;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2.4vmin;
+    background:rgba(240,252,255,.86);
+    backdrop-filter:blur(10px);
+    transition:opacity .45s ease,visibility .45s;
+    padding:4vmin;text-align:center;
+  }
+  #splash.hide{opacity:0;visibility:hidden;pointer-events:none}
+  #splash .peek{
+    width:min(34vmin,240px);height:min(34vmin,240px);
+    animation:peekBob 2.4s ease-in-out infinite;
+  }
+  @keyframes peekBob{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-3%) rotate(3deg)}}
+  #splash h1{
+    margin:0;font-size:clamp(26px,5.4vmin,52px);letter-spacing:.04em;color:#3f6b52;
+  }
+  #startBtn{
+    margin-top:1vmin;
+    border:none;cursor:pointer;
+    padding:.55em 1.5em .62em;
+    border-radius:999px;
+    font-family:inherit;
+    font-size:clamp(24px,4.6vmin,44px);
+    font-weight:900;letter-spacing:.06em;color:#fff;
+    background:linear-gradient(180deg,#7fd97f,#43b95f);
+    box-shadow:0 1vmin 0 #2f9a49,0 1.6vmin 3vmin rgba(47,154,73,.35);
+    animation:btnPulse 1.8s ease-in-out infinite;
+    transition:transform .12s ease;
+  }
+  #startBtn:active{transform:translateY(.5vmin) scale(.98);box-shadow:0 .5vmin 0 #2f9a49,0 .8vmin 1.6vmin rgba(47,154,73,.35)}
+  @keyframes btnPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+  #splash p{
+    margin:0;font-size:clamp(14px,2.4vmin,21px);color:#6d8a7a;font-weight:700;
+  }
+
+  /* ---------- 特效层 ---------- */
+  #fx{position:fixed;inset:0;pointer-events:none;z-index:15;overflow:hidden}
+  .bit{position:absolute;border-radius:50%;will-change:transform,opacity}
+</style>
+</head>
+<body>
+
+<div id="sky">
+  <div class="sun"></div>
+  <div class="cloud c1"></div>
+  <div class="cloud c2"></div>
+  <div class="cloud c3"></div>
+  <div class="hill h1"></div>
+  <div class="hill h2"></div>
+  <div class="hill h3"></div>
+</div>
+
+<div id="stage">
+  <div id="glow"></div>
+  <div id="ring"></div>
+  <div id="shadow"></div>
+  <div id="bubble"><span>喵~</span></div>
+  <div id="actor"></div>
+</div>
+
+<div id="fx"></div>
+
+<div id="hint"><span class="arrow">↕</span> 滚动鼠标滚轮</div>
+<div id="soundHint">🔊 点一下屏幕，听听小动物叫</div>
+
+<div id="tools">
+  <button id="soundBtn" title="音效" aria-label="音效">🔊</button>
+  <button id="musicBtn" title="音乐" aria-label="音乐">🎵</button>
+  <button id="fsBtn" title="全屏" aria-label="全屏">⛶</button>
+</div>
+
+<div id="splash">
+  <div class="peek" id="peek"></div>
+  <h1>滚一滚 · 小动物</h1>
+  <button id="startBtn">开 始 玩</button>
+  <p>点一下，然后滚动鼠标滚轮</p>
+</div>
+
+<script>
+/* =========================================================
+   滚一滚 · 小动物
+   给 2 岁小朋友的游戏：唯一的操作是鼠标滚轮
+   ========================================================= */
+
+/* ---------- 画小动物 ---------- */
+const eyes = (y = 104, gap = 23, r = 9.5) => `
+  <g fill="#3b2b23">
+    <circle cx="${100 - gap}" cy="${y}" r="${r}"/>
+    <circle cx="${100 + gap}" cy="${y}" r="${r}"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="${100 - gap + 3}" cy="${y - 3.5}" r="${r * .38}"/>
+    <circle cx="${100 + gap + 3}" cy="${y - 3.5}" r="${r * .38}"/>
+  </g>`;
+
+const blush = (y = 132, cx = 58, rx = 13, ry = 8, color = "#ff8fa3", op = ".45") => `
+  <g fill="${color}" opacity="${op}">
+    <ellipse cx="${cx}" cy="${y}" rx="${rx}" ry="${ry}"/>
+    <ellipse cx="${200 - cx}" cy="${y}" rx="${rx}" ry="${ry}"/>
+  </g>`;
+
+const mouth = (y, w = 9, color = "#a9714a") => `
+  <g fill="none" stroke="${color}" stroke-width="3.2" stroke-linecap="round">
+    <path d="M100 ${y} q${-w} ${w} ${-w - 6} 0"/>
+    <path d="M100 ${y} q${w} ${w} ${w + 6} 0"/>
+  </g>`;
+
+const wrap = (inner) =>
+  `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`;
+
+const DRAW = {
+  /* 小猫 */
+  cat: () => wrap(`
+    <path d="M60 88 L45 22 L107 58 Z" fill="#ffb95e"/>
+    <path d="M140 88 L155 22 L93 58 Z" fill="#ffb95e"/>
+    <path d="M65 78 L57 41 L93 63 Z" fill="#ff9db0"/>
+    <path d="M135 78 L143 41 L107 63 Z" fill="#ff9db0"/>
+    <circle cx="100" cy="112" r="62" fill="#ffb95e"/>
+    ${blush(133)}
+    ${eyes(105)}
+    <ellipse cx="100" cy="135" rx="24" ry="16" fill="#fff1dd"/>
+    <path d="M100 123 l-8 7 h16 z" fill="#ff7a90"/>
+    <path d="M100 130 v5" stroke="#a9714a" stroke-width="3" stroke-linecap="round"/>
+    ${mouth(136, 8)}
+    <g stroke="#cf8f5e" stroke-width="3" stroke-linecap="round" opacity=".75">
+      <path d="M78 132 L47 126"/>
+      <path d="M78 140 L50 143"/>
+      <path d="M122 132 L153 126"/>
+      <path d="M122 140 L150 143"/>
+    </g>`),
+
+  /* 小狗 */
+  dog: () => wrap(`
+    <ellipse cx="44" cy="104" rx="20" ry="37" fill="#c98a5a" transform="rotate(14 44 104)"/>
+    <ellipse cx="156" cy="104" rx="20" ry="37" fill="#c98a5a" transform="rotate(-14 156 104)"/>
+    <circle cx="100" cy="112" r="62" fill="#e0a86e"/>
+    ${blush(134, 56, 13, 8, "#ff8fa3", ".35")}
+    ${eyes(103)}
+    <ellipse cx="100" cy="137" rx="32" ry="23" fill="#fff2e0"/>
+    <ellipse cx="100" cy="125" rx="13" ry="10" fill="#4a3328"/>
+    <path d="M100 135 v6" stroke="#b07a4e" stroke-width="3" stroke-linecap="round"/>
+    ${mouth(141, 9, "#b07a4e")}
+    <path d="M93 146 q7 15 14 0 z" fill="#ff8fa3"/>`),
+
+  /* 小兔 */
+  rabbit: () => wrap(`
+    <ellipse cx="74" cy="46" rx="17" ry="45" fill="#fffdfd" transform="rotate(-9 74 46)"/>
+    <ellipse cx="126" cy="46" rx="17" ry="45" fill="#fffdfd" transform="rotate(9 126 46)"/>
+    <ellipse cx="74" cy="46" rx="8.5" ry="32" fill="#ffc0d0" transform="rotate(-9 74 46)"/>
+    <ellipse cx="126" cy="46" rx="8.5" ry="32" fill="#ffc0d0" transform="rotate(9 126 46)"/>
+    <circle cx="100" cy="112" r="61" fill="#fffdfd" stroke="#f2e2e8" stroke-width="3"/>
+    ${blush(134, 58, 13, 8, "#ffb3c6", ".55")}
+    ${eyes(106)}
+    <path d="M100 124 l-8 7 h16 z" fill="#ff8fab"/>
+    <path d="M100 131 v6" stroke="#c98ba0" stroke-width="3" stroke-linecap="round"/>
+    <rect x="92" y="137" width="16" height="13" rx="4" fill="#fff" stroke="#eccfd8" stroke-width="2.5"/>
+    <path d="M100 138 v12" stroke="#eccfd8" stroke-width="2.5"/>`),
+
+  /* 小熊 */
+  bear: () => wrap(`
+    <circle cx="52" cy="62" r="28" fill="#c98b62"/>
+    <circle cx="148" cy="62" r="28" fill="#c98b62"/>
+    <circle cx="52" cy="62" r="15" fill="#e8b892"/>
+    <circle cx="148" cy="62" r="15" fill="#e8b892"/>
+    <circle cx="100" cy="112" r="62" fill="#c98b62"/>
+    ${blush(134, 57, 13, 8, "#ff8fa3", ".35")}
+    ${eyes(104)}
+    <ellipse cx="100" cy="135" rx="31" ry="24" fill="#f6e0c8"/>
+    <ellipse cx="100" cy="124" rx="13" ry="10" fill="#4a3328"/>
+    <path d="M100 134 v5" stroke="#a9714a" stroke-width="3" stroke-linecap="round"/>
+    ${mouth(139, 8)}`),
+
+  /* 小猪 */
+  pig: () => wrap(`
+    <path d="M62 82 L50 32 L99 60 Z" fill="#ff9fb8"/>
+    <path d="M138 82 L150 32 L101 60 Z" fill="#ff9fb8"/>
+    <circle cx="100" cy="112" r="62" fill="#ffb3c6"/>
+    ${blush(120, 54, 14, 9, "#ff7a9c", ".5")}
+    ${eyes(97)}
+    <ellipse cx="100" cy="134" rx="31" ry="23" fill="#ff8fab"/>
+    <ellipse cx="88" cy="134" rx="5" ry="8" fill="#e0607f"/>
+    <ellipse cx="112" cy="134" rx="5" ry="8" fill="#e0607f"/>`),
+
+  /* 小鸡 */
+  chick: () => wrap(`
+    <path d="M100 54 q-11 -21 3 -31" stroke="#f2c14e" stroke-width="8" fill="none" stroke-linecap="round"/>
+    <path d="M100 54 q9 -17 21 -21" stroke="#f2c14e" stroke-width="8" fill="none" stroke-linecap="round"/>
+    <ellipse cx="42" cy="142" rx="16" ry="22" fill="#ffcb2e" transform="rotate(18 42 142)"/>
+    <ellipse cx="158" cy="142" rx="16" ry="22" fill="#ffcb2e" transform="rotate(-18 158 142)"/>
+    <circle cx="100" cy="112" r="61" fill="#ffd84d"/>
+    ${blush(126, 56, 14, 9, "#ffb347", ".55")}
+    ${eyes(101)}
+    <path d="M87 121 q13 -9 26 0 q-13 21 -26 0 z" fill="#ff9f1c"/>
+    <path d="M88 122 q12 7 24 0" stroke="#e07f00" stroke-width="3" fill="none" stroke-linecap="round"/>`),
+
+  /* 小青蛙 */
+  frog: () => wrap(`
+    <circle cx="100" cy="122" r="58" fill="#8fd96b"/>
+    <circle cx="72" cy="70" r="25" fill="#8fd96b"/>
+    <circle cx="128" cy="70" r="25" fill="#8fd96b"/>
+    <circle cx="72" cy="70" r="17" fill="#fff"/>
+    <circle cx="128" cy="70" r="17" fill="#fff"/>
+    <circle cx="74" cy="74" r="9" fill="#2f2a25"/>
+    <circle cx="126" cy="74" r="9" fill="#2f2a25"/>
+    <circle cx="77.5" cy="70" r="3.2" fill="#fff"/>
+    <circle cx="129.5" cy="70" r="3.2" fill="#fff"/>
+    <g fill="#5f9c3f"><circle cx="90" cy="114" r="3.5"/><circle cx="110" cy="114" r="3.5"/></g>
+    <path d="M68 130 q32 34 64 0" fill="none" stroke="#3f6b2c" stroke-width="6" stroke-linecap="round"/>
+    ${blush(138, 54, 13, 8, "#ff8fa3", ".35")}`),
+
+  /* 熊猫 */
+  panda: () => wrap(`
+    <circle cx="52" cy="60" r="28" fill="#2f2b2e"/>
+    <circle cx="148" cy="60" r="28" fill="#2f2b2e"/>
+    <circle cx="100" cy="112" r="62" fill="#fffdfb" stroke="#f0eaea" stroke-width="3"/>
+    <ellipse cx="76" cy="104" rx="20" ry="24" fill="#2f2b2e" transform="rotate(-16 76 104)"/>
+    <ellipse cx="124" cy="104" rx="20" ry="24" fill="#2f2b2e" transform="rotate(16 124 104)"/>
+    <circle cx="77" cy="102" r="8" fill="#fff"/>
+    <circle cx="123" cy="102" r="8" fill="#fff"/>
+    <circle cx="78.5" cy="103" r="5" fill="#1f1c1e"/>
+    <circle cx="121.5" cy="103" r="5" fill="#1f1c1e"/>
+    ${blush(128, 52, 12, 8, "#ff9fb3", ".4")}
+    <ellipse cx="100" cy="131" rx="11" ry="8" fill="#2f2b2e"/>
+    <path d="M100 139 v5" stroke="#8a7f7a" stroke-width="3" stroke-linecap="round"/>
+    ${mouth(144, 7, "#8a7f7a")}`),
+
+  /* 小老虎 */
+  tiger: () => wrap(`
+    <circle cx="56" cy="60" r="24" fill="#ffa53d"/>
+    <circle cx="144" cy="60" r="24" fill="#ffa53d"/>
+    <circle cx="56" cy="60" r="12" fill="#ffe0b8"/>
+    <circle cx="144" cy="60" r="12" fill="#ffe0b8"/>
+    <circle cx="100" cy="112" r="62" fill="#ffb040"/>
+    <g stroke="#3b2b23" stroke-width="6" stroke-linecap="round">
+      <path d="M100 56 v16"/>
+      <path d="M82 60 l-5 15"/>
+      <path d="M118 60 l5 15"/>
+      <path d="M46 102 h13"/>
+      <path d="M46 116 h11"/>
+      <path d="M154 102 h-13"/>
+      <path d="M154 116 h-11"/>
+    </g>
+    ${blush(137, 56, 13, 8, "#ff8fa3", ".35")}
+    ${eyes(105)}
+    <ellipse cx="100" cy="137" rx="30" ry="21" fill="#fff6ea"/>
+    <path d="M100 125 l-8 7 h16 z" fill="#ff7a90"/>
+    <path d="M100 132 v5" stroke="#b07a4e" stroke-width="3" stroke-linecap="round"/>
+    ${mouth(139, 8, "#b07a4e")}`),
+
+  /* 小狮子 */
+  lion: () => {
+    let mane = "";
+    for (let k = 0; k < 12; k++) {
+      const a = (Math.PI * 2 * k) / 12;
+      mane += `<circle cx="${(100 + Math.cos(a) * 55).toFixed(1)}" cy="${(112 + Math.sin(a) * 55).toFixed(1)}" r="25" fill="#e09a34"/>`;
+    }
+    return wrap(`
+      ${mane}
+      <circle cx="100" cy="112" r="62" fill="#f5c26e"/>
+      ${blush(134, 58, 13, 8, "#ff8fa3", ".35")}
+      ${eyes(104)}
+      <ellipse cx="100" cy="136" rx="29" ry="21" fill="#fff3dd"/>
+      <path d="M100 124 l-8 7 h16 z" fill="#e2708a"/>
+      <path d="M100 131 v5" stroke="#b07a4e" stroke-width="3" stroke-linecap="round"/>
+      ${mouth(136, 8, "#b07a4e")}`);
+  },
+
+  /* 小奶牛 */
+  cow: () => wrap(`
+    <ellipse cx="62" cy="52" rx="9" ry="17" fill="#f0e0c8" transform="rotate(-25 62 52)"/>
+    <ellipse cx="138" cy="52" rx="9" ry="17" fill="#f0e0c8" transform="rotate(25 138 52)"/>
+    <ellipse cx="42" cy="98" rx="19" ry="12" fill="#ffc7d6" transform="rotate(-14 42 98)"/>
+    <ellipse cx="158" cy="98" rx="19" ry="12" fill="#ffc7d6" transform="rotate(14 158 98)"/>
+    <circle cx="100" cy="112" r="62" fill="#fffdfa"/>
+    <ellipse cx="57" cy="68" rx="18" ry="13" fill="#4a4a4a" transform="rotate(-24 57 68)"/>
+    <ellipse cx="146" cy="154" rx="15" ry="11" fill="#4a4a4a" transform="rotate(16 146 154)"/>
+    <ellipse cx="100" cy="140" rx="35" ry="24" fill="#ffc7d6"/>
+    <ellipse cx="88" cy="140" rx="4.5" ry="6" fill="#e58aa2"/>
+    <ellipse cx="112" cy="140" rx="4.5" ry="6" fill="#e58aa2"/>
+    ${eyes(98)}
+    ${blush(112, 56, 12, 7, "#ff8fa3", ".35")}`),
+
+  /* 小绵羊 */
+  sheep: () => {
+    const wool = [
+      [100, 56, 30], [56, 74, 27], [144, 74, 27], [40, 112, 24],
+      [160, 112, 24], [56, 150, 25], [144, 150, 25], [100, 164, 27],
+    ];
+    const puff = (fill, grow) =>
+      wool.map(([cx, cy, r]) => `<circle cx="${cx}" cy="${cy}" r="${r + grow}" fill="${fill}"/>`).join("");
+    return wrap(`
+    ${puff("#dde7f7", 3)}
+    ${puff("#fdfdff", 0)}
+    <ellipse cx="38" cy="118" rx="15" ry="9" fill="#f3dbe2" transform="rotate(-24 38 118)"/>
+    <ellipse cx="162" cy="118" rx="15" ry="9" fill="#f3dbe2" transform="rotate(24 162 118)"/>
+    <ellipse cx="100" cy="116" rx="47" ry="51" fill="#f9e6d6"/>
+    ${eyes(102, 20, 9)}
+    <path d="M100 124 l-7 6 h14 z" fill="#e8a0b4"/>
+    <path d="M100 130 v5" stroke="#c98ba0" stroke-width="3" stroke-linecap="round"/>
+    ${mouth(135, 7, "#c98ba0")}
+    ${blush(128, 62, 11, 7, "#ffb3c6", ".45")}`);
+  },
+
+  /* 小鸭子 */
+  duck: () => wrap(`
+    <path d="M100 54 q-7 -19 5 -25 q4 13 1 25" fill="#ffd84d"/>
+    <path d="M100 54 q9 -14 19 -17 q-1 12 -13 19" fill="#ffd84d"/>
+    <circle cx="100" cy="112" r="61" fill="#ffe066"/>
+    ${blush(126, 56, 14, 9, "#ffb347", ".5")}
+    ${eyes(99)}
+    <ellipse cx="100" cy="134" rx="31" ry="16" fill="#ff9f1c"/>
+    <path d="M72 132 q28 9 56 0" stroke="#e07f00" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <g fill="#e07f00"><circle cx="92" cy="126" r="2.4"/><circle cx="108" cy="126" r="2.4"/></g>`),
+
+  /* 小猴子 */
+  monkey: () => wrap(`
+    <circle cx="46" cy="112" r="21" fill="#c98b62"/>
+    <circle cx="154" cy="112" r="21" fill="#c98b62"/>
+    <circle cx="46" cy="112" r="11" fill="#e8b892"/>
+    <circle cx="154" cy="112" r="11" fill="#e8b892"/>
+    <circle cx="100" cy="112" r="62" fill="#c98b62"/>
+    <ellipse cx="100" cy="120" rx="48" ry="45" fill="#f2d3b3"/>
+    <path d="M100 52 q-5 -14 6 -18" stroke="#a9714a" stroke-width="6" fill="none" stroke-linecap="round"/>
+    ${eyes(104, 21)}
+    <g fill="#a9714a"><circle cx="94" cy="130" r="2.6"/><circle cx="106" cy="130" r="2.6"/></g>
+    ${mouth(135, 9, "#b07a4e")}
+    ${blush(124, 56, 12, 8, "#ff8fa3", ".4")}`),
+
+  /* 小企鹅 */
+  penguin: () => wrap(`
+    <circle cx="100" cy="52" r="9" fill="#2f3a46"/>
+    <circle cx="100" cy="112" r="62" fill="#3a4a5a"/>
+    <ellipse cx="78" cy="114" rx="27" ry="35" fill="#fffdfa"/>
+    <ellipse cx="122" cy="114" rx="27" ry="35" fill="#fffdfa"/>
+    ${eyes(104, 20)}
+    <path d="M87 126 q13 -8 26 0 q-13 19 -26 0 z" fill="#ff9f1c"/>
+    ${blush(140, 52, 12, 7, "#ff8fa3", ".45")}`),
+
+  /* 小狐狸 */
+  fox: () => wrap(`
+    <path d="M62 84 L46 20 L104 56 Z" fill="#ff8f4d"/>
+    <path d="M138 84 L154 20 L96 56 Z" fill="#ff8f4d"/>
+    <path d="M67 76 L57 38 L92 60 Z" fill="#4a3a2f"/>
+    <path d="M133 76 L143 38 L108 60 Z" fill="#4a3a2f"/>
+    <circle cx="100" cy="112" r="62" fill="#ff9f5c"/>
+    <path d="M100 126 q-42 4 -45 30 q23 19 45 4 q22 15 45 -4 q-3 -26 -45 -30 z" fill="#fff8f0"/>
+    ${eyes(102)}
+    <ellipse cx="100" cy="132" rx="9" ry="7" fill="#3b2b23"/>
+    <path d="M100 139 v4" stroke="#c98ba0" stroke-width="3" stroke-linecap="round"/>
+    ${mouth(143, 8, "#c98ba0")}
+    ${blush(120, 54, 12, 7, "#ff8fa3", ".35")}`),
+};
+
+/* ---------- 小动物列表 ---------- */
+const ANIMALS = [
+  { id: "cat",     say: "喵~",    accent: "#ffd08a" },
+  { id: "dog",     say: "汪汪!",  accent: "#f2c79b" },
+  { id: "rabbit",  say: "蹦蹦!",  accent: "#ffd6e6" },
+  { id: "bear",    say: "嗷呜~",  accent: "#e8b892" },
+  { id: "pig",     say: "哼哼!",  accent: "#ffc2d4" },
+  { id: "chick",   say: "叽叽!",  accent: "#ffe89a" },
+  { id: "frog",    say: "呱呱!",  accent: "#c6f0a8" },
+  { id: "panda",   say: "嘿嘿~",  accent: "#dcd8ff" },
+  { id: "tiger",   say: "嗷!",    accent: "#ffcf87" },
+  { id: "lion",    say: "吼~",    accent: "#ffd88a" },
+  { id: "cow",     say: "哞~",    accent: "#d9e8ff" },
+  { id: "sheep",   say: "咩~",    accent: "#e8e3ff" },
+  { id: "duck",    say: "嘎嘎!",  accent: "#ffe89a" },
+  { id: "monkey",  say: "吱吱!",  accent: "#ffd0a8" },
+  { id: "penguin", say: "啾啾!",  accent: "#cfe4ff" },
+  { id: "fox",     say: "呀!",    accent: "#ffc7a3" },
+];
+
+/* ---------- 元素 ---------- */
+const actor   = document.getElementById("actor");
+const bubble  = document.getElementById("bubble");
+const bubbleTxt = bubble.querySelector("span");
+const ring    = document.getElementById("ring");
+const fx      = document.getElementById("fx");
+const splash  = document.getElementById("splash");
+const hint    = document.getElementById("hint");
+const peek    = document.getElementById("peek");
+const startBtn = document.getElementById("startBtn");
+const soundBtn = document.getElementById("soundBtn");
+const musicBtn = document.getElementById("musicBtn");
+const fsBtn   = document.getElementById("fsBtn");
+const soundHint = document.getElementById("soundHint");
+
+peek.innerHTML = DRAW[ANIMALS[Math.floor(Math.random() * ANIMALS.length)].id]();
+
+/* =========================================================
+   声音引擎
+   全部用 WebAudio 现场合成，不加载任何音频文件，
+   所以整个游戏就是一个 HTML，离线也能响。
+   ========================================================= */
+let audioCtx = null;
+let master = null;     // 总音量
+let voiceBus = null;   // 动物叫声（换动物时会被轻轻压低）
+let musicBus = null;   // 背景八音盒
+let noiseBuf = null;
+let soundOn = true;
+let musicOn = true;
+
+function initAudio() {
+  if (audioCtx) {
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+    return;
+  }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try {
+    audioCtx = new AC();
+
+    master = audioCtx.createGain();
+    master.gain.value = 0.6;
+    master.connect(audioCtx.destination);
+
+    voiceBus = audioCtx.createGain();
+    voiceBus.gain.value = 1;
+    voiceBus.connect(master);
+
+    musicBus = audioCtx.createGain();
+    musicBus.gain.value = 0.55;
+    musicBus.connect(master);
+
+    noiseBuf = makeNoise();
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+    startMusic();
+  } catch (e) {
+    audioCtx = null;
+  }
+}
+
+function makeNoise() {
+  const len = Math.floor(audioCtx.sampleRate * 1.5);
+  const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  return buf;
+}
+
+/* 一小段滤波噪声：用来做“呼”、“噗”、“沙沙” */
+function noiseBurst(t, dur, vol, freq, q = 1, sweepTo = 0) {
+  if (!audioCtx) return;
+  const src = audioCtx.createBufferSource();
+  src.buffer = noiseBuf;
+  const f = audioCtx.createBiquadFilter();
+  f.type = "bandpass";
+  f.Q.value = q;
+  f.frequency.setValueAtTime(freq, t);
+  if (sweepTo) f.frequency.exponentialRampToValueAtTime(sweepTo, t + dur);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f).connect(g).connect(master);
+  src.start(t);
+  src.stop(t + dur + 0.05);
+}
+
+/* 通用音符：f1 → f2 滑音，可加颤音和低通 */
+function tone(t, o = {}) {
+  if (!audioCtx) return;
+  const {
+    type = "sine", f1 = 440, f2 = 0, dur = 0.3, vol = 0.2,
+    attack = 0.01, lp = 0, q = 1, vib = 0, vibRate = 6,
+  } = o;
+
+  const osc = audioCtx.createOscillator();
+  osc.type = type;
+  osc.frequency.setValueAtTime(f1, t);
+  if (f2) osc.frequency.exponentialRampToValueAtTime(f2, t + dur * 0.85);
+
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+  let node = osc;
+  if (lp) {
+    const bq = audioCtx.createBiquadFilter();
+    bq.type = "lowpass";
+    bq.frequency.value = lp;
+    bq.Q.value = q;
+    osc.connect(bq);
+    node = bq;
+  }
+  node.connect(g).connect(voiceBus);
+
+  if (vib) {
+    const lfo = audioCtx.createOscillator();
+    const lg = audioCtx.createGain();
+    lfo.frequency.value = vibRate;
+    lg.gain.value = vib;
+    lfo.connect(lg).connect(osc.frequency);
+    lfo.start(t);
+    lfo.stop(t + dur + 0.05);
+  }
+
+  osc.start(t);
+  osc.stop(t + dur + 0.05);
+}
+
+/* 低吼引擎：老虎、狮子共用 */
+function growl(t, o = {}) {
+  const { f1 = 150, f2 = 95, dur = 0.5, lp = 780, trem = 18, depth = 0.32, vol = 0.2 } = o;
+
+  const osc = audioCtx.createOscillator();
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(f1, t);
+  osc.frequency.exponentialRampToValueAtTime(f2, t + dur);
+
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = "lowpass";
+  filt.frequency.value = lp;
+  filt.Q.value = 3;
+
+  const am = audioCtx.createGain();
+  am.gain.value = 0.6;
+  const lfo = audioCtx.createOscillator();
+  const lg = audioCtx.createGain();
+  lfo.frequency.value = trem;
+  lg.gain.value = depth;
+  lfo.connect(lg).connect(am.gain);
+
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.1, dur * 0.25));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+  osc.connect(filt).connect(am).connect(g).connect(voiceBus);
+  osc.start(t); osc.stop(t + dur + 0.05);
+  lfo.start(t); lfo.stop(t + dur + 0.05);
+}
+
+/* ---------- 每只小动物自己的叫声 ---------- */
+const VOICES = {
+  /* 喵～ 锯齿波 + 两个共振峰 */
+  cat(t) {
+    const o = audioCtx.createOscillator();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(540, t);
+    o.frequency.exponentialRampToValueAtTime(920, t + 0.10);
+    o.frequency.exponentialRampToValueAtTime(560, t + 0.46);
+
+    const lfo = audioCtx.createOscillator();
+    const lg = audioCtx.createGain();
+    lfo.frequency.value = 7.5;
+    lg.gain.value = 16;
+    lfo.connect(lg).connect(o.frequency);
+
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.26, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+
+    const f1 = audioCtx.createBiquadFilter();
+    f1.type = "bandpass"; f1.frequency.value = 900; f1.Q.value = 3;
+    const f2 = audioCtx.createBiquadFilter();
+    f2.type = "bandpass"; f2.frequency.value = 1900; f2.Q.value = 5;
+
+    o.connect(f1).connect(g);
+    o.connect(f2).connect(g);
+    g.connect(voiceBus);
+
+    o.start(t); o.stop(t + 0.55);
+    lfo.start(t); lfo.stop(t + 0.55);
+  },
+
+  /* 汪汪！两声短促的吠叫 */
+  dog(t) {
+    const bark = (at, p) => {
+      const o = audioCtx.createOscillator();
+      o.type = "square";
+      o.frequency.setValueAtTime(210 * p, at);
+      o.frequency.exponentialRampToValueAtTime(105 * p, at + 0.11);
+
+      const lp = audioCtx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 950;
+
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.24, at + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.15);
+
+      o.connect(lp).connect(g).connect(voiceBus);
+      o.start(at); o.stop(at + 0.2);
+      noiseBurst(at, 0.07, 0.09, 650, 1.2);
+    };
+    bark(t, 1);
+    bark(t + 0.21, 1.12);
+  },
+
+  /* 蹦蹦！像弹簧一样的“boing” */
+  rabbit(t) {
+    const o = audioCtx.createOscillator();
+    o.type = "sine";
+    o.frequency.setValueAtTime(980, t);
+    o.frequency.exponentialRampToValueAtTime(300, t + 0.26);
+
+    const lfo = audioCtx.createOscillator();
+    const lg = audioCtx.createGain();
+    lfo.frequency.value = 20;
+    lg.gain.value = 70;
+    lfo.connect(lg).connect(o.frequency);
+
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.22, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+
+    o.connect(g).connect(voiceBus);
+    o.start(t); o.stop(t + 0.35);
+    lfo.start(t); lfo.stop(t + 0.35);
+
+    // 落地的小“咚”
+    tone(t + 0.3, { type: "sine", f1: 160, f2: 90, dur: 0.12, vol: 0.12 });
+  },
+
+  /* 嗷呜～ 低沉的呼噜吼 */
+  bear(t) {
+    const o = audioCtx.createOscillator();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(108, t);
+    o.frequency.exponentialRampToValueAtTime(70, t + 0.55);
+
+    const lp = audioCtx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 420;
+    lp.Q.value = 2;
+
+    // 抖动的“呼噜”感
+    const am = audioCtx.createGain();
+    am.gain.value = 0.55;
+    const lfo = audioCtx.createOscillator();
+    const lg = audioCtx.createGain();
+    lfo.frequency.value = 24;
+    lg.gain.value = 0.4;
+    lfo.connect(lg).connect(am.gain);
+
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.2, t + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.62);
+
+    o.connect(lp).connect(am).connect(g).connect(voiceBus);
+    o.start(t); o.stop(t + 0.65);
+    lfo.start(t); lfo.stop(t + 0.65);
+  },
+
+  /* 哼哼！鼻音很重的两声猪叫 */
+  pig(t) {
+    const oink = (at, p) => {
+      const o = audioCtx.createOscillator();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(200 * p, at);
+      o.frequency.exponentialRampToValueAtTime(360 * p, at + 0.06);
+      o.frequency.exponentialRampToValueAtTime(170 * p, at + 0.2);
+
+      const bp = audioCtx.createBiquadFilter();
+      bp.type = "bandpass"; bp.frequency.value = 620; bp.Q.value = 5;
+      const lp = audioCtx.createBiquadFilter();
+      lp.type = "lowpass"; lp.frequency.value = 1600;
+
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.22, at + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.24);
+
+      o.connect(bp).connect(lp).connect(g).connect(voiceBus);
+      o.start(at); o.stop(at + 0.28);
+    };
+    oink(t, 1);
+    oink(t + 0.19, 0.92);
+  },
+
+  /* 叽叽！三声清亮的鸟叫 */
+  chick(t) {
+    [0, 0.085, 0.17].forEach((d, i) => {
+      tone(t + d, {
+        type: "sine",
+        f1: 1500 * (1 + i * 0.04),
+        f2: 2400 * (1 + i * 0.04),
+        dur: 0.075,
+        vol: 0.13,
+        attack: 0.005,
+      });
+    });
+  },
+
+  /* 呱呱！快速颤动的一声蛙鸣 ×2 */
+  frog(t) {
+    const croak = (at, p) => {
+      const o = audioCtx.createOscillator();
+      o.type = "square";
+      o.frequency.setValueAtTime(155 * p, at);
+      o.frequency.exponentialRampToValueAtTime(115 * p, at + 0.32);
+
+      const am = audioCtx.createGain();
+      am.gain.value = 0.5;
+      const lfo = audioCtx.createOscillator();
+      const lg = audioCtx.createGain();
+      lfo.frequency.value = 32;
+      lg.gain.value = 0.5;
+      lfo.connect(lg).connect(am.gain);
+
+      const bp = audioCtx.createBiquadFilter();
+      bp.type = "bandpass"; bp.frequency.value = 460; bp.Q.value = 3;
+
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.18, at + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.34);
+
+      o.connect(bp).connect(am).connect(g).connect(voiceBus);
+      o.start(at); o.stop(at + 0.38);
+      lfo.start(at); lfo.stop(at + 0.38);
+    };
+    croak(t, 1);
+    croak(t + 0.3, 0.94);
+  },
+
+  /* 嘿嘿～ 温柔的“嗯”+ 一颗小铃铛 */
+  panda(t) {
+    tone(t, { type: "sine", f1: 340, f2: 250, dur: 0.42, vol: 0.2, attack: 0.06, vib: 6, vibRate: 5 });
+    tone(t + 0.12, { type: "sine", f1: 1320, dur: 0.3, vol: 0.05 });
+  },
+
+  /* 嗷！小老虎 */
+  tiger(t) {
+    growl(t, { f1: 155, f2: 92, dur: 0.46, lp: 820, trem: 19, depth: 0.34, vol: 0.2 });
+    noiseBurst(t, 0.26, 0.07, 900, 0.9);
+  },
+
+  /* 吼～小狮子 */
+  lion(t) {
+    growl(t, { f1: 98, f2: 60, dur: 0.72, lp: 460, trem: 13, depth: 0.4, vol: 0.22 });
+    noiseBurst(t, 0.5, 0.055, 600, 0.8);
+  },
+
+  /* 哞～小奶牛 */
+  cow(t) {
+    const o = audioCtx.createOscillator();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(215, t);
+    o.frequency.exponentialRampToValueAtTime(135, t + 0.62);
+
+    const vib = audioCtx.createOscillator();
+    const vg = audioCtx.createGain();
+    vib.frequency.value = 5.5;
+    vg.gain.value = 6;
+    vib.connect(vg).connect(o.frequency);
+
+    const bp = audioCtx.createBiquadFilter();
+    bp.type = "bandpass"; bp.frequency.value = 520; bp.Q.value = 2.4;
+    const lp = audioCtx.createBiquadFilter();
+    lp.type = "lowpass"; lp.frequency.value = 1400;
+
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.2, t + 0.07);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+
+    o.connect(bp).connect(lp).connect(g).connect(voiceBus);
+    o.start(t); o.stop(t + 0.75);
+    vib.start(t); vib.stop(t + 0.75);
+  },
+
+  /* 咩～小绵羊 */
+  sheep(t) {
+    const o = audioCtx.createOscillator();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(430, t);
+    o.frequency.exponentialRampToValueAtTime(330, t + 0.55);
+
+    const am = audioCtx.createGain();
+    am.gain.value = 0.55;
+    const lfo = audioCtx.createOscillator();
+    const lg = audioCtx.createGain();
+    lfo.frequency.value = 10.5;
+    lg.gain.value = 0.5;
+    lfo.connect(lg).connect(am.gain);
+
+    const bp = audioCtx.createBiquadFilter();
+    bp.type = "bandpass"; bp.frequency.value = 1100; bp.Q.value = 4;
+
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.17, t + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+
+    o.connect(bp).connect(am).connect(g).connect(voiceBus);
+    o.start(t); o.stop(t + 0.65);
+    lfo.start(t); lfo.stop(t + 0.65);
+  },
+
+  /* 嘎嘎！小鸭子 */
+  duck(t) {
+    const quack = (at, p) => {
+      const o = audioCtx.createOscillator();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(340 * p, at);
+      o.frequency.exponentialRampToValueAtTime(205 * p, at + 0.13);
+
+      const bp = audioCtx.createBiquadFilter();
+      bp.type = "bandpass"; bp.frequency.value = 1150; bp.Q.value = 4;
+      const lp = audioCtx.createBiquadFilter();
+      lp.type = "lowpass"; lp.frequency.value = 2200;
+
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.18, at + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.16);
+
+      o.connect(bp).connect(lp).connect(g).connect(voiceBus);
+      o.start(at); o.stop(at + 0.2);
+      noiseBurst(at, 0.06, 0.045, 1600, 1.5);
+    };
+    quack(t, 1);
+    quack(t + 0.17, 1.08);
+  },
+
+  /* 吱吱！小猴子 */
+  monkey(t) {
+    [0, 0.1, 0.2].forEach((d, i) => {
+      tone(t + d, {
+        type: "sine",
+        f1: 900 + i * 180,
+        f2: 1500 + i * 220,
+        dur: 0.07,
+        vol: 0.13,
+        attack: 0.004,
+      });
+    });
+    tone(t + 0.32, { type: "sine", f1: 1300, f2: 800, dur: 0.12, vol: 0.09 });
+  },
+
+  /* 啾啾！小企鹅 */
+  penguin(t) {
+    const honk = (at, p) => {
+      const o = audioCtx.createOscillator();
+      o.type = "square";
+      o.frequency.setValueAtTime(430 * p, at);
+      o.frequency.exponentialRampToValueAtTime(300 * p, at + 0.14);
+
+      const bp = audioCtx.createBiquadFilter();
+      bp.type = "bandpass"; bp.frequency.value = 950; bp.Q.value = 3;
+
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.14, at + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.16);
+
+      o.connect(bp).connect(g).connect(voiceBus);
+      o.start(at); o.stop(at + 0.2);
+    };
+    honk(t, 1);
+    honk(t + 0.16, 1.07);
+  },
+
+  /* 呀！小狐狸 */
+  fox(t) {
+    const yip = (at, p) => {
+      tone(at, { type: "sawtooth", f1: 620 * p, f2: 1150 * p, dur: 0.09, vol: 0.11, lp: 2200 });
+      tone(at + 0.07, { type: "sine", f1: 1100 * p, f2: 600 * p, dur: 0.1, vol: 0.06 });
+    };
+    yip(t, 1);
+    yip(t + 0.19, 1.1);
+  },
+};
+
+/* 换动物时把上一声轻轻压低，避免糊成一片 */
+function duckVoices(t) {
+  if (!voiceBus) return;
+  const g = voiceBus.gain;
+  g.cancelScheduledValues(t);
+  g.setTargetAtTime(0.12, t, 0.01);
+  g.setTargetAtTime(1, t + 0.07, 0.02);
+}
+
+function playVoice(i) {
+  if (!soundOn) return;
+  initAudio();
+  if (!audioCtx) return;
+
+  // 浏览器还没允许出声（比如只用滚轮操作时）：先解锁，解锁后立刻补上这一声
+  if (audioCtx.state === "suspended") {
+    soundHint.classList.add("show");
+    audioCtx
+      .resume()
+      .then(() => {
+        if (audioCtx.state === "running") playVoice(i);
+      })
+      .catch(() => {});
+    return;
+  }
+
+  soundHint.classList.remove("show");
+  const t = audioCtx.currentTime + 0.03;
+  duckVoices(t);
+
+  // 换动物的“呼——”
+  noiseBurst(t, 0.22, 0.07, 500, 1.1, 2600);
+
+  // 小动物自己叫
+  VOICES[ANIMALS[i].id](t + 0.02);
+
+  // 亮晶晶的碎铃声
+  for (let k = 0; k < 4; k++) {
+    tone(t + 0.16 + k * 0.05, {
+      type: "sine",
+      f1: 1500 + Math.random() * 1500,
+      dur: 0.16,
+      vol: 0.035,
+    });
+  }
+}
+
+/* 按钮的“叮” */
+function clickSound() {
+  if (!soundOn || !audioCtx) return;
+  const t = audioCtx.currentTime + 0.01;
+  tone(t, { type: "sine", f1: 880, dur: 0.12, vol: 0.1 });
+  tone(t + 0.06, { type: "sine", f1: 1320, dur: 0.16, vol: 0.07 });
+}
+
+/* ---------- 背景八音盒 ---------- */
+const MELODY = [0, 2, 4, null, 3, 2, 0, null, 1, 3, 5, null, 4, 3, 2, null];
+const BOX = [523.25, 587.33, 659.25, 783.99, 880, 1046.5];
+const BEAT = 0.44;
+
+let musicStep = 0;
+let musicNext = 0;
+let musicTimer = null;
+
+function boxNote(freq, t, vol = 0.05) {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator();
+  o.type = "sine";
+  o.frequency.value = freq;
+
+  const o2 = audioCtx.createOscillator();
+  o2.type = "triangle";
+  o2.frequency.value = freq * 2;
+
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.85);
+
+  const g2 = audioCtx.createGain();
+  g2.gain.value = 0.3;
+
+  o.connect(g);
+  o2.connect(g2).connect(g);
+  g.connect(musicBus);
+
+  o.start(t); o.stop(t + 0.9);
+  o2.start(t); o2.stop(t + 0.5);
+}
+
+function musicTick() {
+  if (!audioCtx || !musicOn || audioCtx.state !== "running") return;
+  const now = audioCtx.currentTime;
+  if (musicNext < now - 0.5) musicNext = now + 0.1;
+  while (musicNext < now + 0.4) {
+    const n = MELODY[musicStep % MELODY.length];
+    if (n !== null) {
+      boxNote(BOX[n], musicNext);
+      if (musicStep % 8 === 0) boxNote(BOX[n] / 2, musicNext, 0.03);
+    }
+    musicNext += BEAT;
+    musicStep++;
+  }
+}
+
+function startMusic() {
+  if (!audioCtx || musicTimer) return;
+  musicNext = audioCtx.currentTime + 0.3;
+  musicTimer = setInterval(musicTick, 150);
+}
+
+/* ---------- 渲染 ---------- */
+let index = 0;
+let steps = 0;
+let lastStep = 0;
+const STEP_GAP = 145;   // 两次切换的最小间隔（毫秒）
+
+function show(i, animate = true) {
+  const a = ANIMALS[i];
+  document.documentElement.style.setProperty("--accent", a.accent);
+  actor.innerHTML = DRAW[a.id]();
+  bubbleTxt.textContent = a.say;
+
+  if (animate) {
+    actor.classList.remove("pop");
+    void actor.offsetWidth;
+    actor.classList.add("pop");
+
+    bubble.classList.remove("show", "pop");
+    void bubble.offsetWidth;
+    bubble.classList.add("show", "pop");
+
+    ring.classList.remove("pulse");
+    void ring.offsetWidth;
+    ring.classList.add("pulse");
+
+    burst(a.accent);
+  } else {
+    bubble.classList.add("show");
+  }
+}
+
+function step(dir) {
+  const now = performance.now();
+  if (now - lastStep < STEP_GAP) return;
+  lastStep = now;
+
+  index = (index + dir + ANIMALS.length) % ANIMALS.length;
+  show(index, true);
+  playHello(index);
+
+  steps++;
+  if (steps === 1) hint.classList.add("show");
+  if (steps >= 12) hint.classList.remove("show");
+}
+
+/* ---------- 彩色纸屑 ---------- */
+const CONFETTI = ["#ffd93d", "#ff8fa3", "#8fd96b", "#7ec8ff", "#c9a7ff", "#ffb95e"];
+
+function burst(accent) {
+  const cx = window.innerWidth / 2;
+  const cy = window.innerHeight / 2;
+  const n = 16;
+  for (let i = 0; i < n; i++) {
+    const bit = document.createElement("div");
+    bit.className = "bit";
+    const size = 8 + Math.random() * 14;
+    const round = Math.random() > 0.45;
+    bit.style.width = size + "px";
+    bit.style.height = size * (round ? 1 : 0.55) + "px";
+    bit.style.borderRadius = round ? "50%" : "2px";
+    bit.style.background = Math.random() < 0.4 ? accent : CONFETTI[i % CONFETTI.length];
+    bit.style.left = cx + "px";
+    bit.style.top = cy + "px";
+    bit.style.opacity = "1";
+    fx.appendChild(bit);
+
+    const angle = (Math.PI * 2 * i) / n + Math.random() * 0.5;
+    const dist = 90 + Math.random() * Math.min(window.innerWidth, window.innerHeight) * 0.22;
+    const dx = Math.cos(angle) * dist;
+    const dy = Math.sin(angle) * dist * 0.85 + 40;
+
+    const anim = bit.animate(
+      [
+        { transform: "translate(-50%,-50%) scale(.4) rotate(0deg)", opacity: 1 },
+        { transform: `translate(calc(-50% + ${dx * 0.75}px), calc(-50% + ${dy * 0.8}px)) scale(1.05) rotate(${Math.random() * 240 - 120}deg)`, opacity: 1, offset: 0.55 },
+        { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy + 60}px)) scale(.5) rotate(${Math.random() * 360 - 180}deg)`, opacity: 0 },
+      ],
+      { duration: 800 + Math.random() * 500, easing: "cubic-bezier(.22,.9,.36,1)" }
+    );
+    anim.onfinish = () => bit.remove();
+  }
+}
+
+/* ---------- 滚轮 ---------- */
+const THRESHOLD = 100;
+let acc = 0;
+
+window.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    if (!started) startGame();
+
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+    const d = (Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX) * unit;
+    if (!d) return;
+
+    acc += d;
+    if (Math.abs(acc) >= THRESHOLD) {
+      const dir = acc > 0 ? 1 : -1;
+      acc = 0;                       // 每次只走一格，避免快速滚动堆积
+      step(dir);
+    }
+    // 限制累积，防止长时间快速滚动后疯狂连跳
+    if (acc > THRESHOLD) acc = THRESHOLD;
+    if (acc < -THRESHOLD) acc = -THRESHOLD;
+  },
+  { passive: false }
+);
+
+/* 键盘：给家长备用 */
+window.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown" || e.key === "PageDown" || e.key === " ") {
+    e.preventDefault();
+    if (!started) startGame();
+    acc = 0;
+    step(1);
+  } else if (e.key === "ArrowUp" || e.key === "PageUp") {
+    e.preventDefault();
+    if (!started) startGame();
+    acc = 0;
+    step(-1);
+  }
+});
+
+/* ---------- 开始 ---------- */
+let started = false;
+
+function startGame() {
+  if (started) return;
+  started = true;
+  splash.classList.add("hide");
+  initAudio();
+  show(index, false);
+  hint.classList.add("show");
+  setTimeout(() => hint.classList.remove("show"), 7000);
+
+  // 如果只是滚轮进入，声音可能还锁着 → 提示点一下屏幕
+  setTimeout(() => {
+    if (audioCtx && audioCtx.state !== "running") soundHint.classList.add("show");
+  }, 600);
+}
+
+startBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  startGame();
+  playVoice(index);
+});
+
+splash.addEventListener("pointerdown", () => startGame());
+
+/* ---------- 解锁声音 ---------- */
+function unlockAudio() {
+  initAudio();
+  if (!audioCtx) return;
+  const finish = () => {
+    if (audioCtx.state !== "running") return;
+    const wasSilent = soundHint.classList.contains("show");
+    soundHint.classList.remove("show");
+    if (wasSilent && started) playVoice(index);
+  };
+  if (audioCtx.state === "running") finish();
+  else audioCtx.resume().then(finish).catch(() => {});
+}
+
+document.addEventListener("pointerdown", unlockAudio, { passive: true });
+document.addEventListener("click", unlockAudio, { passive: true });
+document.addEventListener("keydown", unlockAudio, { passive: true });
+
+/* ---------- 工具按钮 ---------- */
+soundBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  soundOn = !soundOn;
+  soundBtn.textContent = soundOn ? "🔊" : "🔇";
+  soundBtn.classList.toggle("off", !soundOn);
+  if (soundOn) {
+    unlockAudio();
+    playVoice(index);
+  }
+});
+
+musicBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  musicOn = !musicOn;
+  musicBtn.classList.toggle("off", !musicOn);
+  if (musicOn) {
+    initAudio();
+    startMusic();
+    if (audioCtx) musicNext = audioCtx.currentTime + 0.1;
+  }
+});
+
+fsBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  } else {
+    document.exitFullscreen?.().catch(() => {});
+  }
+});
+
+/* ---------- 首屏 ---------- */
+show(0, false);
+bubble.classList.remove("show");
+</script>
+</body>
+</html>
