@@ -2173,56 +2173,68 @@ async def async_main(args, state: TelemetryState, stop_event: threading.Event, l
         for reply in replies:
             proto_responses.put(reply)
 
+    async def start_bless_server(name):
+        # Windows 内置蓝牙 (WinRT GATT Server) 模式：无需 USB 蓝牙适配器与 Zadig 驱动
+        if BlessServer is None:
+            raise RuntimeError(
+                f"Windows 内置蓝牙模式不可用（bless 导入失败: {BLESS_IMPORT_ERROR}）"
+            )
+        import socket
+        pc_name = socket.gethostname()
+        if pc_name.lower() == name.lower():
+            log_queue.put(f"[+] 电脑名已匹配: {pc_name}，直接以普通模式启动 BLE 广播。")
+            server_obj = BlessServer(name=name, name_overwrite=False)
+        else:
+            log_queue.put(f"[+] 将 Windows 蓝牙设备名覆写为: {name} (需要管理员权限)")
+            server_obj = BlessServer(name=name, name_overwrite=True)
+        await server_obj.add_new_service(SVC_UUID)
+
+        # Write Characteristic (可写特征值)
+        await server_obj.add_new_characteristic(
+            service_uuid=SVC_UUID,
+            char_uuid=WR_UUID,
+            properties=GATTCharacteristicProperties.write | GATTCharacteristicProperties.write_without_response,
+            value=bytearray(),
+            permissions=GATTAttributePermissions.writeable
+        )
+
+        # Notify Characteristic (主通道特征值)
+        await server_obj.add_new_characteristic(
+            service_uuid=SVC_UUID,
+            char_uuid=RD_UUID,
+            properties=GATTCharacteristicProperties.notify,
+            value=bytearray(),
+            permissions=GATTAttributePermissions.readable
+        )
+
+        server_obj.write_request_func = on_write
+        await server_obj.start()
+        return server_obj
+
     async def start_ble_server(name):
         use_bumble = getattr(args, 'bumble', False)
+        use_bless = getattr(args, 'bless', False)
 
+        # --bless：强制使用 Windows 内置蓝牙 (WinRT)，跳过 USB 蓝牙适配器
+        if use_bless:
+            log_queue.put("[+] 使用 Windows 内置蓝牙 (WinRT) 模式启动 BLE 广播（无需 USB 蓝牙适配器）...")
+            return await start_bless_server(name)
+
+        # 默认优先 Bumble USB HCI 硬件模式；未插适配器时自动回退到内置蓝牙
         if use_bumble or HAS_BUMBLE:
             log_queue.put("[+] 使用 Bumble (USB HCI 硬件模式) 启动 BLE 广播...")
-            server_obj = BumbleTeslaServer(vin=state.get_vin())
-            server_obj.write_callback = on_write
-            await server_obj.start()
-            return server_obj
+            try:
+                server_obj = BumbleTeslaServer(vin=state.get_vin())
+                server_obj.write_callback = on_write
+                await server_obj.start()
+                return server_obj
+            except Exception as exc:
+                if use_bumble:
+                    raise
+                log_queue.put(f"[-] Bumble USB HCI 模式启动失败: {exc}")
+                log_queue.put("[+] 未检测到可用 USB 蓝牙适配器，自动回退到 Windows 内置蓝牙 (WinRT) 模式...")
 
-        if BlessServer is not None:
-            import socket
-            pc_name = socket.gethostname()
-            if pc_name.lower() == name.lower():
-                log_queue.put(f"[+] 电脑名已匹配: {pc_name}，直接以普通模式启动 BLE 广播。")
-                server_obj = BlessServer(name=name, name_overwrite=False)
-            else:
-                log_queue.put(f"[+] 将 Windows 蓝牙设备名覆写为: {name} (需要管理员权限)")
-                server_obj = BlessServer(name=name, name_overwrite=True)
-            await server_obj.add_new_service(SVC_UUID)
-            
-            # Write Characteristic (可写特征值)
-            await server_obj.add_new_characteristic(
-                service_uuid=SVC_UUID,
-                char_uuid=WR_UUID,
-                properties=GATTCharacteristicProperties.write | GATTCharacteristicProperties.write_without_response,
-                value=bytearray(),
-                permissions=GATTAttributePermissions.writeable
-            )
-            
-            # Notify Characteristic (主通道特征值)
-            await server_obj.add_new_characteristic(
-                service_uuid=SVC_UUID,
-                char_uuid=RD_UUID,
-                properties=GATTCharacteristicProperties.notify,
-                value=bytearray(),
-                permissions=GATTAttributePermissions.readable
-            )
-            
-            server_obj.write_request_func = on_write
-            await server_obj.start()
-            return server_obj
-
-        details = []
-        if BLESS_IMPORT_ERROR is not None:
-            details.append(f"bless 导入失败: {BLESS_IMPORT_ERROR}")
-        if BUMBLE_IMPORT_ERROR is not None:
-            details.append(f"bumble 导入失败: {BUMBLE_IMPORT_ERROR}")
-        detail_text = "；".join(details) if details else "未检测到任何 BLE 后端"
-        raise RuntimeError(f"无可用 BLE 后端服务（请安装 bless 或 bumble 依赖）。{detail_text}")
+        return await start_bless_server(name)
 
     # 启动蓝牙广播
     try:
@@ -2471,6 +2483,11 @@ if __name__ == "__main__":
     parser.add_argument("--nogui", action="store_true", help="强制在纯命令行模式下运行（不启动 Tkinter 界面）")
     parser.add_argument("--vin", type=str, default="LRWYGCFJ8RC571213", help="设定模拟车型的 17 位 VIN 识别号（默认: LRWYGCFJ8RC571213）")
     parser.add_argument("--bumble", action="store_true", help="使用 Bumble (CSR8510 USB HCI) 硬件物理广播模式")
+    parser.add_argument(
+        "--bless",
+        action="store_true",
+        help="强制使用 Windows 内置蓝牙 (WinRT GATT Server) 模式，无需 USB 蓝牙适配器（需管理员权限重命名蓝牙名）",
+    )
     parser.add_argument(
         "--client-pub",
         type=str,

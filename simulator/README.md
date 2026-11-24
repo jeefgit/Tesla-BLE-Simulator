@@ -39,9 +39,14 @@
 
 ## 🚀 极速安装与使用指南
 
-### 1. 硬件准备（强烈推荐使用 USB 蓝牙接收器）
-为了获得最真实的物理层空中广播体验，建议准备一个低成本（约 10~15 元）的 **CSR8510 A10 USB 蓝牙接收器**。
-按说明文档配置 Zadig WinUSB 驱动：
+### 1. 硬件准备（二选一）
+* **方案 A — Windows 内置蓝牙（无需任何适配器）**：直接运行（推荐加 `--bless` 强制指定），程序会自动将本机蓝牙名覆写为特斯拉 `S<sha1>C` 广播名（需管理员权限，`run.bat` 已自动提权）：
+  ```powershell
+  python sim_server.py --bless
+  ```
+  未插 USB 适配器时，即使不加 `--bless` 也会自动回退到该模式。
+  > 注意：该模式会临时修改 Windows 蓝牙设备名，且广播参数由系统协议栈控制，拟真度略低于方案 B。
+* **方案 B — USB 蓝牙接收器（拟真度最高）**：准备一个低成本（约 10~15 元）的 **CSR8510 A10 USB 蓝牙接收器**，按说明文档配置 Zadig WinUSB 驱动：
 👉 **[普通 USB 蓝牙接收器配置指南 (docs/USB_BLUETOOTH_DONGLE_SETUP.md)](docs/USB_BLUETOOTH_DONGLE_SETUP.md)**
 
 ### 2. 方式一：一键批处理启动 (Windows 推荐)
