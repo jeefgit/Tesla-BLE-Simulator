@@ -1,5 +1,7 @@
 # 普通 USB 蓝牙接收器硬件改造与配置指南 (USB Bluetooth Dongle + Zadig + Bumble)
 
+> ⚠️ **本文档为可选的进阶方案**。自 v2.1 起，模拟器默认支持 **Windows 内置蓝牙 (WinRT) 模式**——无需任何额外硬件，直接运行 `python sim_server.py --bless` 或双击 `run.bat` 即可广播。仅当你需要最高拟真度的广播参数控制时，才需要按本文档改造 USB 蓝牙接收器。
+
 本指南旨在指导开发者与用户，如何使用一个成本约 10~15 元人民币的普通 USB 蓝牙接收器（USB Bluetooth Dongle），通过 **Zadig 驱动替换** 与 **Python Bumble 原生 HCI 驱动**，将其改造为一个能够被本系统（Tesla BLE Simulator）全权掌控的特斯拉车机 BLE 硬件信号发射源。
 
 ---

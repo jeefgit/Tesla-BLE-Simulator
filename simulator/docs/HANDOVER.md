@@ -15,9 +15,9 @@ graph LR
     subgraph Windows Host (Simulation_app)
         A[sim_server.py] -->|1. GUI / Script Data| B[TelemetryState]
         B -->|2. Pack to SimPayload| C[struct.pack format]
-        C -->|3. BLE Notify| D[Bumble USB HCI Server / Bless]
+        C -->|3. BLE Notify| D[BLE Server: Bless/WinRT 内置蓝牙 或 Bumble USB HCI]
     end
-    D == Wireless BLE (CSR8510 USB Dongle) ==> E[ESP32 NimBLE Central]
+    D == Wireless BLE (内置蓝牙 或 CSR8510 USB Dongle) ==> E[ESP32 NimBLE Central]
     subgraph ESP32 (Firmware Side)
         E -->|4. Intercept 53-byte Pack| F[ble_adapter.cpp]
         F -->|5. Bypass Decryption| G[main.cpp Loop]
@@ -69,9 +69,9 @@ PAYLOAD_FORMAT = "<ffifc6BBfff4f"
 ## 📂 代码库文件清单
 
 `Simulation_app` 目录中的核心文件及其职责如下：
-* **[sim_server.py](file:///e:/AI_coding_test/_Gemini/TESLA_BLE_TFT/Simulation_app/sim_server.py)**：仿真核心脚本。包含 Tkinter 暗黑 UI 面板、Bumble USB HCI 服务端、800ms 真车节奏/理想 20Hz 双模式推送逻辑、丢包与故障注入控制。
-* **[docs/USB_BLUETOOTH_DONGLE_SETUP.md](file:///e:/AI_coding_test/_Gemini/TESLA_BLE_TFT/Simulation_app/docs/USB_BLUETOOTH_DONGLE_SETUP.md)**：普通 USB 蓝牙接收器 (CSR8510) + Zadig WinUSB 驱动配置指南。
-* **[requirements.txt](file:///e:/AI_coding_test/_Gemini/TESLA_BLE_TFT/Simulation_app/requirements.txt)**：声明依赖库（`bumble`, `libusb-package`, `bless`）。
+* **[sim_server.py](file:///e:/AI_coding_test/_Gemini/TESLA_BLE_TFT/Simulation_app/sim_server.py)**：仿真核心脚本。包含 Tkinter 暗黑 UI 面板、双 BLE 后端服务端（默认 Bless/WinRT 内置蓝牙，可选 Bumble USB HCI）、800ms 真车节奏/理想 20Hz 双模式推送逻辑、丢包与故障注入控制。
+* **[docs/USB_BLUETOOTH_DONGLE_SETUP.md](file:///e:/AI_coding_test/_Gemini/TESLA_BLE_TFT/Simulation_app/docs/USB_BLUETOOTH_DONGLE_SETUP.md)**：（可选进阶）普通 USB 蓝牙接收器 (CSR8510) + Zadig WinUSB 驱动配置指南。
+* **[requirements.txt](file:///e:/AI_coding_test/_Gemini/TESLA_BLE_TFT/Simulation_app/requirements.txt)**：声明依赖库（`bless` 及 WinRT 组件为内置蓝牙模式所需；`bumble`, `libusb-package` 为 USB 适配器模式可选依赖）。
 * **[run.bat](file:///e:/AI_coding_test/_Gemini/TESLA_BLE_TFT/Simulation_app/run.bat)**：一键管理员运行脚本。
 * **[README.md](file:///e:/AI_coding_test/_Gemini/TESLA_BLE_TFT/Simulation_app/README.md)**：用户使用说明文档。
 
@@ -82,7 +82,7 @@ PAYLOAD_FORMAT = "<ffifc6BBfff4f"
 ### ✅ 已完成功能 (v2.0)
 1. **Tkinter 暗黑风图形化操控台**：已完成手动滑块/按键干预车速、档位、车门、电量、胎压、温度等全套 UI 参数。
 2. **真车 BLE 节奏模拟**：支持 800ms 基础间隔分批推送、150ms~300ms 拟真延时、5% 长尾链路抖动、0~20% 丢包率模拟、一键 5 秒信号闪断故障注入。
-3. **Bumble USB HCI 物理广播**：支持 CSR8510 Dongle 物理收发与动态 VIN 广播名刷新（`S<sha1_prefix>C`）。
+3. **双后端 BLE 物理广播**：默认 Windows 内置蓝牙（WinRT GATT Server，`--bless`），可选 CSR8510 Dongle Bumble USB HCI 直控；均支持动态 VIN 广播名刷新（`S<sha1_prefix>C`），未检测到适配器时自动回退内置蓝牙。
 
 ### 🎯 建议扩展方向
 1. **扩展车机状态报文**：在 `SimPayload` 中扩展转向灯（左/右/双闪）、远光灯、AP 自动辅助驾驶状态图标等。

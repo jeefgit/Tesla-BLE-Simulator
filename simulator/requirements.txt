@@ -5,5 +5,9 @@ bless>=0.2.6
 protobuf>=3.20.0
 # 特斯拉真实加密协议栈：NIST P-256 ECDH + AES-128-GCM（cryptography 提供成熟实现）
 cryptography>=41.0.0
+# (可选) USB 蓝牙适配器模式：Bumble USB HCI 直控 CSR8510（需 Zadig 替换 WinUSB 驱动，
+# 使用前取消注释并插上适配器；未安装时模拟器自动使用 Windows 内置蓝牙 bless/WinRT 后端）
+# bumble>=0.0.190
+# libusb-package>=0.0.3
 # 仅在需要重新生成 tesla_protocol/pb 下的 *_pb2.py 时安装：
 # grpcio-tools>=1.60.0

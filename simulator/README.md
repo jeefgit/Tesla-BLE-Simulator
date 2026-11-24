@@ -18,8 +18,9 @@
   * **网络抖动与延迟模拟**：包含 150ms ~ 300ms 拟真响应延迟、5% 概率长尾链路抖动。
   * **丢包率与故障注入**：支持 0% ~ 20% 动态丢包率测试，以及一键 5 秒 BLE 信号闪断/断连故障注入。
   * **双通信模式无缝切换**：支持 **`问答/分批模式 (REALISTIC 800ms)`** 与 **`理想主动推送 (IDEAL 20Hz)`** 随时切换。
-* **硬件级 Bumble USB HCI 蓝牙直控 (CSR8510 Dongle)**：
-  * 基于 `Bumble` + `WinUSB` 原生 USB 接口直控（绕过 Windows UWP 蓝牙限制），支持普通 15 元 USB 蓝牙接收器物理广播。
+* **双蓝牙后端：内置蓝牙优先，可选 USB 适配器**：
+  * **默认推荐 Windows 内置蓝牙 (WinRT GATT Server)**：无需任何额外硬件，自动覆写本机蓝牙名为特斯拉空中广播名。
+  * （可选）`Bumble` + `WinUSB` 原生 USB HCI 直控（绕过 Windows 蓝牙协议栈），支持普通 15 元 CSR8510 USB 蓝牙接收器物理广播，拟真度最高。
   * 动态 VIN 计算：用户输入 17 位 VIN 码后，实时计算 `S<sha1_prefix>C` 标准特斯拉空中广播包名称。
   * 硬件级广播总开关（`BLE广播: ON / OFF`）与连接状态显示。
 * **可视化暗黑风 Tkinter 操控台**：
@@ -65,7 +66,10 @@ pip install -r requirements.txt
 # 2. 启动图形化仿真服务
 python sim_server.py
 
-# (可选) 强制使用 Bumble CSR8510 USB HCI 模式
+# (可选) 强制使用 Windows 内置蓝牙模式 (推荐，无需 USB 适配器)
+python sim_server.py --bless
+
+# (可选) 强制使用 Bumble CSR8510 USB HCI 模式 (需按 Dongle 指南改造驱动)
 python sim_server.py --bumble
 
 # (可选) 纯命令行模式 (无 GUI 界面)
