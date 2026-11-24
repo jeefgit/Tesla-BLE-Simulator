@@ -21,7 +21,7 @@ namespace {
 
 // 车速数字/弧线的过渡时长。重绘节流是 50ms，200ms 约跨 4 帧：既保留缓动、
 // 避免 20 → 17 的瞬间跳变，又不会在两次轮询之间拖出明显的“追值”延迟。
-constexpr uint32_t kSpeedTransitionMs = 200;
+constexpr uint32_t kSpeedTransitionMs = 300;
 
 // BOOT 键接 GPIO0，板上有外部上拉，按下为低电平。
 constexpr uint8_t kBootButtonPin = 0;

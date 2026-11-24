@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tesla Round Driving · 驾驶页重设计 v2</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #06080b;
+    --fg: #f5f7fa;
+    --dim: #8a93a6;
+    --faint: #5a6377;
+    --red: #e82127;
+    --green: #21c15e;
+    --amber: #ffb340;
+    --alert: #ff453a;
+    --cyan: #43d9f5;
+    --blue: #3e6ae1;
+    --line: #1b2430;
+    --card: #0c1218;
+    --card-line: #1d2733;
+    --card-line-strong: #283642;
+    --font: "Bahnschrift", "DIN Alternate", "Segoe UI", Arial, sans-serif;
+    --mono: "Cascadia Mono", Consolas, monospace;
+  }
+
+  body {
+    min-width: 1200px;
+    padding: 46px 0 90px;
+    color: var(--fg);
+    font-family: var(--font);
+    background:
+      radial-gradient(1100px 560px at 50% -8%, #121a23 0%, #06080b 58%, #040507 100%);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .board { width: 1120px; margin: 0 auto; }
+
+  /* ---------- page header ---------- */
+  .page-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 42px; }
+  .eyebrow {
+    font-size: 10px; font-weight: 600; letter-spacing: 4px; color: var(--red);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before { content: ""; width: 24px; height: 1px; background: var(--red); }
+  h1 { margin-top: 14px; font-size: 32px; font-weight: 300; letter-spacing: .5px; }
+  h1 b { font-weight: 500; }
+  .page-meta { margin-top: 12px; font-size: 11px; letter-spacing: .6px; color: var(--faint); }
+  .page-meta span { color: var(--dim); }
+  .page-meta i { margin: 0 8px; font-style: normal; color: #2c3641; }
+
+  .guide-toggle {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 10px; letter-spacing: 1.6px; color: var(--dim);
+    cursor: pointer; user-select: none; padding-bottom: 6px;
+  }
+  .guide-toggle input { display: none; }
+  .guide-toggle .box {
+    width: 14px; height: 14px; border: 1px solid #33404e; border-radius: 4px;
+    display: grid; place-items: center; transition: .15s;
+  }
+  .guide-toggle .box::after {
+    content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--red);
+    transform: scale(0); transition: .15s;
+  }
+  #guides:checked + .board .guide-toggle .box { border-color: var(--red); }
+  #guides:checked + .board .guide-toggle .box::after { transform: scale(1); }
+  #guides:checked + .board .guides { display: block; }
+
+  /* ---------- screens grid ---------- */
+  .screens {
+    display: grid;
+    grid-template-columns: 466px 466px;
+    gap: 58px 60px;
+    justify-content: center;
+    margin-bottom: 64px;
+  }
+  .item { width: 466px; }
+  .item-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
+  .item-head .name { font-size: 13px; letter-spacing: 1px; color: #dbe3ec; font-weight: 500; }
+  .item-head .name em { font-style: normal; color: var(--faint); font-size: 10px; letter-spacing: 1.4px; margin-left: 8px; }
+  .item-head .note { font-size: 9px; letter-spacing: 1px; color: #4d5866; }
+
+  /* ---------- round screen ---------- */
+  .screen {
+    position: relative;
+    width: 466px;
+    height: 466px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 35%, #101923 0%, #070b10 56%, #020406 100%);
+    box-shadow:
+      0 0 0 1px #141b23,
+      0 30px 90px rgba(0, 0, 0, .85),
+      inset 0 0 90px rgba(0, 0, 0, .65);
+  }
+  .screen::after {
+    content: ""; position: absolute; inset: 5px; border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, .045); pointer-events: none;
+  }
+  .driving { background: #020406; }
+
+  /* ---------- speed gauge (SVG arcs) ---------- */
+  .gauge { position: absolute; inset: 0; width: 466px; height: 466px; }
+  .arc-track { fill: none; stroke: #1d2733; stroke-width: 7; stroke-linecap: round; }
+  .arc-progress { fill: none; stroke-width: 7; stroke-linecap: round; }
+  .tick-minor { fill: none; stroke: #2b3744; stroke-width: 9; stroke-linecap: butt; }
+  .tick-major { fill: none; stroke: #445365; stroke-width: 20; stroke-linecap: butt; }
+  .arc-label {
+    fill: #5a6377; font-size: 11px; font-weight: 600; letter-spacing: 0;
+    text-anchor: middle; font-family: var(--font);
+  }
+
+  /* ---------- 方案 A · 弧芯布局 ---------- */
+  .a .topbar {
+    position: absolute; top: 56px; left: 113px; right: 113px; height: 20px;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; font-weight: 600; letter-spacing: 1px; color: var(--faint);
+  }
+  .a .topbar .brand { color: #c9d3de; letter-spacing: 2px; font-size: 13px; }
+  .a .topbar .tr { display: flex; align-items: center; gap: 10px; }
+  .a .topbar .link { display: flex; align-items: center; gap: 5px; color: var(--green); }
+  .a .topbar .dot {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 7px rgba(33, 193, 94, .9);
+  }
+  .a .topbar .sep { width: 1px; height: 10px; background: #25313a; }
+  .a .topbar .lock { color: #4d5866; }
+
+  .a .speed {
+    position: absolute; top: 104px; left: 0; right: 0; text-align: center;
+    font-size: 112px; line-height: 118px; font-weight: 300; letter-spacing: -3px;
+    font-variant-numeric: tabular-nums; color: var(--fg);
+  }
+  .a .unit {
+    position: absolute; top: 228px; left: 0; right: 0; text-align: center;
+    font-size: 13px; font-weight: 500; letter-spacing: 3px; color: var(--cyan);
+  }
+
+  .a .gears {
+    position: absolute; top: 256px; left: 149px; width: 168px; height: 40px;
+    display: flex; align-items: center;
+    border-radius: 12px; background: #0a1117; border: 1px solid #202d37;
+  }
+  .a .gear {
+    width: 42px; height: 40px; display: grid; place-items: center;
+    font-size: 20px; font-weight: 500; line-height: 1; color: #5a6370;
+  }
+  .a .gear.on {
+    width: 36px; height: 34px; margin: 3px; border-radius: 9px;
+    background: var(--cyan); color: #020406;
+  }
+
+  .a .dcard {
+    position: absolute; top: 316px; width: 102px; height: 62px; border-radius: 12px;
+    background: linear-gradient(180deg, rgba(13, 20, 27, .92), rgba(8, 12, 17, .92));
+    border: 1px solid var(--card-line);
+  }
+  .a .dcard.battery { left: 82px; }
+  .a .dcard.power { right: 82px; }
+  .a .dcard .cap {
+    position: absolute; left: 10px; top: 6px; font-size: 7.5px; font-weight: 600;
+    letter-spacing: 1.4px; color: var(--faint);
+  }
+  .a .dcard .val {
+    position: absolute; left: 10px; top: 16px; font-size: 20px; font-weight: 500;
+    line-height: 20px; letter-spacing: -.3px; font-variant-numeric: tabular-nums; color: var(--fg);
+  }
+  .a .dcard .val i {
+    font-style: normal; font-size: 9px; font-weight: 600; color: var(--dim);
+    margin-left: 2px; letter-spacing: .5px;
+  }
+  .a .dcard .sub {
+    position: absolute; left: 10px; bottom: 17px;
+    font-size: 7px; font-weight: 600; letter-spacing: .5px; color: var(--faint);
+  }
+  .a .dcard .sub b { color: #c9d3de; font-weight: 600; }
+  .a .dcard .meter {
+    position: absolute; left: 10px; bottom: 8px; width: 82px; height: 3px;
+    border-radius: 2px; background: #141d26;
+  }
+  .a .dcard .meter i { position: absolute; top: 0; height: 3px; border-radius: 2px; background: var(--cyan); }
+  .a .dcard .meter .z { position: absolute; left: 24%; top: -2px; width: 1px; height: 7px; background: #637987; }
+
+  .a .temps {
+    position: absolute; top: 396px; left: 0; right: 0;
+    display: flex; justify-content: center; align-items: center; gap: 7px;
+    font-size: 8px; font-weight: 600; letter-spacing: 1.2px; color: var(--faint);
+  }
+  .a .temps b { color: #aebac6; font-size: 9.5px; }
+  .a .temps .sep { width: 1px; height: 9px; background: #25313a; margin: 0 3px; }
+
+  .a .banner {
+    position: absolute; top: 80px; left: 50%; transform: translateX(-50%); height: 20px;
+    display: none; align-items: center; padding: 0 11px; border-radius: 10px;
+    font-size: 8.5px; font-weight: 700; letter-spacing: 1px; white-space: nowrap;
+  }
+  .a .banner.show { display: flex; animation: blink 1s steps(2, end) infinite; }
+  .a .banner.red { background: rgba(255, 69, 58, .14); border: 1px solid rgba(255, 69, 58, .55); color: #ff5b60; }
+  .a .banner.amber { background: rgba(255, 179, 64, .13); border: 1px solid rgba(255, 179, 64, .55); color: #ffc164; }
+  @keyframes blink { 50% { opacity: .45; } }
+
+  .a .arc-progress { filter: drop-shadow(0 0 7px rgba(67, 217, 245, .3)); }
+  .a.st-regen .arc-progress { stroke: var(--green); filter: drop-shadow(0 0 7px rgba(33, 193, 94, .35)); }
+  .a.st-regen .unit { color: var(--green); }
+  .a.st-low .arc-progress { stroke: var(--amber); filter: drop-shadow(0 0 7px rgba(255, 179, 64, .35)); }
+  .a.st-low .unit { color: var(--amber); }
+  .a.st-low .dcard.battery .val { color: var(--amber); }
+  .a.st-low .dcard.battery .meter i { background: var(--amber); }
+
+  /* ---------- 方案 B · 线性布局 ---------- */
+  .b .topmini {
+    position: absolute; top: 40px; left: 0; right: 0;
+    display: flex; justify-content: center; align-items: center; gap: 5px;
+    font-size: 8px; font-weight: 600; letter-spacing: 1.6px; color: var(--green);
+  }
+  .b .topmini .dot {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 7px rgba(33, 193, 94, .9);
+  }
+  .b .gearrow {
+    position: absolute; top: 66px; left: 0; right: 0;
+    display: flex; justify-content: center; align-items: center; gap: 16px;
+    font-size: 15px; font-weight: 500; color: #5a6370;
+  }
+  .b .gearrow .on {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: var(--cyan); color: #020406; display: grid; place-items: center;
+    font-size: 14px; font-weight: 600;
+  }
+  .b .speed {
+    position: absolute; top: 112px; left: 0; right: 0; text-align: center;
+    font-size: 130px; line-height: 136px; font-weight: 200; letter-spacing: -3px;
+    font-variant-numeric: tabular-nums; color: var(--fg);
+  }
+  .b .unit {
+    position: absolute; top: 250px; left: 0; right: 0; text-align: center;
+    font-size: 12px; font-weight: 500; letter-spacing: 3px; color: var(--dim);
+  }
+  .b .sbar {
+    position: absolute; top: 292px; left: 83px; width: 300px; height: 4px;
+    border-radius: 2px; background: #141d26;
+  }
+  .b .sbar i {
+    position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px;
+    background: linear-gradient(90deg, #2b86a8, var(--cyan));
+  }
+  .b .sbar em {
+    position: absolute; top: -3px; width: 2px; height: 10px; border-radius: 1px;
+    background: var(--cyan); box-shadow: 0 0 8px rgba(67, 217, 245, .8);
+  }
+  .b .sbar-lab {
+    position: absolute; top: 302px; left: 83px; width: 300px;
+    display: flex; justify-content: space-between;
+    font-size: 7px; font-weight: 600; letter-spacing: 1px; color: #4d5866;
+  }
+  .b .stats {
+    position: absolute; top: 328px; left: 0; right: 0; display: flex; justify-content: center;
+  }
+  .b .stats .cell { width: 98px; text-align: center; }
+  .b .stats .cap { font-size: 7.5px; font-weight: 600; letter-spacing: 1.4px; color: var(--faint); }
+  .b .stats .val {
+    margin-top: 4px; font-size: 17px; font-weight: 500; letter-spacing: -.2px;
+    font-variant-numeric: tabular-nums; color: var(--fg);
+  }
+  .b .stats .val i { font-style: normal; font-size: 8px; font-weight: 600; color: var(--dim); margin-left: 2px; }
+  .b .stats .vd { width: 1px; background: #202b36; margin: 2px 0; }
+  .b .temps {
+    position: absolute; top: 380px; left: 0; right: 0;
+    display: flex; justify-content: center; align-items: center; gap: 7px;
+    font-size: 8px; font-weight: 600; letter-spacing: 1.2px; color: var(--faint);
+  }
+  .b .temps b { color: #aebac6; font-size: 9.5px; }
+  .b .temps .sep { width: 1px; height: 9px; background: #25313a; margin: 0 3px; }
+  .b .word {
+    position: absolute; top: 408px; left: 0; right: 0; text-align: center;
+    font-size: 7px; font-weight: 600; letter-spacing: 2.4px; color: #33404e;
+  }
+
+  /* ---------- 状态演示条 ---------- */
+  .stripwrap { margin: 0 0 64px; }
+  .strip { display: flex; gap: 38px; justify-content: center; }
+  .mini {
+    width: 233px; height: 233px; border-radius: 50%; overflow: hidden; position: relative;
+    box-shadow: 0 0 0 1px #141b23, 0 18px 50px rgba(0, 0, 0, .75);
+  }
+  .mini .screen { transform: scale(.5); transform-origin: 0 0; }
+  .mini-cap { margin-top: 12px; text-align: center; font-size: 9px; font-weight: 600; letter-spacing: 1.4px; color: var(--dim); }
+  .mini-cap em { font-style: normal; color: #4d5866; margin-left: 6px; font-size: 8px; }
+
+  /* ---------- guides ---------- */
+  .guides { display: none; position: absolute; inset: 0; z-index: 50; pointer-events: none; }
+  .guides .safe { position: absolute; inset: 17px; border: 1px dashed rgba(255, 255, 255, .22); border-radius: 50%; }
+  .guides .cross-h { position: absolute; top: 232px; left: 0; right: 0; height: 1px; background: rgba(232, 33, 39, .35); }
+  .guides .cross-v { position: absolute; left: 232px; top: 0; bottom: 0; width: 1px; background: rgba(232, 33, 39, .35); }
+  .guides .gl {
+    position: absolute; font-size: 7px; letter-spacing: 1px; color: #7f8b9a;
+    background: #0a0f15; padding: 2px 4px; border: 1px solid #24303d; border-radius: 3px;
+  }
+  .guides .g1 { top: 24px; left: 50%; transform: translateX(-50%); }
+  .guides .g2 { top: 214px; left: 26px; }
+  .guides .g3 { top: 214px; right: 26px; }
+
+  /* ---------- spec ---------- */
+  .spec-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 24px; padding-top: 10px; border-top: 1px solid #121a24; }
+  .spec-head h2 { font-size: 15px; font-weight: 500; letter-spacing: 2px; }
+  .spec-head span { font-size: 9px; letter-spacing: 1.6px; color: var(--faint); }
+  .spec-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 18px; }
+  .panel {
+    padding: 20px; border-radius: 16px; border: 1px solid #141d27;
+    background: linear-gradient(180deg, rgba(15, 22, 30, .75), rgba(8, 12, 17, .75));
+  }
+  .panel.wide { grid-column: 1 / -1; }
+  .panel h3 { font-size: 9px; font-weight: 600; letter-spacing: 2px; color: var(--faint); margin-bottom: 15px; }
+  .swatches { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
+  .sw { display: flex; align-items: center; gap: 8px; font-size: 8px; letter-spacing: .5px; color: var(--dim); }
+  .sw i { width: 18px; height: 18px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, .08); flex: none; }
+  .sw b { display: block; color: #c9d3de; font-weight: 600; font-size: 8.5px; }
+  .type-row { display: flex; align-items: baseline; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #121a23; }
+  .type-row:last-child { border-bottom: 0; }
+  .type-row .t { color: #c9d3de; }
+  .type-row .s { font-size: 8px; letter-spacing: .8px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .t-hero { font-size: 22px; font-weight: 300; letter-spacing: -1px; }
+  .t-kw { font-size: 17px; font-weight: 300; }
+  .t-cap { font-size: 7px; font-weight: 600; letter-spacing: 1.4px; color: var(--faint); }
+  .geo { list-style: none; font-size: 9px; line-height: 1.9; color: var(--dim); }
+  .geo li { display: flex; justify-content: space-between; border-bottom: 1px solid #121a23; padding: 4px 0; }
+  .geo li:last-child { border-bottom: 0; }
+  .geo b { color: #c9d3de; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .map-wrap { padding: 20px 22px; border-radius: 16px; border: 1px solid #141d27; background: rgba(10, 15, 21, .7); }
+  .map-wrap h3 { font-size: 9px; font-weight: 600; letter-spacing: 2px; color: var(--faint); margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 9px; }
+  th { text-align: left; font-weight: 600; letter-spacing: 1.2px; color: #6c7787; padding: 7px 10px; border-bottom: 1px solid #1a232e; }
+  td { padding: 8px 10px; color: #a9b5c2; border-bottom: 1px solid #111923; vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td code { font-family: var(--mono); font-size: 8.5px; color: #e2e8ef; background: #121a24; padding: 1px 5px; border-radius: 4px; }
+  td em { font-style: normal; color: var(--faint); }
+  .accent-red { color: #ff5b60; }
+  .accent-green { color: #4ddb88; }
+  .accent-amber { color: #ffc164; }
+  .accent-cyan { color: #57d7f2; }
+  .accent-blue { color: #6f92ee; }
+  .notes { font-size: 9.5px; line-height: 2; color: var(--dim); }
+  .notes b { color: #c9d3de; font-weight: 600; }
+  .notes code { font-family: var(--mono); font-size: 8.5px; color: #e2e8ef; background: #121a24; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<input type="checkbox" id="guides" hidden>
+<div class="board">
+
+  <header class="page-head">
+    <div>
+      <div class="eyebrow">TESLA BLE · ROUND INSTRUMENT</div>
+      <h1>驾驶页重设计 <b>DRIVING REDESIGN</b></h1>
+      <div class="page-meta">
+        Waveshare ESP32-S3-Touch-AMOLED-1.75-B <i>/</i>
+        466 × 466 <span>CO5300 QSPI</span> <i>/</i>
+        实机 1:1 <span>安全圆 R216</span> <i>/</i>
+        <span>独立设计稿 · 原 dashboard-ui.html 未改动</span>
+      </div>
+    </div>
+    <label class="guide-toggle" for="guides">
+      <span class="box"></span> 显示安全区 / 中心线
+    </label>
+  </header>
+
+  <div class="screens">
+
+    <!-- ================= 01 · 方案 A 弧芯布局 ================= -->
+    <section class="item">
+      <div class="item-head">
+        <div class="name">方案 A · 弧芯布局 <em>GAUGE CORE</em></div>
+        <div class="note">240° 速度环 · 档位胶囊 · 双下角数据卡 · 底部温度</div>
+      </div>
+      <div class="screen driving a" role="img" aria-label="方案 A 行驶仪表设计稿">
+        <svg class="gauge" viewBox="0 0 466 466" aria-hidden="true">
+          <defs>
+            <linearGradient id="grad-speed" x1="70" y1="330" x2="400" y2="330" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#9be9ff"/>
+              <stop offset=".55" stop-color="#43d9f5"/>
+              <stop offset="1" stop-color="#43d9f5"/>
+            </linearGradient>
+          </defs>
+          <circle class="arc-track" cx="233" cy="233" r="190" transform="rotate(150 233 233)" stroke-dasharray="795.9 1193.8"/>
+          <circle class="arc-progress" cx="233" cy="233" r="190" transform="rotate(150 233 233)" stroke="url(#grad-speed)" stroke-dasharray="424.5 1193.8"/>
+          <circle class="tick-minor" cx="233" cy="233" r="182" transform="rotate(150 233 233)" stroke-dasharray="2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 378.68"/>
+          <circle class="tick-major" cx="233" cy="233" r="182" transform="rotate(150 233 233)" stroke-dasharray="4 186.59 4 186.59 4 186.59 4 186.59 4 377.18"/>
+          <text class="arc-label" x="55" y="340">0</text>
+          <text class="arc-label" x="411" y="340">240</text>
+        </svg>
+
+        <div class="topbar">
+          <span class="brand">TESLA</span>
+          <span class="tr">
+            <span class="link"><i class="dot"></i>LINK</span>
+            <span class="sep"></span>
+            <span class="lock">LOCK</span>
+          </span>
+        </div>
+
+        <div class="speed">128</div>
+        <div class="unit">KM/H</div>
+
+        <div class="gears">
+          <span class="gear">P</span>
+          <span class="gear">R</span>
+          <span class="gear">N</span>
+          <span class="gear on">D</span>
+        </div>
+
+        <div class="dcard battery">
+          <div class="cap">BATTERY</div>
+          <div class="val">78<i>%</i></div>
+          <div class="sub">RANGE <b>312</b> km</div>
+          <div class="meter"><i style="left:0;width:78%"></i></div>
+        </div>
+
+        <div class="dcard power">
+          <div class="cap">MOTOR</div>
+          <div class="val">44<i>kW</i></div>
+          <div class="sub">OUTPUT</div>
+          <div class="meter"><span class="z"></span><i style="left:24%;width:17.6%;background:var(--blue)"></i></div>
+        </div>
+
+        <div class="temps">
+          <span>OUT</span><b>18°</b>
+          <span class="sep"></span>
+          <span>IN</span><b>22°</b>
+        </div>
+
+        <div class="guides">
+          <div class="safe"></div><div class="cross-h"></div><div class="cross-v"></div>
+          <span class="gl g1">SAFE R216</span>
+          <span class="gl g2">R190 速度环</span>
+          <span class="gl g3">R190 速度环</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 02 · 方案 B 线性布局 ================= -->
+    <section class="item">
+      <div class="item-head">
+        <div class="name">方案 B · 线性布局 <em>LINEAR SPINE</em></div>
+        <div class="note">无环 · 超大车速 · 横向速度条 · 三列数据 · 最简实现</div>
+      </div>
+      <div class="screen driving b" role="img" aria-label="方案 B 行驶仪表设计稿">
+        <div class="topmini"><i class="dot"></i>LINK</div>
+
+        <div class="gearrow">
+          <span>P</span><span>R</span><span>N</span><span class="on">D</span>
+        </div>
+
+        <div class="speed">128</div>
+        <div class="unit">KM/H</div>
+
+        <div class="sbar">
+          <i style="width:53.3%"></i>
+          <em style="left:53.3%"></em>
+        </div>
+        <div class="sbar-lab"><span>0</span><span>KM/H</span><span>240</span></div>
+
+        <div class="stats">
+          <div class="cell"><div class="cap">BATTERY</div><div class="val">78<i>%</i></div></div>
+          <div class="vd"></div>
+          <div class="cell"><div class="cap">RANGE</div><div class="val">312 <i>km</i></div></div>
+          <div class="vd"></div>
+          <div class="cell"><div class="cap">MOTOR</div><div class="val">44 <i>kW</i></div></div>
+        </div>
+
+        <div class="temps">
+          <span>OUT</span><b>18°</b>
+          <span class="sep"></span>
+          <span>IN</span><b>22°</b>
+        </div>
+
+        <div class="word">TESLA BLE · DRIVE MODE</div>
+
+        <div class="guides">
+          <div class="safe"></div><div class="cross-h"></div><div class="cross-v"></div>
+          <span class="gl g1">SAFE R216</span>
+          <span class="gl g2">300px 线性条</span>
+          <span class="gl g3">300px 线性条</span>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ================= 03 · 方案 A 状态演示 ================= -->
+  <section class="stripwrap">
+    <div class="item-head">
+      <div class="name">方案 A · 状态演示 <em>STATE STRIP</em></div>
+      <div class="note">环色 / 功率条方向 / 告警胶囊随 SimPayload 语义切换 · 0.5× 预览</div>
+    </div>
+    <div class="strip">
+
+      <!-- 动能回收 -->
+      <div>
+        <div class="mini"><div class="screen driving a st-regen">
+          <svg class="gauge" viewBox="0 0 466 466" aria-hidden="true">
+            <circle class="arc-track" cx="233" cy="233" r="190" transform="rotate(150 233 233)" stroke-dasharray="795.9 1193.8"/>
+            <circle class="arc-progress" cx="233" cy="233" r="190" transform="rotate(150 233 233)" stroke="#21c15e" stroke-dasharray="139.3 1193.8"/>
+            <circle class="tick-minor" cx="233" cy="233" r="182" transform="rotate(150 233 233)" stroke-dasharray="2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 378.68"/>
+            <circle class="tick-major" cx="233" cy="233" r="182" transform="rotate(150 233 233)" stroke-dasharray="4 186.59 4 186.59 4 186.59 4 186.59 4 377.18"/>
+            <text class="arc-label" x="55" y="340">0</text>
+            <text class="arc-label" x="411" y="340">240</text>
+          </svg>
+          <div class="topbar">
+            <span class="brand">TESLA</span>
+            <span class="tr"><span class="link"><i class="dot"></i>LINK</span><span class="sep"></span><span class="lock">LOCK</span></span>
+          </div>
+          <div class="speed">42</div>
+          <div class="unit">KM/H</div>
+          <div class="gears">
+            <span class="gear">P</span><span class="gear">R</span><span class="gear">N</span><span class="gear on">D</span>
+          </div>
+          <div class="dcard battery">
+            <div class="cap">BATTERY</div>
+            <div class="val">76<i>%</i></div>
+            <div class="sub">RANGE <b>305</b> km</div>
+            <div class="meter"><i style="left:0;width:76%"></i></div>
+          </div>
+          <div class="dcard power">
+            <div class="cap">MOTOR</div>
+            <div class="val">-38<i>kW</i></div>
+            <div class="sub">REGEN</div>
+            <div class="meter"><span class="z"></span><i style="left:8.8%;width:15.2%;background:var(--green)"></i></div>
+          </div>
+          <div class="temps"><span>OUT</span><b>23°</b><span class="sep"></span><span>IN</span><b>25°</b></div>
+        </div></div>
+        <div class="mini-cap">动能回收 <em>REGEN · -38 kW</em></div>
+      </div>
+
+      <!-- 低电量 -->
+      <div>
+        <div class="mini"><div class="screen driving a st-low">
+          <div class="banner amber show">LOW BATTERY · 48 KM</div>
+          <svg class="gauge" viewBox="0 0 466 466" aria-hidden="true">
+            <circle class="arc-track" cx="233" cy="233" r="190" transform="rotate(150 233 233)" stroke-dasharray="795.9 1193.8"/>
+            <circle class="arc-progress" cx="233" cy="233" r="190" transform="rotate(150 233 233)" stroke="#ffb340" stroke-dasharray="209.1 1193.8"/>
+            <circle class="tick-minor" cx="233" cy="233" r="182" transform="rotate(150 233 233)" stroke-dasharray="2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 378.68"/>
+            <circle class="tick-major" cx="233" cy="233" r="182" transform="rotate(150 233 233)" stroke-dasharray="4 186.59 4 186.59 4 186.59 4 186.59 4 377.18"/>
+            <text class="arc-label" x="55" y="340">0</text>
+            <text class="arc-label" x="411" y="340">240</text>
+          </svg>
+          <div class="topbar">
+            <span class="brand">TESLA</span>
+            <span class="tr"><span class="link"><i class="dot"></i>LINK</span><span class="sep"></span><span class="lock">LOCK</span></span>
+          </div>
+          <div class="speed">63</div>
+          <div class="unit">KM/H</div>
+          <div class="gears">
+            <span class="gear">P</span><span class="gear">R</span><span class="gear">N</span><span class="gear on">D</span>
+          </div>
+          <div class="dcard battery">
+            <div class="cap">BATTERY</div>
+            <div class="val">12<i>%</i></div>
+            <div class="sub">RANGE <b>48</b> km</div>
+            <div class="meter"><i style="left:0;width:12%"></i></div>
+          </div>
+          <div class="dcard power">
+            <div class="cap">MOTOR</div>
+            <div class="val">52<i>kW</i></div>
+            <div class="sub">OUTPUT</div>
+            <div class="meter"><span class="z"></span><i style="left:24%;width:20.8%;background:var(--blue)"></i></div>
+          </div>
+          <div class="temps"><span>OUT</span><b>10°</b><span class="sep"></span><span>IN</span><b>17°</b></div>
+        </div></div>
+        <div class="mini-cap">低电量 <em>LOW · SOC 12%</em></div>
+      </div>
+
+      <!-- 车门告警 -->
+      <div>
+        <div class="mini"><div class="screen driving a">
+          <div class="banner red show">FRUNK OPEN</div>
+          <svg class="gauge" viewBox="0 0 466 466" aria-hidden="true">
+            <circle class="arc-track" cx="233" cy="233" r="190" transform="rotate(150 233 233)" stroke-dasharray="795.9 1193.8"/>
+            <circle class="arc-progress" cx="233" cy="233" r="190" transform="rotate(150 233 233)" stroke="#43d9f5" stroke-dasharray="0.1 1193.8"/>
+            <circle class="tick-minor" cx="233" cy="233" r="182" transform="rotate(150 233 233)" stroke-dasharray="2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 61.03 2.5 378.68"/>
+            <circle class="tick-major" cx="233" cy="233" r="182" transform="rotate(150 233 233)" stroke-dasharray="4 186.59 4 186.59 4 186.59 4 186.59 4 377.18"/>
+            <text class="arc-label" x="55" y="340">0</text>
+            <text class="arc-label" x="411" y="340">240</text>
+          </svg>
+          <div class="topbar">
+            <span class="brand">TESLA</span>
+            <span class="tr"><span class="link"><i class="dot"></i>LINK</span><span class="sep"></span><span class="lock">LOCK</span></span>
+          </div>
+          <div class="speed">0</div>
+          <div class="unit">KM/H</div>
+          <div class="gears">
+            <span class="gear on">P</span><span class="gear">R</span><span class="gear">N</span><span class="gear">D</span>
+          </div>
+          <div class="dcard battery">
+            <div class="cap">BATTERY</div>
+            <div class="val">64<i>%</i></div>
+            <div class="sub">RANGE <b>261</b> km</div>
+            <div class="meter"><i style="left:0;width:64%"></i></div>
+          </div>
+          <div class="dcard power">
+            <div class="cap">MOTOR</div>
+            <div class="val">0<i>kW</i></div>
+            <div class="sub">STANDBY</div>
+            <div class="meter"><span class="z"></span></div>
+          </div>
+          <div class="temps"><span>OUT</span><b>26°</b><span class="sep"></span><span>IN</span><b>27°</b></div>
+        </div></div>
+        <div class="mini-cap">车门告警 <em>ALERT · P 档</em></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= 04 · 设计规格 ================= -->
+  <div class="spec-head">
+    <h2>设计规格 SPEC</h2>
+    <span>466 × 466 · 1:1 实机 · CO5300 QSPI · 数据源 SimPayload (53B)</span>
+  </div>
+
+  <div class="spec-grid">
+    <div class="panel">
+      <h3>色彩规范</h3>
+      <div class="swatches">
+        <div class="sw"><i style="background:#020406"></i><span><b>背景 Background</b>#020406</span></div>
+        <div class="sw"><i style="background:#f5f7fa"></i><span><b>主文本 Primary</b>#f5f7fa</span></div>
+        <div class="sw"><i style="background:#8a93a6"></i><span><b>次级 Dim</b>#8a93a6</span></div>
+        <div class="sw"><i style="background:#5a6377"></i><span><b>弱化 Faint</b>#5a6377</span></div>
+        <div class="sw"><i style="background:#43d9f5"></i><span><b>速度主色 Accent</b>#43d9f5</span></div>
+        <div class="sw"><i style="background:#3e6ae1"></i><span><b>功率输出 Output</b>#3e6ae1</span></div>
+        <div class="sw"><i style="background:#21c15e"></i><span><b>回收/能入 Regen</b>#21c15e</span></div>
+        <div class="sw"><i style="background:#ffb340"></i><span><b>二级警示 Caution</b>#ffb340</span></div>
+        <div class="sw"><i style="background:#ff453a"></i><span><b>告警 Alert</b>#ff453a</span></div>
+        <div class="sw"><i style="background:#e82127"></i><span><b>品牌点缀 Tesla Red</b>#e82127</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>字型阶梯</h3>
+      <div class="type-row"><span class="t t-hero">128</span><span class="s">车速 · 112px / 300</span></div>
+      <div class="type-row"><span class="t t-kw">44 kW</span><span class="s">卡片数值 · 20px / 500</span></div>
+      <div class="type-row"><span class="t t-kw">P R N D</span><span class="s">档位 · 20px / 500</span></div>
+      <div class="type-row"><span class="t t-kw">KM/H</span><span class="s">单位 · 13px / 500 · ls3</span></div>
+      <div class="type-row"><span class="t t-cap">BATTERY</span><span class="s">标签 · 7.5px / 600 · ls1.4</span></div>
+    </div>
+
+    <div class="panel">
+      <h3>几何布局 (方案 A)</h3>
+      <ul class="geo">
+        <li><span>屏幕 / 安全区</span><b>Ø466 / R216 (inset 17)</b></li>
+        <li><span>速度环</span><b>R190 · stroke 7 · 150°→30° 经顶</b></li>
+        <li><span>刻度环</span><b>R182 · minor 20 / major 60 km/h</b></li>
+        <li><span>车速区</span><b>y104–244 · 单位 y228</b></li>
+        <li><span>档位胶囊</span><b>168×40 @ y256 · x149</b></li>
+        <li><span>数据卡</span><b>102×62 @ y316 · x82 / x282</b></li>
+        <li><span>温度行</span><b>y396 · 居中</b></li>
+      </ul>
+    </div>
+
+    <div class="panel wide map-wrap">
+      <h3>数据映射 (SimPayload → UI)</h3>
+      <table>
+        <tr><th>字段</th><th>UI 元素</th><th>行为</th></tr>
+        <tr>
+          <td><code>speed_kmh</code></td>
+          <td>中央大字 + R190 弧</td>
+          <td>0–240 km/h，弧长 = 值/240 × 240°，200ms 补间</td>
+        </tr>
+        <tr>
+          <td><code>motor_power_kw</code></td>
+          <td>MOTOR 卡 + 环色/单位色</td>
+          <td><em class="accent-blue">&gt;0 蓝 (零点右伸)</em> · <em class="accent-green">&lt;0 绿 (零点左伸, 回收)</em> · 环色随符号切换</td>
+        </tr>
+        <tr>
+          <td><code>battery_level</code></td>
+          <td>BATTERY 卡 + meter</td>
+          <td><em class="accent-amber">≤15% 数值/meter 转琥珀 + LOW BATTERY 告警</em></td>
+        </tr>
+        <tr>
+          <td><code>battery_range_km</code></td>
+          <td>BATTERY 卡副行</td>
+          <td>RANGE n km</td>
+        </tr>
+        <tr>
+          <td><code>gear</code></td>
+          <td>档位胶囊</td>
+          <td>P/R/N/D 高亮；<code>SNA('?')</code> → AP 辅助驾驶高亮</td>
+        </tr>
+        <tr>
+          <td><code>doors[6]</code> / <code>tpms[4]</code></td>
+          <td>告警胶囊 (top 80)</td>
+          <td><em class="accent-red">红色 1Hz 闪烁</em>；胎压临界转琥珀二级警示</td>
+        </tr>
+        <tr>
+          <td><code>charging</code></td>
+          <td>页面切换</td>
+          <td>切至充电页，驾驶页整页隐藏</td>
+        </tr>
+        <tr>
+          <td>内外温度 / <code>ble rssi</code></td>
+          <td>底部温度行 / 顶栏 LINK</td>
+          <td>断连时 <em>LINK 转灰 NO SIG，数值显示 --</em></td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="panel wide">
+      <h3>设计说明 & LVGL 实现注记</h3>
+      <div class="notes">
+        <b>① 主色换青蓝</b>：速度环由原柠檬绿 <code>#a6b94c</code> 改为 <code>#43d9f5</code>，与品牌仪表冷色一致；功率语义色独立（输出蓝 / 回收绿），环色与功率状态联动，一眼可辨能量流向。<br>
+        <b>② 增加刻度</b>：R182 minor 每 20 / major 每 60 km/h，弥补纯弧长无标定的扫读弱点；环改为 240° 经顶布局，0/240 刻度值落在下缘两侧，避让中央大字。<br>
+        <b>③ 数据卡外移</b>：电量/功率两张 102×62 卡移到安全圆下缘两侧，中央留白聚焦车速；RANGE 并入 BATTERY 卡副行，节省一行高度。<br>
+        <b>④ 档位胶囊保持原位</b>（168×40 @ y256），沿用既有肌肉记忆；告警条升级为悬浮胶囊（top 80），不再横贯全宽遮挡大字。<br>
+        <b>⑤ LVGL 实现</b>：速度环用 <code>lv_meter</code>（自带 minor/major 刻度）或 <code>lv_arc</code> + 自定义刻度层（注意 LVGL 与 SVG 角度方向换算）；功率双向条用 <code>lv_bar</code> 负量程或自绘；告警胶囊 lv_obj + 1Hz timer 闪烁；驱动轮询 100ms / UI 补间 200ms；全 ASCII 文案用 <code>lv_font_conv</code> 打包子集。<br>
+        <b>⑥ 方案取舍</b>：方案 A 信息密度高、仪表感强，<b>推荐</b>；方案 B 去环化更极简，实现最简单（纯 lv_bar + lv_label），适合作为低功耗/夜间极简模式的备选。
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

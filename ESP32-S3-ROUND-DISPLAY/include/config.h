@@ -36,7 +36,7 @@
 
 // 驾驶状态轮询间隔；单条请求仍需等车端响应后才会发送下一条。
 // 实测车端回包 300~450ms，设 300 相当于“回包就发下一条”，再低不会更快。
-#define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 300
+#define CFG_TESLA_DRIVE_POLL_INTERVAL_MS 289
 
 #define CFG_TESLA_AUX_POLL_INTERVAL_MS 15000
 
