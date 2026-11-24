@@ -207,6 +207,7 @@ class TelemetryState:
         self.ble_connected = False    # BLE 连接状态
         self.ble_enabled = True       # BLE 蓝牙广播全局总开关 (默认开启)
         self.frame_counter = 0        # 剧本帧计数器
+        self.script_type = "FULL"     # 剧本类型: "FULL" (完整剧情) / "SPEED_ONLY" (仅车速线性变化, 延迟测试用)
         self.vin = "LRWYGCFJ8RC571213" # 默认 VIN (用户可在界面/命令行自行填入)
         self.request_restart = False  # 蓝牙广播重启标志位
 
@@ -304,9 +305,21 @@ class TelemetryState:
                 return None
             self.frame_counter = (self.frame_counter + 1) % 1030
             frame = self.frame_counter
-        mock_data = generate_mock_frame(frame)
+            script_type = self.script_type
+        if script_type == "SPEED_ONLY":
+            mock_data = generate_speed_only_frame(frame)
+        else:
+            mock_data = generate_mock_frame(frame)
         self.update_data(**mock_data)
         return mock_data
+
+    def get_script_type(self):
+        with self.lock:
+            return self.script_type
+
+    def set_script_type(self, val):
+        with self.lock:
+            self.script_type = val
 
     def get_vin(self):
         with self.lock:
@@ -654,6 +667,78 @@ def generate_mock_frame(frame_counter):
     return data
 
 
+def generate_speed_only_frame(frame_counter):
+    """
+    仅车速剧本：车速线性变化，用于验证设备显示延迟。
+
+    其余状态全部保持静止（车门/锁定/充电/温度/胎压不变），
+    观察端只需关注车速一项指标与真实时间轴的偏差。
+
+    时间轴 (20Hz, 1030 帧循环 = 51.5s):
+      0   ~ 400  帧: 0 -> 120 km/h 线性加速 (20s, 6 km/h 每秒)
+      400 ~ 500  帧: 120 km/h 定速巡航 (5s)
+      500 ~ 900  帧: 120 -> 0 km/h 线性减速 (20s, 能量回收)
+      900 ~ 1030 帧: 静止停车 (6.5s)
+    """
+    loop_frame = frame_counter % 1030
+
+    data = {
+        'speed_kmh': 0.0,
+        'motor_power_kw': 0.0,
+        'battery_level': 62,
+        'battery_range_km': 248.0,
+        'gear': 'P',
+        'door_open_fl': False,
+        'door_open_fr': False,
+        'door_open_rl': False,
+        'door_open_rr': False,
+        'door_open_trunk_front': False,
+        'door_open_trunk_rear': False,
+        'locked': True,
+        'charging': False,
+        'charge_power_kw': 0.0,
+        'inside_temp': 35.0,
+        'outside_temp': 16.0,
+        'tpms_fl': 2.9,
+        'tpms_fr': 2.9,
+        'tpms_rl': 2.9,
+        'tpms_rr': 2.9,
+        'script_phase_desc': "仅车速: 静止待命"
+    }
+
+    data['locked'] = False
+
+    if loop_frame < 400:
+        # 线性加速: 0 -> 120 km/h
+        speed = (loop_frame / 400.0) * 120.0
+        data['gear'] = 'D'
+        data['speed_kmh'] = round(speed, 1)
+        data['motor_power_kw'] = round(speed * 0.25, 1)  # 功率随车速线性上升
+        data['script_phase_desc'] = "仅车速: 线性加速 0→120 km/h"
+    elif loop_frame < 500:
+        # 定速巡航
+        data['gear'] = 'D'
+        data['speed_kmh'] = 120.0
+        data['motor_power_kw'] = 12.0
+        data['script_phase_desc'] = "仅车速: 定速巡航 120 km/h"
+    elif loop_frame < 900:
+        # 线性减速: 120 -> 0 km/h
+        ratio = (loop_frame - 500) / 400.0
+        speed = 120.0 - ratio * 120.0
+        data['gear'] = 'D'
+        data['speed_kmh'] = round(speed, 1)
+        data['motor_power_kw'] = round(-speed * 0.10, 1)  # 能量回收负功率
+        data['script_phase_desc'] = "仅车速: 线性减速 120→0 km/h"
+    else:
+        # 静止停车
+        data['gear'] = 'P'
+        data['speed_kmh'] = 0.0
+        data['motor_power_kw'] = 0.0
+        data['script_phase_desc'] = "仅车速: 静止停车"
+
+    return data
+
+
 # ─── 特斯拉深色主题 GUI 界面类 ────────────────────────────────
 class TeslaSimulatorGUI:
     def __init__(self, root, state: TelemetryState, stop_event: threading.Event, log_queue: queue.Queue):
@@ -809,6 +894,41 @@ class TeslaSimulatorGUI:
         self.btn_mode.grid(row=0, column=4, padx=10, sticky="e")
         self.btn_mode.bind("<Enter>", lambda e: self.btn_mode.config(bg=self.adjust_color_brightness(self.btn_mode['bg'], 1.2)))
         self.btn_mode.bind("<Leave>", lambda e: self.btn_mode.config(bg=self.get_current_mode_color()))
+
+        # 剧本类型切换按钮 (完整剧情 / 仅车速线性变化)
+        self.btn_script_type = tk.Button(
+            top_frame,
+            text=self.get_script_type_label(),
+            font=("Segoe UI", 9),
+            bg=self.BG_BTN,
+            fg=self.FG_TEXT,
+            activebackground=self.BG_BTN_HOVER,
+            activeforeground=self.FG_TEXT,
+            bd=0,
+            relief="flat",
+            padx=10,
+            pady=6,
+            command=self.cycle_script_type
+        )
+        self.btn_script_type.grid(row=0, column=5, padx=(0, 10), sticky="e")
+
+    def get_script_type_label(self):
+        if self.state.get_script_type() == "SPEED_ONLY":
+            return "剧本: 仅车速 (延迟测试)"
+        return "剧本: 完整剧情"
+
+    def cycle_script_type(self):
+        """
+        在完整剧情剧本和仅车速线性剧本之间切换
+        """
+        new_type = "SPEED_ONLY" if self.state.get_script_type() == "FULL" else "FULL"
+        self.state.set_script_type(new_type)
+        self.state.reset_frame()
+        self.btn_script_type.config(text=self.get_script_type_label())
+        if new_type == "SPEED_ONLY":
+            self.log_queue.put("[System] 切换至：仅车速剧本。0→120 km/h 线性加速 20s → 定速巡航 5s → 线性减速 20s → 停车 6.5s，循环播放（其余状态保持静止）。")
+        else:
+            self.log_queue.put("[System] 切换至：完整剧情剧本（8 阶段全状态演进）。")
 
     def update_ble_name_preview(self):
         vin = self.entry_vin.get().strip()
