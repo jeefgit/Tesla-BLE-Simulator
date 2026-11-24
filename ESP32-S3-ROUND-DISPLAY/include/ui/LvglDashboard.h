@@ -66,6 +66,18 @@ class LvglDashboard : public IDashboard {
   void updateLabel(lv_obj_t* label, const char* text);
   void updateGaugeArc(float speedKmh, bool valid);
 
+  // Per-page render helpers. Each one is implemented in the translation unit
+  // that also builds the page, so widgets and their update code stay together.
+  void renderTopBar(const UiModel& model, bool pairing);
+  void renderGaugeState(const UiModel& model, bool ready, bool pairing,
+                        bool showCharging);
+  void renderDrivingPage(const UiModel& model);
+  void renderChargingPage(const UiModel& model);
+  void renderLinkPage(const UiModel& model);
+  void renderPairingPage(const UiModel& model);
+  void renderDoorPage(const UiModel& model, uint8_t openDoorCount,
+                      int8_t firstOpenDoor);
+
   lv_obj_t* m_arc = nullptr;
   bool m_showSpeedArc = false;
   lv_obj_t* m_gaugeTicks = nullptr;
