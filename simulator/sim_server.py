@@ -674,10 +674,17 @@ def generate_speed_only_frame(frame_counter):
     其余状态全部保持静止（车门/锁定/充电/温度/胎压不变），
     观察端只需关注车速一项指标与真实时间轴的偏差。
 
+    每段内部均为严格线性变化，急加速/急减速段斜率明显更陡，
+    可用于验证设备在大斜率变化下的刷新延迟与丢帧情况。
+
     时间轴 (20Hz, 1030 帧循环 = 51.5s):
-      0   ~ 400  帧: 0 -> 120 km/h 线性加速 (20s, 6 km/h 每秒)
-      400 ~ 500  帧: 120 km/h 定速巡航 (5s)
-      500 ~ 900  帧: 120 -> 0 km/h 线性减速 (20s, 能量回收)
+      0   ~ 300  帧: 0 -> 120 km/h 线性加速 (15s, 8 km/h 每秒)
+      300 ~ 380  帧: 120 km/h 定速巡航 (4s)
+      380 ~ 440  帧: 120 -> 0 km/h 急减速 (3s, 40 km/h 每秒, 硬刹车)
+      440 ~ 470  帧: 静止缓冲 (1.5s)
+      470 ~ 530  帧: 0 -> 120 km/h 急加速 (3s, 40 km/h 每秒, 弹射起步)
+      530 ~ 610  帧: 120 km/h 定速巡航 (4s)
+      610 ~ 900  帧: 120 -> 0 km/h 线性减速 (14.5s, 能量回收)
       900 ~ 1030 帧: 静止停车 (6.5s)
     """
     loop_frame = frame_counter % 1030
@@ -708,14 +715,41 @@ def generate_speed_only_frame(frame_counter):
 
     data['locked'] = False
 
-    if loop_frame < 400:
+    if loop_frame < 300:
         # 线性加速: 0 -> 120 km/h
-        speed = (loop_frame / 400.0) * 120.0
+        speed = (loop_frame / 300.0) * 120.0
         data['gear'] = 'D'
         data['speed_kmh'] = round(speed, 1)
         data['motor_power_kw'] = round(speed * 0.25, 1)  # 功率随车速线性上升
         data['script_phase_desc'] = "仅车速: 线性加速 0→120 km/h"
-    elif loop_frame < 500:
+    elif loop_frame < 380:
+        # 定速巡航
+        data['gear'] = 'D'
+        data['speed_kmh'] = 120.0
+        data['motor_power_kw'] = 12.0
+        data['script_phase_desc'] = "仅车速: 定速巡航 120 km/h"
+    elif loop_frame < 440:
+        # 急减速: 120 -> 0 km/h, 40 km/h 每秒 (硬刹车)
+        ratio = (loop_frame - 380) / 60.0
+        speed = 120.0 - ratio * 120.0
+        data['gear'] = 'D'
+        data['speed_kmh'] = round(speed, 1)
+        data['motor_power_kw'] = round(-speed * 0.5, 1)  # 强能量回收, 最高 -60 kW
+        data['script_phase_desc'] = "仅车速: 急减速 120→0 km/h (硬刹车)"
+    elif loop_frame < 470:
+        # 静止缓冲
+        data['gear'] = 'P'
+        data['speed_kmh'] = 0.0
+        data['motor_power_kw'] = 0.0
+        data['script_phase_desc'] = "仅车速: 静止缓冲"
+    elif loop_frame < 530:
+        # 急加速: 0 -> 120 km/h, 40 km/h 每秒 (弹射起步)
+        speed = ((loop_frame - 470) / 60.0) * 120.0
+        data['gear'] = 'D'
+        data['speed_kmh'] = round(speed, 1)
+        data['motor_power_kw'] = round(speed * 0.7, 1)  # 大功率输出, 最高 84 kW
+        data['script_phase_desc'] = "仅车速: 急加速 0→120 km/h (弹射起步)"
+    elif loop_frame < 610:
         # 定速巡航
         data['gear'] = 'D'
         data['speed_kmh'] = 120.0
@@ -723,7 +757,7 @@ def generate_speed_only_frame(frame_counter):
         data['script_phase_desc'] = "仅车速: 定速巡航 120 km/h"
     elif loop_frame < 900:
         # 线性减速: 120 -> 0 km/h
-        ratio = (loop_frame - 500) / 400.0
+        ratio = (loop_frame - 610) / 290.0
         speed = 120.0 - ratio * 120.0
         data['gear'] = 'D'
         data['speed_kmh'] = round(speed, 1)
@@ -926,7 +960,7 @@ class TeslaSimulatorGUI:
         self.state.reset_frame()
         self.btn_script_type.config(text=self.get_script_type_label())
         if new_type == "SPEED_ONLY":
-            self.log_queue.put("[System] 切换至：仅车速剧本。0→120 km/h 线性加速 20s → 定速巡航 5s → 线性减速 20s → 停车 6.5s，循环播放（其余状态保持静止）。")
+            self.log_queue.put("[System] 切换至：仅车速剧本。线性加速 15s → 巡航 4s → 急减速 3s (120→0) → 缓冲 1.5s → 急加速 3s (0→120) → 巡航 4s → 线性减速 14.5s → 停车 6.5s，循环播放（其余状态保持静止）。")
         else:
             self.log_queue.put("[System] 切换至：完整剧情剧本（8 阶段全状态演进）。")
 
