@@ -59,16 +59,26 @@ function build(vs) {
   const driveFresh = ready && fresh.drive;
   const battFresh = ready && fresh.battery;
   const gearFresh = ready && fresh.gear;
+  // 功率条（WXML 渲染）：-100~100 kW，输出=红 / 回收=绿
+  const powerKw = driveFresh ? snap.motorPowerKw : null;
+  const hasPower = powerKw !== null && powerKw !== undefined && !isNaN(powerKw);
   model.drive = {
     speedText: fmtInt(snap.speedKmh, driveFresh),
     speedVal: driveFresh ? Math.max(0, Math.min(150, snap.speedKmh || 0)) : null,
     gearText: gearFresh ? (snap.gear || STALE_TEXT) : STALE_TEXT,
-    powerKw: driveFresh ? snap.motorPowerKw : null,
-    powerText: fmtNum(snap.motorPowerKw, 1, driveFresh),
+    powerKw: powerKw,
+    powerText: fmtNum(powerKw, 1, driveFresh),
+    hasPower: hasPower,
+    powerPct: hasPower ? Math.round(Math.abs(Math.max(-100, Math.min(100, powerKw)))) : 0,
+    powerDir: !hasPower || powerKw === 0 ? null : (powerKw > 0 ? 'out' : 'regen'),
     socText: fmtInt(snap.batteryLevel, battFresh),
     socVal: battFresh ? snap.batteryLevel : null,
     rangeText: fmtInt(snap.batteryRangeKm, battFresh),
   };
+
+  // WXML 内联样式串预生成（避免 VS Code 对 style="{{}}" 的 CSS 误报）
+  model.drive.powerOutStyle = 'width: ' + (model.drive.powerDir === 'out' ? model.drive.powerPct : 0) + '%';
+  model.drive.powerRegenStyle = 'width: ' + (model.drive.powerDir === 'regen' ? model.drive.powerPct : 0) + '%';
 
   // 充电页
   model.charge = {
@@ -77,7 +87,9 @@ function build(vs) {
     powerText: fmtNum(snap.chargePowerKw, 1, ready && fresh.charge),
     rangeText: fmtInt(snap.batteryRangeKm, battFresh),
     etaText: chargeEtaText(snap, ready && fresh.charge),
+    charging: ready && fresh.charge ? snap.charging === true : false,
   };
+  model.charge.socBarStyle = 'width: ' + (model.charge.socVal || 0) + '%';
 
   // 门状态（任一打开时叠加显示）
   const doorsFresh = ready && fresh.doors;

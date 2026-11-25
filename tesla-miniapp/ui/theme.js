@@ -1,18 +1,18 @@
-// 仪表配色/字号 token（对齐 ESP32-S3-ROUND-DISPLAY/design/UI-DESIGN.md）
+// 仪表配色 token（与 dashboard.wxss 完全对齐的小程序浅色 Tesla 色板）
 'use strict';
 
 module.exports = {
-  SCREEN: '#020406',
-  TEXT: '#F5F7FA',
-  DIM: '#8A93A6',
-  FAINT: '#5A6377',
-  TRACK: '#1D2733',
-  GAUGE_CYAN: '#43D9F5',
-  TESLA_RED: '#E82127',
-  REGEN_GREEN: '#21C15E',
-  CAUTION: '#FFB340',
-  ALERT: '#FF453A',
-  CARD: '#0C1218',
+  SCREEN: '#FFFFFF',        // Canvas 背景
+  TEXT: '#2C3E50',          // 主文本
+  DIM: '#8B98A8',           // 次要文本
+  FAINT: '#B2B8C0',         // 弱化/占位
+  TRACK: '#EFF1F5',         // 圆环底轨
+
+  GAUGE_CYAN: '#10AEFF',    // Tesla 蓝：速度/信息
+  TESLA_RED: '#FA5151',     // 微信红：功率输出/告警
+  REGEN_GREEN: '#07C160',   // 微信绿：充电/回收/成功
+  CAUTION: '#FFA033',       // 速度中段过渡
+  ALERT: '#FA5151',
 
   FONT: 'sans-serif',
 };

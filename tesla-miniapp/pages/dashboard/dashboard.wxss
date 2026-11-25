@@ -1,122 +1,574 @@
+/* 特斯拉浅色仪表盘 — 统一间距 24rpx / 圆角 24rpx / 字号 20·22·26·34·44·56·88rpx / 阴影两档 */
+
+/* ── Page 背景：冷色渐变，Tesla 品牌基调 ── */
 .page {
-  position: relative;
-  width: 100vw;
-  height: 100vh;
-  background: #020406;
+  min-height: 100vh;
+  background: linear-gradient(160deg, #EEF2F7 0%, #F7F9FB 40%, #FAFBFC 100%);
+  padding: 24rpx 28rpx 64rpx;
+  box-sizing: border-box;
 }
 
-.gauge {
-  width: 100vw;
-  height: 100vh;
+/* ── 卡片基础 ── */
+.card {
+  background: #FFFFFF;
+  border-radius: 24rpx;
+  box-shadow: 0 4rpx 20rpx rgba(16, 24, 40, 0.05), 0 2rpx 6rpx rgba(16, 24, 40, 0.03);
+  overflow: hidden;
 }
 
-.debugbar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+/* ── 顶部状态条 ── */
+.statusbar {
   display: flex;
   align-items: center;
-  padding: 8rpx 16rpx;
-  background: rgba(2, 4, 6, 0.7);
+  padding: 12rpx 4rpx 20rpx;
+}
+
+.status-pill {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10rpx);
+  border-radius: 999rpx;
+  padding: 12rpx 28rpx;
+  box-shadow: 0 2rpx 12rpx rgba(16, 24, 40, 0.06);
+  border: 1rpx solid rgba(16, 24, 40, 0.05);
 }
 
 .dot {
-  width: 14rpx;
-  height: 14rpx;
+  width: 16rpx;
+  height: 16rpx;
   border-radius: 50%;
   margin-right: 12rpx;
+  box-shadow: 0 0 0 4rpx currentColor;
+  opacity: 0.9;
 }
 
-.dot-ok { background: #21c15e; }
-.dot-warn { background: #ffb340; }
+.dot-ok { background: #07C160; color: rgba(7, 193, 96, 0.15); }
+.dot-warn { background: #FFA033; color: rgba(255, 160, 51, 0.15); }
 
-.debug-text {
-  color: #8a93a6;
-  font-size: 20rpx;
-  margin-right: 16rpx;
+.status-text {
+  color: #2C3E50;
+  font-size: 26rpx;
+  font-weight: 600;
+  letter-spacing: 0.5rpx;
 }
 
-.dim { color: #5a6377; }
+.stats-text {
+  color: #8B98A8;
+  font-size: 22rpx;
+  margin-left: 20rpx;
+}
 
-.btns {
+.disconn-link {
+  margin-left: auto;
+  color: #576B95;
+  font-size: 26rpx;
+  padding: 8rpx 16rpx;
+  border-radius: 8rpx;
+}
+.disconn-link:active { background: rgba(87, 107, 149, 0.08); }
+
+/* ── Hero 主卡：带 Tesla Cyan 顶条 + 强阴影 ── */
+.hero-card {
+  position: relative;
+  border-radius: 32rpx;
+  box-shadow: 0 12rpx 40rpx rgba(16, 174, 255, 0.08), 0 4rpx 12rpx rgba(16, 24, 40, 0.06);
+}
+.hero-card::before {
+  content: '';
   position: absolute;
-  bottom: 120rpx;
-  left: 0;
-  right: 0;
+  top: 0; left: 0; right: 0;
+  height: 6rpx;
+  background: linear-gradient(90deg, #10AEFF 0%, #07C160 60%, #10AEFF 100%);
+  background-size: 200% 100%;
+  animation: flow 6s linear infinite;
+  z-index: 1;
+  border-radius: 32rpx 32rpx 0 0;
+}
+@keyframes flow {
+  0% { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.gauge {
+  width: 100%;
+  height: 560rpx;
+  display: block;
+}
+
+/* ── 按钮（Tesla 品牌蓝 + 微信绿副按钮） ── */
+.btn-area {
   display: flex;
-  justify-content: center;
+  gap: 24rpx;
+  margin-top: 32rpx;
+}
+
+.wx-btn {
+  flex: 1;
+  border-radius: 20rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  height: 92rpx;
+  line-height: 92rpx;
+  letter-spacing: 1rpx;
+}
+
+.wx-btn.primary {
+  background: linear-gradient(135deg, #10AEFF 0%, #1890D9 100%);
+  color: #FFFFFF;
+  box-shadow: 0 8rpx 24rpx rgba(16, 174, 255, 0.28);
+}
+
+.wx-btn.ghost {
+  background: #FFFFFF;
+  color: #07C160;
+  border: 2rpx solid rgba(7, 193, 96, 0.4);
+}
+
+/* ── 信息卡片 ── */
+.info-card {
+  padding: 28rpx 32rpx 32rpx;
+  margin-top: 24rpx;
+  position: relative;
+}
+
+.grid2 {
+  display: flex;
   gap: 24rpx;
 }
+.grid2 .half {
+  flex: 1;
+  min-width: 0;
+}
 
-.btn.primary { background: #0e6e86; color: #eaf6fa; }
-.btn { background: #1d2733; color: #8a93a6; }
+/* 每张卡左侧 6rpx 功能色条 */
+.info-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 6rpx;
+  border-radius: 0 2rpx 2rpx 0;
+  background: #D8DCE2;
+}
+.info-batt::before  { background: linear-gradient(180deg, #07C160, #10AEFF); }
+.info-climate::before { background: linear-gradient(180deg, #10AEFF, #576B95); }
+.info-power::before  { background: linear-gradient(180deg, #FA5151, #FFA033); }
+.info-doors::before  { background: #576B95; }
+.info-tpms::before   { background: linear-gradient(180deg, #FFA033, #FA5151); }
+
+.card-title-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 24rpx;
+}
+
+.card-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #2C3E50;
+  letter-spacing: 1rpx;
+}
+
+/* ── 电量卡 ── */
+.charge-badge {
+  margin-left: auto;
+  font-size: 22rpx;
+  color: #FFFFFF;
+  background: linear-gradient(135deg, #07C160, #06AD56);
+  border-radius: 999rpx;
+  padding: 8rpx 22rpx;
+  font-weight: 500;
+  box-shadow: 0 4rpx 12rpx rgba(7, 193, 96, 0.25);
+}
+
+.soc-row {
+  display: flex;
+  align-items: baseline;
+}
+
+.soc-num {
+  font-size: 88rpx;
+  font-weight: 700;
+  color: #2C3E50;
+  line-height: 1;
+  letter-spacing: -2rpx;
+}
+
+.soc-unit {
+  font-size: 32rpx;
+  color: #8B98A8;
+  margin-left: 12rpx;
+  font-weight: 500;
+}
+
+.soc-range {
+  margin-left: auto;
+  font-size: 24rpx;
+  color: #8B98A8;
+  font-weight: 500;
+}
+
+.soc-bar {
+  margin-top: 24rpx;
+  height: 20rpx;
+  background: #EFF1F5;
+  border-radius: 10rpx;
+  overflow: hidden;
+}
+
+.soc-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #07C160 0%, #10AEFF 100%);
+  border-radius: 10rpx;
+  transition: width 0.4s ease;
+}
+
+.charge-meta {
+  display: flex;
+  gap: 40rpx;
+  margin-top: 20rpx;
+}
+
+.meta-item {
+  font-size: 22rpx;
+  color: #07C160;
+  font-weight: 500;
+}
+
+/* ── 温度卡 ── */
+.temp-grid {
+  display: flex;
+}
+
+.temp-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8rpx 0;
+}
+
+.temp-label {
+  font-size: 22rpx;
+  color: #8B98A8;
+  margin-bottom: 12rpx;
+  letter-spacing: 1rpx;
+}
+
+.temp-val {
+  font-size: 56rpx;
+  font-weight: 700;
+  color: #2C3E50;
+  line-height: 1;
+}
+
+/* ── 功率卡 ── */
+.power-tag {
+  margin-left: auto;
+  font-size: 22rpx;
+  border-radius: 999rpx;
+  padding: 8rpx 22rpx;
+  font-weight: 500;
+}
+
+.power-tag.out {
+  color: #FFFFFF;
+  background: linear-gradient(135deg, #FA5151, #E84444);
+  box-shadow: 0 4rpx 12rpx rgba(250, 81, 81, 0.25);
+}
+.power-tag.regen {
+  color: #FFFFFF;
+  background: linear-gradient(135deg, #07C160, #06AD56);
+  box-shadow: 0 4rpx 12rpx rgba(7, 193, 96, 0.25);
+}
+
+.power-bar {
+  position: relative;
+  display: flex;
+  height: 24rpx;
+  background: #EFF1F5;
+  border-radius: 12rpx;
+  overflow: hidden;
+}
+
+/* 零位标记线 */
+.power-bar::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4rpx;
+  height: 12rpx;
+  transform: translate(-50%, -50%);
+  background: #FFFFFF;
+  border-radius: 2rpx;
+  z-index: 2;
+}
+
+.power-half {
+  flex: 1;
+  display: flex;
+}
+.power-half:first-child { justify-content: flex-end; }
+
+.power-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+.power-fill.out {
+  background: linear-gradient(90deg, #FF7A7A, #FA5151);
+  border-radius: 0 12rpx 12rpx 0;
+}
+.power-fill.regen {
+  background: linear-gradient(90deg, #07C160, #2DCB74);
+  border-radius: 12rpx 0 0 12rpx;
+}
+
+.power-num {
+  display: block;
+  text-align: center;
+  margin-top: 20rpx;
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #2C3E50;
+  line-height: 1;
+}
+
+/* ── 门与锁：俯视图 ── */
+.lock-text {
+  margin-left: auto;
+  font-size: 22rpx;
+  color: #8B98A8;
+  font-weight: 500;
+}
+.lock-text.ok { color: #07C160; }
+.lock-text.bad { color: #FA5151; }
+
+.car-top {
+  position: relative;
+  width: 240rpx;
+  height: 330rpx;
+  margin: 8rpx auto 0;
+}
+
+.car-body {
+  position: absolute;
+  left: 44rpx;
+  top: 24rpx;
+  width: 152rpx;
+  height: 282rpx;
+  border: 3rpx solid #C0C9D4;
+  border-radius: 32rpx;
+  background: linear-gradient(180deg, #F8FAFC 0%, #EEF2F7 100%);
+}
+
+/* 车窗分割线 */
+.car-body::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 45%;
+  right: 0;
+  height: 2rpx;
+  background: #C0C9D4;
+}
+
+.door-mark {
+  position: absolute;
+  background: #D8DCE2;
+  border-radius: 8rpx;
+}
+
+.d-fl   { left: 18rpx;  top: 92rpx;  width: 26rpx; height: 60rpx; }
+.d-fr   { right: 18rpx; top: 92rpx;  width: 26rpx; height: 60rpx; }
+.d-rl   { left: 18rpx;  top: 182rpx; width: 26rpx; height: 60rpx; }
+.d-rr   { right: 18rpx; top: 182rpx; width: 26rpx; height: 60rpx; }
+.d-frunk  { left: 44rpx; top: 8rpx;   width: 152rpx; height: 18rpx; }
+.d-trunk  { left: 44rpx; bottom: 8rpx; width: 152rpx; height: 18rpx; }
+
+.doors-unknown {
+  text-align: center;
+  color: #8B98A8;
+  font-size: 24rpx;
+  padding: 60rpx 0;
+}
+
+/* ── 胎压卡 ── */
+.tpms-grid {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0 -10rpx;
+}
+
+.tpms-item {
+  width: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16rpx 10rpx;
+  box-sizing: border-box;
+}
+
+.tpms-name {
+  font-size: 22rpx;
+  color: #8B98A8;
+  margin-bottom: 8rpx;
+  letter-spacing: 1rpx;
+}
+
+.tpms-val {
+  font-size: 40rpx;
+  font-weight: 700;
+  color: #2C3E50;
+  line-height: 1;
+}
+
+.tpms-unit {
+  display: block;
+  text-align: center;
+  font-size: 20rpx;
+  color: #B2B8C0;
+  margin-top: 12rpx;
+}
+
+/* ── 告警动画 ── */
+@keyframes blink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.97); }
+}
+
+.tp-low {
+  color: #FA5151;
+  animation: blink 0.9s ease-in-out infinite;
+}
+
+@keyframes doorBlink {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(250, 81, 81, 0); }
+  50% { opacity: 0.35; box-shadow: 0 0 12rpx 4rpx rgba(250, 81, 81, 0.5); }
+}
+
+.door-mark.is-open {
+  background: #FA5151;
+  animation: doorBlink 0.8s ease-in-out infinite;
+}
+
+/* ── 调试 ── */
+.debug-toggle {
+  margin: 36rpx auto 0;
+  width: 220rpx;
+  text-align: center;
+  font-size: 22rpx;
+  color: #576B95;
+  padding: 12rpx 0;
+  border-radius: 999rpx;
+}
 
 .logs {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 320rpx;
-  background: rgba(2, 4, 6, 0.85);
-  padding: 8rpx 16rpx;
+  margin-top: 16rpx;
+  padding: 20rpx 24rpx;
+  max-height: 400rpx;
 }
 
 .log-line {
-  font-size: 18rpx;
-  color: #8a93a6;
-  padding: 2rpx 0;
-}
-
-/* 配钥浮层 */
-.pair-mask {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 200rpx;
-  display: flex;
-  justify-content: center;
-}
-
-.pair-card {
-  width: 560rpx;
-  background: rgba(12, 18, 24, 0.94);
-  border: 1rpx solid #1d2733;
-  border-radius: 20rpx;
-  padding: 32rpx 36rpx;
-}
-
-.pair-title {
-  font-size: 34rpx;
-  font-weight: 600;
-  color: #f5f7fa;
-  margin-bottom: 12rpx;
-}
-
-.pair-title-good { color: #21c15e; }
-.pair-title-bad { color: #ffb340; }
-
-.pair-sub {
-  font-size: 24rpx;
-  color: #8a93a6;
-  line-height: 1.5;
-}
-
-.pair-count {
-  margin-top: 20rpx;
-  font-size: 56rpx;
-  font-weight: 600;
-  color: #43d9f5;
-}
-
-.pair-progress {
-  margin-top: 16rpx;
-  font-size: 22rpx;
-  color: #5a6377;
-}
-
-.pair-card-hint {
-  margin-top: 16rpx;
   font-size: 20rpx;
-  color: #5a6377;
+  color: #8B98A8;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+/* ── 配钥弹窗 ── */
+.wx-mask {
+  position: fixed;
+  left: 0; top: 0; right: 0; bottom: 0;
+  background: rgba(16, 24, 40, 0.55);
+  backdrop-filter: blur(4rpx);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.wx-modal {
+  width: 600rpx;
+  background: #FFFFFF;
+  border-radius: 32rpx;
+  padding: 56rpx 48rpx 44rpx;
+  text-align: center;
+  box-shadow: 0 24rpx 64rpx rgba(16, 24, 40, 0.15);
+  position: relative;
+  overflow: hidden;
+}
+.wx-modal::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 6rpx;
+  background: linear-gradient(90deg, #10AEFF, #07C160, #10AEFF);
+}
+
+.wx-modal-icon { margin-bottom: 24rpx; }
+
+.icon-text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #10AEFF 0%, #1890D9 100%);
+  color: #FFFFFF;
+  font-size: 52rpx;
+  line-height: 112rpx;
+  box-shadow: 0 8rpx 24rpx rgba(16, 174, 255, 0.3);
+}
+
+.icon-text.good {
+  background: linear-gradient(135deg, #07C160, #06AD56);
+  box-shadow: 0 8rpx 24rpx rgba(7, 193, 96, 0.3);
+  font-weight: 700;
+}
+
+.icon-text.bad {
+  background: linear-gradient(135deg, #FA5151, #E84444);
+  box-shadow: 0 8rpx 24rpx rgba(250, 81, 81, 0.3);
+  font-weight: 700;
+}
+
+.wx-modal-title {
+  font-size: 36rpx;
+  font-weight: 700;
+  color: #2C3E50;
+  margin-bottom: 16rpx;
+  letter-spacing: 0.5rpx;
+}
+.wx-modal-title.good { color: #07C160; }
+.wx-modal-title.bad { color: #FA5151; }
+
+.wx-modal-body {
+  font-size: 26rpx;
+  color: #657080;
+  line-height: 1.7;
+}
+
+.wx-modal-count {
+  margin-top: 28rpx;
+  font-size: 80rpx;
+  font-weight: 700;
+  color: #10AEFF;
+  line-height: 1;
+  letter-spacing: -2rpx;
+}
+
+.wx-modal-progress {
+  margin-top: 20rpx;
+  font-size: 22rpx;
+  color: #8B98A8;
+}
+
+.wx-modal-hint {
+  margin-top: 24rpx;
+  font-size: 22rpx;
+  color: #B2B8C0;
+  padding-top: 20rpx;
+  border-top: 1rpx solid #EFF1F5;
 }

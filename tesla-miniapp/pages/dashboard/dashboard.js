@@ -27,6 +27,8 @@ Page({
     stateText: 'idle',
     statsText: '',
     logs: [],
+    // 仪表 UI 模型（WXML 信息卡片绑定；Canvas 每 100ms 独立重绘）
+    model: null,
     // 配钥浮层：phase = sending|waiting|ok|failed
     pair: { active: false, phase: '', title: '', sub: '', countdown: 0, sends: 0, maxSends: 0 },
   },
@@ -98,6 +100,12 @@ Page({
     this._tick += REDRAW_MS;
     const model = uiModel.build(this._vstate.get());
     gauge.drawFrame(this._ctx, this._cvW, this._cvH, model, this._tick);
+    // WXML 信息卡片：仅在模型变化时 setData，避免高频渲染
+    const json = JSON.stringify(model);
+    if (json !== this._lastModelJson) {
+      this._lastModelJson = json;
+      this.setData({ model });
+    }
     this.updatePairCountdown();
   },
 
