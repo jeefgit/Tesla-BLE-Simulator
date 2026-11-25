@@ -1,0 +1,9 @@
+{
+  "desc": "Tesla BLE 仪表",
+  "rules": [
+    {
+      "action": "allow",
+      "page": "*"
+    }
+  ]
+}

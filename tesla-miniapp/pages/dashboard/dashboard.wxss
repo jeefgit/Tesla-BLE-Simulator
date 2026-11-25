@@ -1,0 +1,122 @@
+.page {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  background: #020406;
+}
+
+.gauge {
+  width: 100vw;
+  height: 100vh;
+}
+
+.debugbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  padding: 8rpx 16rpx;
+  background: rgba(2, 4, 6, 0.7);
+}
+
+.dot {
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 50%;
+  margin-right: 12rpx;
+}
+
+.dot-ok { background: #21c15e; }
+.dot-warn { background: #ffb340; }
+
+.debug-text {
+  color: #8a93a6;
+  font-size: 20rpx;
+  margin-right: 16rpx;
+}
+
+.dim { color: #5a6377; }
+
+.btns {
+  position: absolute;
+  bottom: 120rpx;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 24rpx;
+}
+
+.btn.primary { background: #0e6e86; color: #eaf6fa; }
+.btn { background: #1d2733; color: #8a93a6; }
+
+.logs {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 320rpx;
+  background: rgba(2, 4, 6, 0.85);
+  padding: 8rpx 16rpx;
+}
+
+.log-line {
+  font-size: 18rpx;
+  color: #8a93a6;
+  padding: 2rpx 0;
+}
+
+/* 配钥浮层 */
+.pair-mask {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 200rpx;
+  display: flex;
+  justify-content: center;
+}
+
+.pair-card {
+  width: 560rpx;
+  background: rgba(12, 18, 24, 0.94);
+  border: 1rpx solid #1d2733;
+  border-radius: 20rpx;
+  padding: 32rpx 36rpx;
+}
+
+.pair-title {
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #f5f7fa;
+  margin-bottom: 12rpx;
+}
+
+.pair-title-good { color: #21c15e; }
+.pair-title-bad { color: #ffb340; }
+
+.pair-sub {
+  font-size: 24rpx;
+  color: #8a93a6;
+  line-height: 1.5;
+}
+
+.pair-count {
+  margin-top: 20rpx;
+  font-size: 56rpx;
+  font-weight: 600;
+  color: #43d9f5;
+}
+
+.pair-progress {
+  margin-top: 16rpx;
+  font-size: 22rpx;
+  color: #5a6377;
+}
+
+.pair-card-hint {
+  margin-top: 16rpx;
+  font-size: 20rpx;
+  color: #5a6377;
+}

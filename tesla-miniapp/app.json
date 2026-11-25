@@ -1,0 +1,15 @@
+{
+  "pages": [
+    "pages/dashboard/dashboard"
+  ],
+  "window": {
+    "navigationBarTitleText": "Tesla BLE",
+    "navigationBarBackgroundColor": "#020406",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#020406",
+    "backgroundColorTop": "#020406",
+    "backgroundColorBottom": "#020406"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

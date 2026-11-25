@@ -36,9 +36,9 @@ cd /d "%~dp0"
 
 :: ── Client pairing whitelist (simulates a paired Tesla vehicle) ────
 :: Must match ESP32 key: TESLA-DASHBOARD\include\secrets\tesla_client_key.h
-:: NOTE: CLIENT_PUB below is the OLD key (priv FD68...64C2 -> pub 0415358e...ebc91).
-:: The current secrets header holds 7A43...F551 (pub 048fa445f6d89310...625f008c),
-:: which is NOT whitelisted -> the vehicle rejects its handshake and the pairing
+:: NOTE: CLIENT_PUB currently matches the WeChat miniapp key
+:: (tesla-miniapp/config/secret.js priv E861...9FA8 -> pub 04a08eb1...ed4e83).
+:: Keys not in this whitelist are rejected at handshake; the pairing
 :: (add-key-request + NFC tap) flow starts: the GUI pops up the "🔑 BLE 配钥授权"
 :: dialog and the "配钥授权" banner row turns red.
 :: After changing the ESP32 private key, re-derive the public key with:
@@ -51,7 +51,7 @@ cd /d "%~dp0"
 ::      "🔑 轻点钥匙卡（批准）" button in the "配钥授权" banner row)
 ::   3) Or start sim_server.py manually with --pair-auto for unattended approval
 :: See docs/PAIRING.md for the full protocol walkthrough.
-set "CLIENT_PUB=0415358e9fb5d8baf98116fc7dba8eb803524c1472c96c9c25c7eb6f099ebca51621231cbe38bbb5edf17127740c58e72bf39cb8fceb05e6af8ca411587f8ebc91"
+set "CLIENT_PUB=04a08eb177e0b2ee9a5d12905908929bfb5cac29dcd4e4d79a350d7a9fda5e5567873770e3083a0fc550c50cd6105d704856c91e2ecc12781b942af11350ed4e83"
 
 py sim_server.py --client-pub %CLIENT_PUB%
 

@@ -1,0 +1,30 @@
+<view class="page">
+  <canvas type="2d" id="gauge" class="gauge"></canvas>
+
+  <!-- 调试浮层 -->
+  <view class="debugbar" bindtap="toggleDebug">
+    <text class="dot {{stateText.indexOf('ready') === 0 ? 'dot-ok' : 'dot-warn'}}"></text>
+    <text class="debug-text">{{stateText}}</text>
+    <text class="debug-text dim">{{statsText}}</text>
+  </view>
+
+  <view class="btns" wx:if="{{stateText.indexOf('ready') !== 0}}">
+    <button class="btn primary" size="mini" bindtap="tapConnect">连接</button>
+    <button class="btn" size="mini" bindtap="tapDisconnect">断开</button>
+  </view>
+
+  <scroll-view scroll-y class="logs" wx:if="{{showDebug}}">
+    <view class="log-line" wx:for="{{logs}}" wx:key="index">{{item}}</view>
+  </scroll-view>
+
+  <!-- 配钥浮层：sending / waiting / ok / failed -->
+  <view class="pair-mask" wx:if="{{pair.active}}">
+    <view class="pair-card">
+      <view class="pair-title {{pair.phase === 'failed' ? 'pair-title-bad' : (pair.phase === 'ok' ? 'pair-title-good' : '')}}">{{pair.title}}</view>
+      <view class="pair-sub">{{pair.sub}}</view>
+      <view class="pair-count" wx:if="{{pair.phase === 'waiting'}}">{{pair.countdown}}s</view>
+      <view class="pair-progress" wx:if="{{pair.sends > 0}}">请求 {{pair.sends}}/{{pair.maxSends}}</view>
+      <view class="pair-card-hint">模拟器验证：车端弹窗出现后轻点钥匙卡</view>
+    </view>
+  </view>
+</view>

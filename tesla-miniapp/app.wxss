@@ -1,0 +1,15 @@
+/* 全局样式：黑底仪表语言 */
+page {
+  background: #020406;
+  color: #f5f7fa;
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+}
+
+/* 通用辅助类 */
+.text-dim { color: #8a93a6; }
+.text-faint { color: #5a6377; }
+.text-cyan { color: #43d9f5; }
+.text-red { color: #e82127; }
+.text-green { color: #21c15e; }
+.text-caution { color: #ffb340; }
+.text-alert { color: #ff453a; }
