@@ -98,7 +98,7 @@
 
   .fw-list{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--panel)}
   .fw-row{
-    display:grid;grid-template-columns:minmax(190px,1.4fr) 150px 92px minmax(150px,1fr) auto;
+    display:grid;grid-template-columns:minmax(180px,1.3fr) 132px 84px minmax(130px,1fr) auto;
     gap:14px;align-items:center;padding:13px 18px;border-bottom:1px solid var(--line-soft);
     transition:background .15s;
   }
@@ -131,6 +131,14 @@
   .dl svg{width:12px;height:12px}
   .row-latest{background:linear-gradient(90deg,rgba(33,193,94,.05),transparent 55%)}
   .fw-note{margin-top:14px;font-size:12px;color:var(--faint);font-family:var(--mono)}
+  .fw-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+  .flash{
+    display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:8px;
+    border:1px solid rgba(232,33,39,.45);background:rgba(232,33,39,.10);color:#ff6b70;
+    font-size:12px;font-weight:600;letter-spacing:.04em;cursor:pointer;font-family:inherit;
+    transition:.16s;white-space:nowrap;
+  }
+  .flash:hover{background:rgba(232,33,39,.2);border-color:var(--red);color:#fff}
 
   /* ---------- design gallery ---------- */
   .group-title{
@@ -182,6 +190,48 @@
   .step p{margin:0;font-size:13px;color:var(--dim)}
   .step code{font-family:var(--mono);font-size:12px;color:var(--text);background:var(--bg-soft);padding:1px 5px;border-radius:4px}
 
+  .flasher{display:grid;gap:14px;max-width:840px;margin-top:16px}
+  .card{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:18px 20px}
+  .card .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .card .grow{flex:1}
+  .card-note{margin:12px 0 0;font-size:12px;color:var(--faint);line-height:1.75}
+  .card-note b{color:var(--dim);font-weight:600}
+  .card-note code{font-family:var(--mono);color:var(--dim);background:var(--bg-soft);padding:1px 5px;border-radius:4px}
+  .btn{
+    appearance:none;border:1px solid var(--line);background:var(--panel-2);color:var(--text);
+    border-radius:9px;padding:8px 14px;font-size:12.5px;font-family:inherit;cursor:pointer;transition:.15s;
+  }
+  .btn:hover:not(:disabled){border-color:rgba(67,217,245,.45);color:var(--cyan)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn--primary{background:rgba(232,33,39,.14);border-color:rgba(232,33,39,.55);color:#ff6b70;font-weight:600}
+  .btn--primary:hover:not(:disabled){background:rgba(232,33,39,.24);border-color:var(--red);color:#fff}
+  .status{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);font-family:var(--mono)}
+  .dot{width:7px;height:7px;border-radius:50%;background:#555;flex:none}
+  .dot.on{background:var(--green);box-shadow:0 0 8px rgba(33,193,94,.7)}
+  .dot.err{background:var(--red)}
+  .dot.busy{background:var(--amber);animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.3}}
+  .drop{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    min-height:110px;margin:14px 0 0;padding:18px;border:1.5px dashed var(--line);
+    border-radius:12px;background:var(--bg-soft);text-align:center;cursor:pointer;transition:.15s;
+  }
+  .drop:hover,.drop.hover{border-color:var(--red);background:#160d0e}
+  .drop strong{font-size:13.5px}
+  .drop small{font-size:11.5px;color:var(--faint)}
+  .file-meta{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-top:8px}
+  .bar{height:8px;border-radius:999px;background:#151c24;overflow:hidden;margin:16px 0 8px}
+  .bar>i{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#8f1216,var(--red));transition:width .12s linear}
+  .meta-row{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--faint)}
+  pre.log{
+    margin:14px 0 0;height:180px;overflow:auto;padding:12px 14px;border:1px solid var(--line);
+    border-radius:10px;background:var(--bg-soft);color:#b9b9c0;
+    font:12px/1.5 var(--mono);white-space:pre-wrap;word-break:break-all;
+  }
+  pre.log .err{color:#ff6b70}
+  pre.log .ok{color:var(--green)}
+  pre.log .dev{color:#7fb2ff}
+
   footer{padding:34px 0 46px;color:var(--faint);font-size:12px;font-family:var(--mono);letter-spacing:.03em}
   footer a{color:var(--dim);border-bottom:1px dashed var(--line)}
   footer a:hover{color:var(--cyan)}
@@ -212,7 +262,7 @@
     .fw-row.head{display:none}
     .fw-ver{grid-column:1}
     .fw-sha{grid-column:1/-1}
-    .fw-row .dl{grid-row:1;grid-column:2}
+    .fw-actions{grid-row:1;grid-column:2;justify-content:flex-end}
     .fw-meta{grid-column:1/-1;display:flex;gap:14px}
     .feature{grid-template-columns:1fr}
     .feature__txt{border-left:0;border-top:1px solid var(--line-soft);padding:22px}
@@ -229,7 +279,7 @@
       <a href="#design">界面设计</a>
       <a href="#door">车门状态</a>
       <a href="#prototypes">交互原型</a>
-      <a href="#ota">升级方式</a>
+      <a href="#ota">在线烧录</a>
     </nav>
   </div>
 </header>
@@ -243,7 +293,7 @@
       <p class="lede">
         基于 Waveshare ESP32-S3-Touch-AMOLED-1.75-B 的圆形车载仪表工程，
         通过 BLE 直连车辆读取车速、电量、充电、门锁等状态。
-        本页归档全部可下载的 app 固件镜像与配套界面设计稿。
+        本页归档全部可下载的 app 固件镜像与配套界面设计稿，并支持用浏览器直接 USB 在线烧录。
       </p>
       <div class="chips">
         <span class="chip"><b>466 × 466</b> AMOLED</span>
@@ -276,7 +326,7 @@
 
       <div class="fw-list" id="fwList">
         <div class="fw-row head">
-          <span>版本 / VERSION</span><span>编译时间</span><span>大小</span><span>SHA256</span><span>下载</span>
+          <span>版本 / VERSION</span><span>编译时间</span><span>大小</span><span>SHA256</span><span>下载 / 烧录</span>
         </div>
 
         <div class="fw-row row-latest" data-ver="v2026.11.23.1929">
@@ -565,21 +615,71 @@
   <section id="ota">
     <div class="wrap">
       <div class="sec-head">
-        <h2>升级方式</h2>
-        <p>USB OTA · tools/ota</p>
+        <h2>在线烧录</h2>
+        <p>Web Serial · USB-C 直连 · 无需 WiFi</p>
       </div>
+
       <div class="ota">
-        <div class="step"><b>01 / 进入配置模式</b><p>设备启动后进入配置模式，屏幕显示热点名称（SSID）与访问地址。</p></div>
-        <div class="step"><b>02 / 连接热点</b><p>手机或电脑连接设备热点，用浏览器打开 <code>http://&lt;IP&gt;</code>。</p></div>
-        <div class="step"><b>03 / 上传固件</b><p>在 OTA 页面选择上面下载的 <code>firmware.bin</code>，保持供电等待写入完成。</p></div>
-        <div class="step"><b>04 / 校验</b><p>上传后可用 SHA256SUMS.txt 核对文件完整性，设备自动重启进入新固件。</p></div>
+        <div class="step"><b>01 / 连接电脑</b><p>用 USB-C 数据线把设备接到电脑，设备正常开机即可。</p></div>
+        <div class="step"><b>02 / 连接设备</b><p>用 Chrome / Edge 打开本页，点“连接设备”并选择串口；设备休眠时先触摸唤醒。</p></div>
+        <div class="step"><b>03 / 选择固件</b><p>点上方固件列表的“烧录”直接用站内镜像，或拖入本地 <code>firmware.bin</code>。</p></div>
+        <div class="step"><b>04 / 等待重启</b><p>写入备用 OTA 分区，CRC 校验通过后自动重启；NVS（旋转、亮度）保留。</p></div>
+      </div>
+
+      <div class="flasher">
+        <div class="card">
+          <div class="row">
+            <button id="btnConnect" class="btn btn--primary" type="button">连接设备</button>
+            <button id="btnDisconnect" class="btn" type="button" disabled>断开</button>
+            <button id="btnInfo" class="btn" type="button" disabled>读取设备信息</button>
+            <button id="btnReboot" class="btn" type="button" disabled>重启</button>
+            <div class="grow"></div>
+            <div class="status"><i id="dot" class="dot"></i><span id="status">未连接</span></div>
+          </div>
+          <p class="card-note">
+            需要 <code>navigator.serial</code>（Chrome / Edge 89+，https 或 http://localhost）。
+            串口监视器会占用同一串口，连接前请先关闭。首次连接需在弹窗里选一次串口；
+            之后只授权过一个设备时会自动连接，按住 <b>Shift</b> 点“连接设备”可重新选择。
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <strong class="grow">目标固件</strong>
+            <button id="btnPick" class="btn" type="button">选择本地 .bin</button>
+          </div>
+          <div id="drop" class="drop">
+            <strong>拖入 firmware.bin，或点击这里选择</strong>
+            <small>也可以在上方固件列表点“烧录”，直接使用站内镜像</small>
+            <div id="fileMeta" class="file-meta">未选择文件</div>
+          </div>
+          <input id="file" type="file" accept=".bin,application/octet-stream" hidden>
+
+          <div class="row" style="margin-top:14px">
+            <button id="btnFlash" class="btn btn--primary" type="button" disabled>开始烧录</button>
+            <div class="grow"></div>
+            <div class="file-meta" id="deviceInfo" style="margin-top:0">设备固件：--</div>
+          </div>
+          <div class="bar"><i id="bar"></i></div>
+          <div class="meta-row"><span id="pct">0%</span><span id="speed">--</span></div>
+          <p class="card-note"><b>烧录期间不要拔 USB。</b>固件写入备用 OTA 分区，校验通过后自动重启；升级成功后页面会等待几秒自动重连并核对分区。</p>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <strong class="grow">日志</strong>
+            <button id="btnClear" class="btn" type="button">清空</button>
+          </div>
+          <pre id="log" class="log"></pre>
+          <p class="card-note" id="pageVersion">页面版本：--</p>
+        </div>
       </div>
     </div>
   </section>
 
   <footer>
     <div class="wrap">
-      源文件目录：firmware/ESP32-S3-ROUND-DISPLAY · design · 最近更新 2026-11-24 ·
+      源文件目录：firmware/ESP32-S3-ROUND-DISPLAY · design · 最近更新 2026-11-25 ·
       固件运行于 Waveshare ESP32-S3-Touch-AMOLED-1.75-B
     </div>
   </footer>
@@ -674,6 +774,683 @@
     else if (e.key === 'ArrowLeft') openAt(cursor - 1);
     else if (e.key === 'ArrowRight') openAt(cursor + 1);
   });
+})();
+</script>
+
+<script>
+/* USB OTA：协议与 tools/ota/index.html、src/ota/UsbOta.cpp 保持一致 */
+(function () {
+  'use strict';
+
+  var PAGE_VERSION = 'site-ota-1';
+  var CHUNK_SIZE = 4096;
+  var READY_TIMEOUT_MS = 10000;
+  var ACK_TIMEOUT_MS = 20000;
+  var RESULT_TIMEOUT_MS = 180000;
+  var INFO_TIMEOUT_MS = 5000;
+  // 升级成功后保持串口连接，把新固件的启动日志抓下来；过早关闭 Web Serial
+  // 会拉 DTR/RTS 复位设备，可能让新镜像来不及标记有效而被回滚。
+  var BOOT_CAPTURE_MS = 6000;
+  var AUTO_RECONNECT_DELAY_MS = 4000;
+  var AUTO_RECONNECT_TRIES = 3;
+
+  function $(id) { return document.getElementById(id); }
+  function errMsg(err) { return err && err.message ? err.message : String(err); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  var btnConnect = $('btnConnect');
+  var btnDisconnect = $('btnDisconnect');
+  var btnInfo = $('btnInfo');
+  var btnReboot = $('btnReboot');
+  var btnPick = $('btnPick');
+  var btnFlash = $('btnFlash');
+  var btnClear = $('btnClear');
+  var fileInput = $('file');
+  var drop = $('drop');
+  var logEl = $('log');
+
+  var port = null;
+  var reader = null;
+  var writer = null;
+  var readTask = null;
+  var heartbeat = null;
+  var lineBuf = '';
+  var pendingLines = [];
+  var busy = false;
+  var disconnecting = false;
+  var fwInfo = { ver: '', build: '', part: '' };
+  var lastFlashedFrom = null;
+  var lastPort = null;
+  var flashTotal = 0;
+  var flashStartMs = 0;
+  var flashAckCount = 0;
+  var autoReconnectToken = 0;
+  var file = null;
+  var fileBytes = null;
+  var fileCrc = 0;
+
+  // ── 小工具 ──────────────────────────────────────────────
+  function setStatus(text, kind) {
+    $('status').textContent = text;
+    $('dot').className = 'dot' + (kind ? ' ' + kind : '');
+  }
+
+  function addLog(text, cls) {
+    if (!text) return;
+    var line = document.createElement('div');
+    if (cls) line.className = cls;
+    var t = new Date();
+    line.textContent = '[' + t.toTimeString().slice(0, 8) + '] ' + text;
+    logEl.appendChild(line);
+    while (logEl.childElementCount > 300) logEl.removeChild(logEl.firstChild);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1024 / 1024).toFixed(2) + ' MB';
+  }
+
+  var CRC_TABLE = (function () {
+    var table = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      table[n] = c >>> 0;
+    }
+    return table;
+  })();
+
+  function crc32(bytes) {
+    var crc = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++) {
+      crc = CRC_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  function crcHex() { return fileCrc.toString(16).padStart(8, '0'); }
+
+  // ── 行分发 / 等待 ───────────────────────────────────────
+  function dispatchLine(line) {
+    for (var i = 0; i < pendingLines.length; i++) {
+      var waiter = pendingLines[i];
+      if (waiter.re.test(line)) {
+        pendingLines.splice(i, 1);
+        clearTimeout(waiter.timer);
+        waiter.resolve(line);
+        return;
+      }
+    }
+  }
+
+  function rejectAll(err) {
+    var waiters = pendingLines;
+    pendingLines = [];
+    waiters.forEach(function (w) {
+      clearTimeout(w.timer);
+      w.reject(err);
+    });
+  }
+
+  function waitFor(re, timeoutMs, label) {
+    return new Promise(function (resolve, reject) {
+      var waiter = { re: re, resolve: resolve, reject: reject, timer: null };
+      waiter.timer = setTimeout(function () {
+        var i = pendingLines.indexOf(waiter);
+        if (i >= 0) pendingLines.splice(i, 1);
+        reject(new Error(label + ' 超时（' + timeoutMs + ' ms）'));
+      }, timeoutMs);
+      pendingLines.push(waiter);
+    });
+  }
+
+  function onLine(line) {
+    if (!line) return;
+    if (line.indexOf('OTA:') !== 0) {
+      addLog(line, '');
+      return;
+    }
+    if (line.indexOf('OTA: A ') === 0) {
+      // 每块一个 ACK，只拿来驱动进度条，不写日志。
+      var received = parseInt(line.slice(7).trim(), 10);
+      if (isFinite(received)) applyDeviceProgress(received);
+      dispatchLine(line);
+      return;
+    }
+    if (line.indexOf('OTA: PONG') === 0) {
+      dispatchLine(line);
+      return;
+    }
+    if (line.indexOf('OTA: OK') === 0) {
+      addLog(line, 'ok');
+      dispatchLine(line);
+      return;
+    }
+    if (line.indexOf('OTA: ERR') === 0) {
+      addLog(line, 'err');
+      rejectAll(new Error(line));
+      return;
+    }
+    addLog(line, 'dev');
+    dispatchLine(line);
+  }
+
+  function feedText(text) {
+    lineBuf += text;
+    var idx;
+    while ((idx = lineBuf.indexOf('\n')) >= 0) {
+      var line = lineBuf.slice(0, idx).replace(/\r$/, '');
+      lineBuf = lineBuf.slice(idx + 1);
+      onLine(line);
+    }
+    if (lineBuf.length > 8192) lineBuf = '';
+  }
+
+  // ── 串口收发 ────────────────────────────────────────────
+  async function writeBytes(bytes) {
+    if (!writer) throw new Error('串口未连接');
+    await writer.write(bytes);
+  }
+
+  async function sendLine(text) {
+    await writeBytes(new TextEncoder().encode(text.charAt(text.length - 1) === '\n' ? text : text + '\n'));
+  }
+
+  async function pingOnce(timeoutMs) {
+    var p = waitFor(/^OTA: PONG/, timeoutMs, 'PING');
+    await sendLine('OTA_PING');
+    var line = await p;
+    var rest = line.replace(/^OTA: PONG\s*/, '').trim();
+    var mv = rest.match(/ver=(\S+)/);
+    var mb = rest.match(/build=(.*?)\s+part=/);
+    var mp = rest.match(/part=(\S+)/);
+    fwInfo = {
+      ver: mv ? mv[1] : rest,
+      build: mb ? mb[1].trim() : '',
+      part: mp ? mp[1] : ''
+    };
+    $('deviceInfo').textContent =
+      '设备固件：v' + fwInfo.ver + (fwInfo.part ? ' · ' + fwInfo.part : '') +
+      (fwInfo.build ? ' · 构建 ' + fwInfo.build : '');
+
+    // 重连后判断 OTA 是否真的生效：OTA 一定写入另一个槽并从那里启动，
+    // 分区没变说明没切过去（写失败 / 没重启 / 被回滚）。
+    if (lastFlashedFrom) {
+      var before = lastFlashedFrom;
+      lastFlashedFrom = null;
+      var haveParts = Boolean(before.part && fwInfo.part);
+      var samePart = haveParts && before.part === fwInfo.part;
+      var sameBuild = Boolean(before.build && fwInfo.build && before.build === fwInfo.build);
+      if (haveParts && samePart) {
+        addLog('⚠ OTA 没有生效：设备仍在 ' + fwInfo.part + '，启动分区没有切换。', 'err');
+      } else {
+        addLog('升级已生效：启动分区 ' + (haveParts ? before.part + ' → ' + fwInfo.part : '未知') +
+               '，构建 ' + (sameBuild ? '时间戳未变' : (before.build || '?') + ' → ' + (fwInfo.build || '?') + '。'), 'ok');
+      }
+    }
+  }
+
+  async function requestInfo() {
+    if (!port || busy) return;
+    try {
+      var done = waitFor(/^OTA: (INFO done|IMG app1=)/, INFO_TIMEOUT_MS, '读取设备信息');
+      await sendLine('OTA_INFO');
+      await done;
+    } catch (err) {
+      addLog('读取设备信息失败：' + errMsg(err), 'err');
+    }
+  }
+
+  async function rebootDevice() {
+    if (!port || busy) return;
+    addLog('发送重启命令…');
+    try {
+      await sendLine('OTA_REBOOT');
+    } catch (err) {
+      addLog('发送重启命令失败：' + errMsg(err), 'err');
+      return;
+    }
+    await sleep(400);
+    await disconnect();
+    setStatus('已发送重启，请稍后重新连接', 'busy');
+  }
+
+  // 浏览器只会返回“用户之前授权过的串口”，所以只有唯一一个时才能跳过选择框。
+  async function acquirePort(forcePicker) {
+    var authorized = [];
+    if (!forcePicker && navigator.serial.getPorts) {
+      try {
+        authorized = await navigator.serial.getPorts();
+      } catch (err) {
+        authorized = [];
+      }
+    }
+    if (authorized.length === 1) {
+      addLog('检测到唯一一个已授权串口，直接连接（不弹选择框）。');
+      return { port: authorized[0], auto: true };
+    }
+    if (authorized.length > 1) {
+      addLog('检测到 ' + authorized.length + ' 个已授权串口，请在选择框里挑一个。');
+    } else if (!forcePicker) {
+      addLog('首次连接需要在弹窗里选择一次串口；之后只授权过一个设备时会自动连接。');
+    }
+    return { port: await navigator.serial.requestPort(), auto: false };
+  }
+
+  function portKey(p) {
+    try {
+      var info = p && p.getInfo ? p.getInfo() : {};
+      return (info.usbVendorId || 0) + ':' + (info.usbProductId || 0);
+    } catch (err) {
+      return '0:0';
+    }
+  }
+
+  async function pickAutoPort() {
+    var ports = [];
+    try {
+      if (navigator.serial.getPorts) ports = await navigator.serial.getPorts();
+    } catch (err) {
+      ports = [];
+    }
+    if (lastPort && (ports.length === 0 || ports.indexOf(lastPort) >= 0)) return lastPort;
+    if (lastPort) {
+      var key = portKey(lastPort);
+      var match = ports.filter(function (p) { return portKey(p) === key; })[0];
+      if (match) return match;
+    }
+    if (ports.length === 1) return ports[0];
+    return null;
+  }
+
+  function cancelAutoReconnect() { autoReconnectToken++; }
+
+  async function autoReconnectAfterFlash() {
+    var token = ++autoReconnectToken;
+    if (!('serial' in navigator)) return;
+
+    var seconds = Math.round(AUTO_RECONNECT_DELAY_MS / 1000);
+    addLog('设备重启中，' + seconds + ' 秒后自动重新连接并核对分区…');
+    for (var left = seconds; left > 0; left--) {
+      setStatus('自动重连倒计时 ' + left + 's（点“连接设备”可立即连接）', 'busy');
+      await sleep(1000);
+      if (token !== autoReconnectToken) {
+        addLog('已取消自动重连。');
+        return;
+      }
+    }
+
+    for (var attempt = 1; attempt <= AUTO_RECONNECT_TRIES; attempt++) {
+      if (token !== autoReconnectToken || port) return;
+      setStatus('自动重连中（第 ' + attempt + '/' + AUTO_RECONNECT_TRIES + ' 次）…', 'busy');
+      var ok = await connect(null, { auto: true });
+      if (ok) {
+        addLog('自动重连成功。', 'ok');
+        return;
+      }
+      if (token !== autoReconnectToken) return;
+      if (attempt < AUTO_RECONNECT_TRIES) {
+        addLog('第 ' + attempt + ' 次自动重连失败，3 秒后重试…', 'err');
+        await sleep(3000);
+      }
+    }
+    addLog('自动重连失败，请手动点“连接设备”。', 'err');
+    setStatus('未连接', 'err');
+  }
+
+  async function connect(ev, opts) {
+    if (!('serial' in navigator)) {
+      addLog('当前浏览器不支持 Web Serial，请使用 Chrome / Edge 89+，并通过 https 或 http://localhost 打开本页。', 'err');
+      return false;
+    }
+    if (port) return false;
+
+    var auto = !!(opts && opts.auto);
+    var forcePicker = !!(ev && ev.shiftKey);
+    btnConnect.disabled = true;
+    setStatus(auto ? '自动连接中…' : (forcePicker ? '选择串口…' : '查找串口…'), 'busy');
+
+    var chosen = null;
+    try {
+      if (auto) {
+        chosen = await pickAutoPort();
+        if (!chosen) {
+          addLog('没有可用的已授权串口。', 'err');
+          btnConnect.disabled = false;
+          return false;
+        }
+      } else {
+        var picked = await acquirePort(forcePicker);
+        chosen = picked.port;
+        if (!picked.auto) setStatus('打开串口…', 'busy');
+      }
+      await chosen.open({ baudRate: 115200 });
+    } catch (err) {
+      if (auto) lastPort = null;
+      btnConnect.disabled = false;
+      setStatus('未连接', 'err');
+      addLog((auto ? '自动重连打开串口失败：' : '打开串口失败：') + errMsg(err), 'err');
+      return false;
+    }
+
+    return attachPort(chosen, auto);
+  }
+
+  async function attachPort(openedPort, auto) {
+    port = openedPort;
+    lastPort = openedPort;
+
+    writer = port.writable.getWriter();
+    reader = port.readable.getReader();
+    var decoder = new TextDecoder();
+    readTask = (async function () {
+      try {
+        while (true) {
+          var res = await reader.read();
+          if (res.done) break;
+          feedText(decoder.decode(res.value, { stream: true }));
+        }
+      } catch (err) {
+        // 拔线 / 设备重启时读循环报错属于正常路径。
+      }
+    })();
+
+    setStatus('等待设备响应…', 'busy');
+    addLog(auto ? '串口已重新打开，等待设备启动完成…'
+                : '串口已打开，等待设备握手（若设备已休眠，请先触摸/摇晃唤醒）');
+
+    var deadline = Date.now() + (auto ? 15000 : 30000);
+    var ok = false;
+    while (Date.now() < deadline) {
+      try {
+        await pingOnce(1500);
+        ok = true;
+        break;
+      } catch (err) {
+        // 设备可能还在开机，继续重试。
+      }
+    }
+
+    if (!ok) {
+      addLog('设备没有响应。请确认：串口监视器已关闭 / 设备已唤醒 / 当前固件包含 USB OTA。', 'err');
+      await disconnect();
+      return false;
+    }
+
+    busy = false;
+    updateButtons();
+    setStatus('已连接（固件 ' + fwInfo.ver + '）', 'on');
+    addLog('握手成功，设备固件 v' + fwInfo.ver +
+           (fwInfo.part ? ' · ' + fwInfo.part : '') +
+           (fwInfo.build ? ' · 构建 ' + fwInfo.build : ''), 'ok');
+
+    await requestInfo();
+
+    // 每 5 秒 PING：确认在线，同时重置设备端自动休眠计时。
+    heartbeat = setInterval(function () {
+      if (!busy && writer) sendLine('OTA_PING').catch(function () {});
+    }, 5000);
+    return true;
+  }
+
+  async function disconnect() {
+    if (disconnecting) return;
+    disconnecting = true;
+    try {
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
+      rejectAll(new Error('已断开连接'));
+      busy = false;
+
+      try { if (reader) await reader.cancel(); } catch (err) {}
+      if (readTask) { try { await readTask; } catch (err) {} readTask = null; }
+      try { if (reader) reader.releaseLock(); } catch (err) {}
+      reader = null;
+      try { if (writer) writer.releaseLock(); } catch (err) {}
+      writer = null;
+      try { if (port) await port.close(); } catch (err) {}
+      port = null;
+
+      lineBuf = '';
+      fwInfo = { ver: '', build: '', part: '' };
+      $('deviceInfo').textContent = '设备固件：--';
+      updateButtons();
+      setStatus('未连接', '');
+    } finally {
+      disconnecting = false;
+    }
+  }
+
+  // ── 固件选择 ────────────────────────────────────────────
+  function applyFileBytes(bytes, name) {
+    if (bytes.length < 1024 || bytes[0] !== 0xE9) {
+      file = null;
+      fileBytes = null;
+      addLog('这个文件不像 ESP32 app 镜像（首字节不是 0xE9）。请选择 firmware.bin，不要选 bootloader / partitions 镜像。', 'err');
+      updateFileMeta();
+      updateButtons();
+      return false;
+    }
+    file = { name: name };
+    fileBytes = bytes;
+    fileCrc = crc32(bytes);
+    updateFileMeta();
+    updateButtons();
+    addLog('已选择 ' + name + '，' + fmtBytes(bytes.length) + '，CRC32 ' + crcHex(), 'ok');
+    return true;
+  }
+
+  async function setFile(f) {
+    if (!f) return;
+    if (!/\.bin$/i.test(f.name)) {
+      addLog('请选择 .bin 文件（PlatformIO 的 firmware.bin）。', 'err');
+      return;
+    }
+    try {
+      applyFileBytes(new Uint8Array(await f.arrayBuffer()), f.name);
+    } catch (err) {
+      addLog('读取文件失败：' + errMsg(err), 'err');
+    }
+    updateButtons();
+  }
+
+  // 从站内固件目录直接载入镜像，省掉“先下载再选择”这一步。
+  async function loadFirmwareFromUrl(url, label) {
+    addLog('正在载入站内固件 ' + label + ' …');
+    try {
+      var resp = await fetch(url, { cache: 'no-store' });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var bytes = new Uint8Array(await resp.arrayBuffer());
+      if (applyFileBytes(bytes, label + ' · firmware.bin')) {
+        $('ota').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        addLog(port ? '固件已就绪，点“开始烧录”即可写入设备。'
+                     : '固件已就绪，点“连接设备”后即可开始烧录。');
+      }
+    } catch (err) {
+      addLog('载入固件失败：' + errMsg(err) + '（请通过 http(s) 打开本页）', 'err');
+    }
+  }
+
+  function updateFileMeta() {
+    if (!file || !fileBytes) {
+      $('fileMeta').textContent = '未选择文件';
+      return;
+    }
+    $('fileMeta').textContent = file.name + ' · ' + fmtBytes(fileBytes.length) + ' · CRC32 ' + crcHex();
+  }
+
+  function updateButtons() {
+    btnFlash.disabled = !(port && fileBytes && !busy);
+    btnPick.disabled = busy;
+    btnConnect.disabled = !!port || busy;
+    btnDisconnect.disabled = !port || busy;
+    btnInfo.disabled = !port || busy;
+    btnReboot.disabled = !port || busy;
+  }
+
+  // ── 进度 ────────────────────────────────────────────────
+  function setProgress(done, total, startMs) {
+    var pct = total > 0 ? Math.min(100, Math.floor((done * 100) / total)) : 0;
+    $('bar').style.width = pct + '%';
+    $('pct').textContent = pct + '%';
+    if (done > 0 && startMs > 0) {
+      var sec = Math.max(0.001, (Date.now() - startMs) / 1000);
+      var speed = done / sec;
+      var eta = speed > 0 ? (total - done) / speed : 0;
+      $('speed').textContent = fmtBytes(done) + ' / ' + fmtBytes(total) +
+        ' · ' + fmtBytes(speed) + '/s · 剩余 ' + Math.ceil(eta) + 's';
+    } else {
+      $('speed').textContent = '0 B / ' + fmtBytes(total);
+    }
+  }
+
+  var lastProgressRender = 0;
+  function applyDeviceProgress(received) {
+    if (!flashTotal) return;
+    flashAckCount++;
+    var done = Math.min(received, flashTotal);
+    var now = Date.now();
+    if (done < flashTotal && now - lastProgressRender < 100) return;
+    lastProgressRender = now;
+    setProgress(done, flashTotal, flashStartMs);
+  }
+
+  // ── 烧录主流程 ──────────────────────────────────────────
+  async function flash() {
+    if (!port || !fileBytes || busy) return;
+    busy = true;
+    cancelAutoReconnect();
+    var autoReconnectPending = false;
+    updateButtons();
+    setStatus('烧录中…', 'busy');
+    $('bar').style.width = '0%';
+    $('pct').textContent = '0%';
+
+    var total = fileBytes.length;
+    var startMs = Date.now();
+    flashTotal = total;
+    flashStartMs = startMs;
+    flashAckCount = 0;
+    lastProgressRender = 0;
+    setProgress(0, total, startMs);
+
+    try {
+      lastFlashedFrom = { ver: fwInfo.ver, build: fwInfo.build, part: fwInfo.part };
+
+      // 1. 进入升级模式：设备会先 Update.begin()，失败时回 OTA: ERR。
+      var ready = waitFor(/^OTA: (READY|ERR)/, READY_TIMEOUT_MS, '等待设备进入升级模式');
+      await sendLine('OTA_BEGIN ' + total + ' ' + fileCrc.toString(16));
+      var readyLine = await ready;
+      if (readyLine.indexOf('OTA: READY') !== 0) throw new Error(readyLine);
+      addLog('设备已就绪，开始发送 ' + fmtBytes(total), 'dev');
+
+      // 2. 结果等待器提前挂上：最后一块的 ACK 和 OK 可能几乎同时到达。
+      var resultPromise = waitFor(/^OTA: (OK|ERR)/, RESULT_TIMEOUT_MS, '等待校验结果');
+      resultPromise.catch(function () {});
+
+      // 3. 分块发送，每块等设备 ACK；进度条由 OTA: A 驱动。
+      for (var offset = 0; offset < total; offset += CHUNK_SIZE) {
+        var end = Math.min(offset + CHUNK_SIZE, total);
+        var ack = waitFor(/^OTA: A /, ACK_TIMEOUT_MS, '等待设备 ACK');
+        await writeBytes(fileBytes.subarray(offset, end));
+        await ack;
+      }
+
+      // 4. 等待 CRC 校验 + Update.end() 结果。
+      await resultPromise;
+      setProgress(total, total, startMs);
+      setStatus('烧录成功，设备重启中…', 'on');
+      addLog('固件已写入并通过校验（共 ' + flashAckCount + ' 块），设备正在重启。', 'ok');
+      addLog('保持串口连接 ' + (BOOT_CAPTURE_MS / 1000) + ' 秒，避免过早复位导致新镜像被回滚。');
+      await sleep(BOOT_CAPTURE_MS);
+      await disconnect();
+      autoReconnectPending = true;
+    } catch (err) {
+      lastFlashedFrom = null;
+      addLog('烧录失败：' + errMsg(err), 'err');
+      setStatus('烧录失败', 'err');
+      await sleep(1200);
+      await disconnect();
+    } finally {
+      flashTotal = 0;
+      busy = false;
+      updateButtons();
+    }
+
+    if (autoReconnectPending) autoReconnectAfterFlash();
+  }
+
+  // ── 事件绑定 ────────────────────────────────────────────
+  btnConnect.addEventListener('click', function (ev) {
+    cancelAutoReconnect();
+    connect(ev);
+  });
+  btnDisconnect.addEventListener('click', function () {
+    cancelAutoReconnect();
+    disconnect();
+  });
+  btnInfo.addEventListener('click', function () { requestInfo(); });
+  btnReboot.addEventListener('click', function () {
+    if (!port || busy) return;
+    if (!confirm('确定要重启设备吗？重启后需要重新点“连接设备”。')) return;
+    rebootDevice();
+  });
+  btnFlash.addEventListener('click', flash);
+  btnPick.addEventListener('click', function () { fileInput.click(); });
+  btnClear.addEventListener('click', function () { logEl.textContent = ''; });
+
+  fileInput.addEventListener('change', function () {
+    setFile(fileInput.files && fileInput.files[0]);
+  });
+
+  drop.addEventListener('click', function () { fileInput.click(); });
+  drop.addEventListener('dragover', function (e) { e.preventDefault(); drop.classList.add('hover'); });
+  drop.addEventListener('dragleave', function () { drop.classList.remove('hover'); });
+  drop.addEventListener('drop', function (e) {
+    e.preventDefault();
+    drop.classList.remove('hover');
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) setFile(f);
+  });
+
+  // 固件列表每行加一个“烧录”按钮，直接载入站内镜像。
+  Array.prototype.forEach.call(
+    document.querySelectorAll('#fwList .fw-row[data-ver]'),
+    function (row) {
+      var dl = row.querySelector('.dl');
+      if (!dl) return;
+      var url = dl.getAttribute('href');
+      var label = row.getAttribute('data-ver');
+      var wrap = document.createElement('div');
+      wrap.className = 'fw-actions';
+      dl.parentNode.insertBefore(wrap, dl);
+      wrap.appendChild(dl);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'flash';
+      btn.textContent = '烧录';
+      btn.addEventListener('click', function () { loadFirmwareFromUrl(url, label); });
+      wrap.appendChild(btn);
+    }
+  );
+
+  if ('serial' in navigator) {
+    navigator.serial.addEventListener('disconnect', function (e) {
+      if (port && e.target === port) {
+        addLog('串口已断开（设备可能正在重启）');
+        disconnect();
+      }
+    });
+  }
+
+  updateButtons();
+  setStatus('未连接', '');
+  $('pageVersion').textContent =
+    '页面版本：' + PAGE_VERSION + '（若与预期不符，请 Ctrl+Shift+R 强制刷新）';
 })();
 </script>
 </body>
