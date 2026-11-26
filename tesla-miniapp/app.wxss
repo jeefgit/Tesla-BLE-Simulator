@@ -1,6 +1,6 @@
-/* 全局样式：黑底仪表语言 */
+/* 全局样式：深色驾驶舱仪表语言 */
 page {
-  background: #020406;
+  background: #0B0D0F;
   color: #f5f7fa;
   font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
 }

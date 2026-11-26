@@ -4,11 +4,12 @@
   ],
   "window": {
     "navigationBarTitleText": "特斯拉仪表盘",
-    "navigationBarBackgroundColor": "#F2F3F5",
-    "navigationBarTextStyle": "black",
-    "backgroundColor": "#F2F3F5",
-    "backgroundColorTop": "#F2F3F5",
-    "backgroundColorBottom": "#F2F3F5"
+    "navigationBarBackgroundColor": "#0B0D0F",
+    "navigationBarTextStyle": "white",
+    "pageOrientation": "landscape",
+    "backgroundColor": "#0B0D0F",
+    "backgroundColorTop": "#0B0D0F",
+    "backgroundColorBottom": "#0B0D0F"
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json"

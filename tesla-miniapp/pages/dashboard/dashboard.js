@@ -1,4 +1,4 @@
-// M4 主仪表页：BLE → TeslaClient（握手 + 加密轮询 + plain 回退）→ 车辆快照 → Canvas 绘制
+// 主仪表页：BLE → TeslaClient（握手 + 加密轮询 + plain 回退）→ 车辆快照 → WXML 仪表
 'use strict';
 
 const config = require('../../config/index');
@@ -6,9 +6,8 @@ const { BleLink } = require('../../core/bleLink');
 const { VehicleState } = require('../../core/vehicleState');
 const { TeslaClient } = require('../../core/teslaClient');
 const uiModel = require('../../core/uiModel');
-const gauge = require('../../ui/gauge');
 
-const REDRAW_MS = 100;
+const REDRAW_MS = 250;
 const MAX_LOG = 40;
 
 function loadPrivKeyHex() {
@@ -24,10 +23,11 @@ Page({
   data: {
     vin: '',
     showDebug: false,
+    clock: '18:00',
     stateText: 'idle',
     statsText: '',
     logs: [],
-    // 仪表 UI 模型（WXML 信息卡片绑定；Canvas 每 100ms 独立重绘）
+    // 仪表 UI 模型由 WXML 渲染
     model: null,
     // 配钥浮层：phase = sending|waiting|ok|failed
     pair: { active: false, phase: '', title: '', sub: '', countdown: 0, sends: 0, maxSends: 0 },
@@ -36,10 +36,11 @@ Page({
   onLoad() {
     const vin = wx.getStorageSync('vin') || config.CFG.VIN;
     this.setData({ vin });
+    this.updateClock();
+    this._clockTimer = setInterval(() => this.updateClock(), 1000);
 
     // 数据层
     this._vstate = new VehicleState();
-    this._tick = 0;
 
     // BLE 链路
     this._link = new BleLink();
@@ -60,7 +61,7 @@ Page({
     });
     this._client.start();
 
-    // 快照变化仅用于调试计数，绘制走 100ms 轮询
+    // 快照变化用于更新调试计数；仪表模型由定时器刷新以处理数据过期
     this._vstate.subscribe(() => {
       const st = this._link.stats;
       this.setData({ statsText: 'rx ' + st.rxBytes + 'B/' + st.rxFrames + '帧' });
@@ -68,39 +69,25 @@ Page({
   },
 
   onReady() {
-    this.setupCanvas();
+    this.render();
     this._redrawTimer = setInterval(() => this.render(), REDRAW_MS);
   },
 
   onUnload() {
     clearInterval(this._redrawTimer);
+    clearInterval(this._clockTimer);
     this._client.stop();
     this._link.disconnect();
   },
 
-  // ── Canvas 初始化 ─────────────────────────────────────────────────
-  setupCanvas() {
-    const query = wx.createSelectorQuery().in(this);
-    query.select('#gauge').fields({ node: true, size: true }).exec((res) => {
-      if (!res || !res[0] || !res[0].node) return;
-      const canvas = res[0].node;
-      let dpr = 2;
-      try { dpr = wx.getSystemInfoSync().pixelRatio || 2; } catch (e) { /* 默认 2 */ }
-      canvas.width = res[0].width * dpr;
-      canvas.height = res[0].height * dpr;
-      this._ctx = canvas.getContext('2d');
-      this._ctx.scale(dpr, dpr);
-      this._cvW = res[0].width;
-      this._cvH = res[0].height;
-    });
+  updateClock() {
+    const now = new Date();
+    const clock = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
+    if (clock !== this.data.clock) this.setData({ clock });
   },
 
   render() {
-    if (!this._ctx) return;
-    this._tick += REDRAW_MS;
     const model = uiModel.build(this._vstate.get());
-    gauge.drawFrame(this._ctx, this._cvW, this._cvH, model, this._tick);
-    // WXML 信息卡片：仅在模型变化时 setData，避免高频渲染
     const json = JSON.stringify(model);
     if (json !== this._lastModelJson) {
       this._lastModelJson = json;

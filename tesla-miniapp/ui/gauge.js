@@ -175,13 +175,148 @@ function drawLink(ctx, W, H, m, tick) {
   text(ctx, '握手成功前不展示任何业务数据', cx, H * 0.88, 18 * u, T.FAINT);
 }
 
+// ── 驾驶舱页：参考仪表总览布局（车外温度由页面顶栏展示） ───────────────
+function drawCockpit(ctx, W, H, m) {
+  const u = Math.min(W / 760, H / 360);
+  const cx = W * 0.5;
+  const cy = H * 0.48;
+  const ringR = Math.min(W * 0.205, H * 0.48);
+
+  ctx.fillStyle = '#080D18';
+  ctx.fillRect(0, 0, W, H);
+
+  const panel = ctx.createRadialGradient(cx, cy, ringR * 0.1, cx, cy, ringR * 1.8);
+  panel.addColorStop(0, '#10253E');
+  panel.addColorStop(0.55, '#08111F');
+  panel.addColorStop(1, '#080D18');
+  ctx.fillStyle = panel;
+  ctx.fillRect(0, 0, W, H);
+
+  // 左侧垂直分栏和俯视车
+  const leftX = W * 0.09;
+  ctx.fillStyle = '#0D1526';
+  ctx.fillRect(W * 0.015, H * 0.08, W * 0.19, H * 0.62);
+  ctx.strokeStyle = '#26304A';
+  ctx.lineWidth = 1 * u;
+  ctx.strokeRect(W * 0.205, H * 0.08, W * 0.01, H * 0.62);
+
+  const carW = 92 * u;
+  const carH = 250 * u;
+  const carY = cy - carH * 0.46;
+  ctx.beginPath();
+  ctx.moveTo(leftX - carW * 0.28, carY + carH * 0.13);
+  ctx.quadraticCurveTo(leftX - carW * 0.34, carY + carH * 0.06, leftX - carW * 0.18, carY);
+  ctx.quadraticCurveTo(leftX, carY - carH * 0.06, leftX + carW * 0.18, carY);
+  ctx.quadraticCurveTo(leftX + carW * 0.34, carY + carH * 0.06, leftX + carW * 0.28, carY + carH * 0.13);
+  ctx.lineTo(leftX + carW * 0.34, carY + carH * 0.82);
+  ctx.quadraticCurveTo(leftX + carW * 0.28, carY + carH, leftX, carY + carH);
+  ctx.quadraticCurveTo(leftX - carW * 0.28, carY + carH, leftX - carW * 0.34, carY + carH * 0.82);
+  ctx.closePath();
+  ctx.fillStyle = '#EEF1F6';
+  ctx.fill();
+
+  ctx.fillStyle = '#263244';
+  ctx.beginPath();
+  ctx.moveTo(leftX - carW * 0.22, carY + carH * 0.22);
+  ctx.lineTo(leftX + carW * 0.22, carY + carH * 0.22);
+  ctx.lineTo(leftX + carW * 0.18, carY + carH * 0.48);
+  ctx.lineTo(leftX - carW * 0.18, carY + carH * 0.48);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = '#536070';
+  ctx.lineWidth = 4 * u;
+  ctx.beginPath();
+  ctx.moveTo(leftX - carW * 0.30, carY + carH * 0.12);
+  ctx.lineTo(leftX - carW * 0.34, carY + carH * 0.32);
+  ctx.moveTo(leftX + carW * 0.30, carY + carH * 0.12);
+  ctx.lineTo(leftX + carW * 0.34, carY + carH * 0.32);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#E82127';
+  ctx.lineWidth = 5 * u;
+  ctx.beginPath();
+  ctx.arc(leftX, carY + carH * 0.88, carW * 0.40, 0.12 * Math.PI, 0.88 * Math.PI);
+  ctx.stroke();
+
+  text(ctx, '(H)', leftX, H * 0.73, 34 * u, '#FFFFFF', { bold: true });
+
+  // 中央深色玻璃速度环
+  const glow = ctx.createRadialGradient(cx, cy, ringR * 0.15, cx, cy, ringR);
+  glow.addColorStop(0, 'rgba(20,31,48,0.96)');
+  glow.addColorStop(0.72, 'rgba(28,42,61,0.92)');
+  glow.addColorStop(1, 'rgba(97,116,136,0.72)');
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+  ctx.fillStyle = glow;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(155,175,190,0.28)';
+  ctx.lineWidth = 2 * u;
+  ctx.stroke();
+
+  const speed = m.drive.speedText;
+  text(ctx, speed, cx, cy - 34 * u, 92 * u, '#FFFFFF', { bold: true });
+  text(ctx, 'KM/H', cx, cy + 28 * u, 28 * u, '#8A93A6');
+
+  ctx.beginPath();
+  ctx.arc(cx, cy + ringR * 0.60, 38 * u, 0, Math.PI * 2);
+  ctx.fillStyle = '#263B52';
+  ctx.fill();
+  ctx.strokeStyle = '#49C4FF';
+  ctx.lineWidth = 2 * u;
+  ctx.stroke();
+  text(ctx, m.drive.gearText || 'P', cx, cy + ringR * 0.60, 40 * u, '#F7F9FC', { bold: true });
+
+  // 右侧门状态俯视图
+  const rightX = W * 0.87;
+  ctx.fillStyle = '#0D1526';
+  ctx.fillRect(W * 0.72, H * 0.08, W * 0.27, H * 0.62);
+  ctx.strokeStyle = '#26304A';
+  ctx.lineWidth = 1 * u;
+  ctx.strokeRect(W * 0.72, H * 0.08, W * 0.01, H * 0.62);
+
+  const doorW = 78 * u;
+  const doorH = 232 * u;
+  const doorY = H * 0.18;
+  ctx.strokeStyle = '#8A8FA0';
+  ctx.lineWidth = 7 * u;
+  ctx.beginPath();
+  ctx.moveTo(rightX - doorW * 0.46, doorY + doorH * 0.18);
+  ctx.quadraticCurveTo(rightX - doorW * 0.46, doorY, rightX, doorY);
+  ctx.quadraticCurveTo(rightX + doorW * 0.46, doorY, rightX + doorW * 0.46, doorY + doorH * 0.18);
+  ctx.moveTo(rightX - doorW * 0.46, doorY + doorH * 0.82);
+  ctx.quadraticCurveTo(rightX - doorW * 0.46, doorY + doorH, rightX, doorY + doorH);
+  ctx.quadraticCurveTo(rightX + doorW * 0.46, doorY + doorH, rightX + doorW * 0.46, doorY + doorH * 0.82);
+  ctx.stroke();
+
+  ctx.lineWidth = 28 * u;
+  ctx.lineCap = 'butt';
+  ctx.strokeStyle = '#171C2B';
+  [-0.34, 0.34].forEach((offset) => {
+    ctx.beginPath();
+    ctx.moveTo(rightX + offset * doorW, doorY + doorH * 0.24);
+    ctx.lineTo(rightX + offset * doorW, doorY + doorH * 0.76);
+    ctx.stroke();
+  });
+
+  text(ctx, m.locked === true ? '设备已锁定' : (m.locked === false ? '设备未锁定' : '设备未连接'), rightX, H * 0.73, 30 * u, '#F7F9FC', { bold: true });
+
+  // 底部续航条
+  const bottomY = H * 0.87;
+  ctx.strokeStyle = 'rgba(255,255,255,0.045)';
+  ctx.lineWidth = 1 * u;
+  ctx.beginPath();
+  ctx.moveTo(W * 0.72, bottomY - 20 * u);
+  ctx.lineTo(W * 0.96, bottomY - 20 * u);
+  ctx.stroke();
+  text(ctx, m.charge.socText, W * 0.755, bottomY, 30 * u, '#FFFFFF', { bold: true });
+  text(ctx, '预估可行驶里程', W * 0.82, bottomY + 20 * u, 20 * u, '#A7ADBA');
+  text(ctx, m.charge.rangeText + ' km', W * 0.94, bottomY, 26 * u, '#FFFFFF', { bold: true, align: 'right' });
+}
+
 // ── 总入口 ─────────────────────────────────────────────────────────
 function drawFrame(ctx, W, H, model, tick) {
-  ctx.fillStyle = T.SCREEN;
-  ctx.fillRect(0, 0, W, H);
-  if (model.page === 'drive') drawDrive(ctx, W, H, model);
-  else if (model.page === 'charge') drawCharge(ctx, W, H, model);
-  else drawLink(ctx, W, H, model, tick);
+  drawCockpit(ctx, W, H, model);
 }
 
 module.exports = { drawFrame, speedColor };

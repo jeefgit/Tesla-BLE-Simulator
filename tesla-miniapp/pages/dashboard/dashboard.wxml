@@ -1,123 +1,75 @@
 <view class="page">
-  <!-- 顶部状态条 -->
   <view class="statusbar">
-    <view class="status-pill">
-      <view class="dot {{stateText.indexOf('ready') === 0 ? 'dot-ok' : 'dot-warn'}}"></view>
-      <text class="status-text">{{stateText}}</text>
+    <view class="weather">
+      <text class="weather-label">车外</text>
+      <text class="weather-value">{{model ? model.climate.outsideText : '--'}}°C</text>
     </view>
-    <text class="stats-text" wx:if="{{showDebug}}">{{statsText}}</text>
-    <text class="disconn-link"
-      wx:if="{{stateText.indexOf('ready') === 0}}" bindtap="tapDisconnect">断开</text>
+    <view class="status-glyphs">
+      <view class="state-item"><view class="lamp-icon"></view></view>
+      <view class="state-item active"><view class="lamp-icon"></view></view>
+      <view class="state-item"><view class="lamp-icon"></view></view>
+    </view>
+    <view class="clock-group">
+      <text class="debug-toggle" bindtap="toggleDebug">{{showDebug ? '收起日志' : '日志'}}</text>
+      <text class="clock">{{clock}}</text>
+    </view>
   </view>
 
-  <!-- 主卡：Canvas 仪表 -->
-  <view class="card hero-card">
-    <canvas type="2d" id="gauge" class="gauge"></canvas>
+  <view class="cockpit">
+    <view class="side-panel left-panel">
+      <image class="car-image" src="../../assets/car-top.png" mode="aspectFit"></image>
+    </view>
+
+    <view class="center-panel">
+      <view class="speed-ring">
+        <view class="speed-inner">
+          <text class="speed">{{model ? model.drive.speedText : '--'}}</text>
+          <text class="unit">KM/H</text>
+          <view class="gear">{{model && model.drive.gearText !== '--' ? model.drive.gearText : 'P'}}</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="side-panel right-panel">
+      <view class="vehicle-outline">
+        <view class="tire fl"></view>
+        <view class="tire fr"></view>
+        <view class="tire rl"></view>
+        <view class="tire rr"></view>
+        <text class="tire-value fl">{{model ? model.tpms.values[0].text : '--'}}</text>
+        <text class="tire-value fr">{{model ? model.tpms.values[1].text : '--'}}</text>
+        <text class="tire-value rl">{{model ? model.tpms.values[2].text : '--'}}</text>
+        <text class="tire-value rr">{{model ? model.tpms.values[3].text : '--'}}</text>
+      </view>
+      <view class="lock-status" wx:if="{{stateText === 'idle' || stateText.indexOf('error') === 0}}" bindtap="tapConnect">
+        <text>设备未连接</text>
+        <text class="touch-tip">轻触连接车辆</text>
+      </view>
+      <text class="link-status" wx:elif="{{stateText.indexOf('ready') !== 0}}">{{stateText}}</text>
+      <view class="lock-status" wx:else bindtap="tapDisconnect">
+        <text>{{model && model.locked === true ? '设备已锁定' : (model && model.locked === false ? '设备未锁定' : '设备已连接')}}</text>
+        <text class="touch-tip">轻触断开</text>
+      </view>
+    </view>
+
+    <view class="range">
+      <view class="range-main">
+        <text class="battery-chip">{{model ? model.charge.socText : '--'}}%</text>
+        <view class="battery-track">
+          <view class="battery-fill" style="{{model ? model.charge.socBarStyle : 'width: 0%'}}"></view>
+        </view>
+      </view>
+      <view class="range-caption">
+        <text class="range-label">预估可行驶里程</text>
+        <text class="range-value">{{model ? model.charge.rangeText : '--'}} km</text>
+      </view>
+    </view>
   </view>
 
-  <!-- 连接操作（未就绪时） -->
-  <view class="btn-area" wx:if="{{stateText.indexOf('ready') !== 0}}">
-    <button class="wx-btn primary" bindtap="tapConnect">连接车辆</button>
-    <button class="wx-btn ghost" bindtap="tapDisconnect">断开连接</button>
-  </view>
-
-  <!-- 信息卡片区（就绪后展示） -->
-  <block wx:if="{{stateText.indexOf('ready') === 0 && model}}">
-    <!-- 电量卡 -->
-    <view class="card info-card info-batt">
-      <view class="card-title-row">
-        <text class="card-title">电池</text>
-        <text class="charge-badge" wx:if="{{model.charge.charging}}">充电中</text>
-      </view>
-      <view class="soc-row">
-        <text class="soc-num">{{model.charge.socText}}</text>
-        <text class="soc-unit">%</text>
-        <text class="soc-range">续航 {{model.charge.rangeText}} km</text>
-      </view>
-      <view class="soc-bar">
-        <view class="soc-fill" style="{{model.charge.socBarStyle}}"></view>
-      </view>
-      <view class="charge-meta" wx:if="{{model.charge.charging}}">
-        <text class="meta-item">功率 {{model.charge.powerText}} kW</text>
-        <text class="meta-item">预计完成 {{model.charge.etaText}}</text>
-      </view>
-    </view>
-
-    <!-- 温度 + 功率 -->
-    <view class="grid2">
-      <view class="card info-card info-climate half">
-        <view class="card-title-row"><text class="card-title">温度</text></view>
-        <view class="temp-grid">
-          <view class="temp-item">
-            <text class="temp-label">车内</text>
-            <text class="temp-val">{{model.climate.insideText}}°</text>
-          </view>
-          <view class="temp-item">
-            <text class="temp-label">车外</text>
-            <text class="temp-val">{{model.climate.outsideText}}°</text>
-          </view>
-        </view>
-      </view>
-
-      <view class="card info-card info-power half">
-        <view class="card-title-row">
-          <text class="card-title">功率</text>
-          <text class="power-tag {{model.drive.powerDir}}" wx:if="{{model.drive.hasPower && model.drive.powerDir}}">
-            {{model.drive.powerDir === 'out' ? '输出' : '回收'}}
-          </text>
-        </view>
-        <view class="power-bar">
-          <view class="power-half">
-            <view class="power-fill regen" style="{{model.drive.powerRegenStyle}}"></view>
-          </view>
-          <view class="power-half">
-            <view class="power-fill out" style="{{model.drive.powerOutStyle}}"></view>
-          </view>
-        </view>
-        <text class="power-num">{{model.drive.hasPower ? model.drive.powerText + ' kW' : '-- kW'}}</text>
-      </view>
-    </view>
-
-    <!-- 门与锁 + 胎压 -->
-    <view class="grid2">
-      <view class="card info-card info-doors half">
-        <view class="card-title-row">
-          <text class="card-title">门与锁</text>
-          <text class="lock-text {{model.locked === true ? 'ok' : (model.locked === false ? 'bad' : '')}}">
-            {{model.locked === true ? '已锁定' : (model.locked === false ? '未锁定' : '待数据')}}
-          </text>
-        </view>
-        <!-- 俯视图：开门红色闪烁 -->
-        <view class="car-top" wx:if="{{!model.doors.unknown}}">
-          <view class="car-body"></view>
-          <view class="door-mark d-fl {{model.doors.doors[0].open ? 'is-open' : ''}}"></view>
-          <view class="door-mark d-fr {{model.doors.doors[1].open ? 'is-open' : ''}}"></view>
-          <view class="door-mark d-rl {{model.doors.doors[2].open ? 'is-open' : ''}}"></view>
-          <view class="door-mark d-rr {{model.doors.doors[3].open ? 'is-open' : ''}}"></view>
-          <view class="door-mark d-frunk {{model.doors.doors[4].open ? 'is-open' : ''}}"></view>
-          <view class="door-mark d-trunk {{model.doors.doors[5].open ? 'is-open' : ''}}"></view>
-        </view>
-        <view class="doors-unknown" wx:else>等待门状态数据…</view>
-      </view>
-
-      <view class="card info-card info-tpms half">
-        <view class="card-title-row"><text class="card-title">胎压</text></view>
-        <view class="tpms-grid">
-          <view class="tpms-item" wx:for="{{model.tpms.values}}" wx:key="name">
-            <text class="tpms-name">{{item.name}}</text>
-            <text class="tpms-val {{item.low ? 'tp-low' : ''}}">{{item.text}}</text>
-          </view>
-        </view>
-        <text class="tpms-unit">单位 bar · 低于 2.0 告警</text>
-      </view>
-    </view>
-  </block>
-
-  <!-- 调试入口 + 日志面板 -->
-  <view class="debug-toggle" bindtap="toggleDebug">{{showDebug ? '收起日志' : '调试日志'}}</view>
-  <view class="logs card" wx:if="{{showDebug}}">
+  <scroll-view class="logs" wx:if="{{showDebug}}" scroll-y>
+    <view class="stats-text">{{statsText}}</view>
     <view class="log-line" wx:for="{{logs}}" wx:key="index">{{item}}</view>
-  </view>
+  </scroll-view>
 
   <!-- 配钥弹窗（微信 Modal 风格）：sending / waiting / ok / failed -->
   <view class="wx-mask" wx:if="{{pair.active}}">

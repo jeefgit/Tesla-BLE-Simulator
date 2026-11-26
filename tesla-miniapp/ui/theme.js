@@ -1,12 +1,12 @@
-// 仪表配色 token（与 dashboard.wxss 完全对齐的小程序浅色 Tesla 色板）
+// 仪表配色 token（与 dashboard.wxss 对齐的深色驾驶舱色板）
 'use strict';
 
 module.exports = {
-  SCREEN: '#FFFFFF',        // Canvas 背景
-  TEXT: '#2C3E50',          // 主文本
-  DIM: '#8B98A8',           // 次要文本
-  FAINT: '#B2B8C0',         // 弱化/占位
-  TRACK: '#EFF1F5',         // 圆环底轨
+  SCREEN: '#111417',
+  TEXT: '#F7F9FC',
+  DIM: '#9EA6B2',
+  FAINT: '#69717D',
+  TRACK: '#262B31',
 
   GAUGE_CYAN: '#10AEFF',    // Tesla 蓝：速度/信息
   TESLA_RED: '#FA5151',     // 微信红：功率输出/告警
