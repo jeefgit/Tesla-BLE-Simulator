@@ -1,4 +1,4 @@
-// M5 自测：辅助轮询调度（charge/climate/closures/tire 31s 轮换）+ 响应按类别排周期
+// M5 自测：辅助轮询调度（每 30s 整批连续抓取 charge/climate/closures/tire）
 //        + CarServer 五类状态解码入 vstate + UI 模型（ETA/门/胎压/温度）+ 配钥事件流
 // 运行：node scripts/selftest-m5.js
 'use strict';
@@ -120,7 +120,7 @@ function freshPending(kind) {
   return { reqTag: tag, counter: 1, uuid: new Uint8Array(16), kind: kind, sentAt: Date.now() };
 }
 
-// ── 1. 辅助轮询调度：串行化 + 轮换 + 退避 ─────────────────────────
+// ── 1. 辅助轮询调度：30s 整批、批内连续、失败退避 ─────────────────
 console.log('1. 辅助轮询调度');
 const sent = [];
 const vstate = new VehicleState();
@@ -143,32 +143,39 @@ const vstate = new VehicleState();
   client.tick();
   ok(sent.length === 1, '在途未清空时不发新命令（串行化）');
 
-  // 1b. 辅助类别在途超时 → 按类别退避（_nextAuxAt = now+RETRY），且 drive 不受影响
+  // 1b. 辅助类别在途超时 → 放回批次队尾，500ms 后重试（不再推迟整批 30s）
   client._pollPending = freshPending('charge');
   client._pollPending.sentAt -= CFG.POLL_RESPONSE_TIMEOUT_MS + 100;
   client._nextDriveAt = Date.now() + 100000;
   client.tick();
   ok(client._pollPending === null, '超时后清空在途');
-  near(client._nextAuxAt, Date.now() + CFG.POLL_RETRY_MS, 120, 'charge 超时 → aux 退避 now+500ms');
+  ok(client._auxQueue.length === 1 && client._auxQueue[0].kind === 'charge', '超时的 charge 回到批次队列');
+  near(client._auxQueue[0].notBefore, Date.now() + CFG.POLL_RETRY_MS, 120, 'charge 重试 notBefore = now+500ms');
   ok(sent.length === 1, '退避期内不发新帧');
 
-  // 1c. 辅助轮换顺序 charge → climate → closures → tire →（回绕）charge
-  const seq = [];
-  for (let i = 0; i < 5; i++) {
-    client._nextAuxAt = Date.now() - 1; // 模拟 31s 周期到点
-    client.tick();
-    ok(client._pollPending && client._pollPending.kind !== 'drive', 'aux 发出且非 drive');
-    seq.push(client._pollPending.kind);
-    near(client._nextAuxAt, Date.now() + CFG.AUX_POLL_INTERVAL_MS, 120, 'aux 下次周期 = now+31s');
-    client._pollPending = null; // 模拟响应到达清空
-  }
-  ok(seq.join(',') === 'charge,climate,closures,tire,charge', '轮换顺序 charge→climate→closures→tire→回绕 (实际 ' + seq.join(',') + ')');
-
-  // 1d. Drive 优先于辅助类别
-  client._nextDriveAt = Date.now() - 1;
+  // 1c. 批次到点：charge → climate → closures → tire 连续发送，中间不等待 30s
+  client._auxQueue = [];
   client._nextAuxAt = Date.now() - 1;
   client.tick();
-  ok(client._pollPending && client._pollPending.kind === 'drive', 'drive 与 aux 同时到期时 drive 优先');
+  ok(client._pollPending && client._pollPending.kind === 'charge', '批次首个类别 charge');
+  near(client._nextAuxAt, Date.now() + CFG.AUX_POLL_INTERVAL_MS, 120, '批次周期 = now+30s');
+  const seq = [client._pollPending.kind];
+  for (let i = 0; i < 3; i++) {
+    client._pollPending = null; // 模拟响应到达清空，下一 tick 立即发同批下一类别
+    client.tick();
+    ok(client._pollPending && client._pollPending.kind !== 'drive', '同批类别立即发出');
+    seq.push(client._pollPending.kind);
+  }
+  ok(seq.join(',') === 'charge,climate,closures,tire', '批内顺序 charge→climate→closures→tire (实际 ' + seq.join(',') + ')');
+  client._pollPending = null;
+  client.tick();
+  ok(!client._pollPending, '批次排空后不会重复立即抓取');
+  near(client._nextAuxAt, Date.now() + CFG.AUX_POLL_INTERVAL_MS, 120, '辅助数据每 30s 重新整批抓取');
+
+  // 1d. 批次排空后 Drive 恢复正常调度
+  client._nextDriveAt = Date.now() - 1;
+  client.tick();
+  ok(client._pollPending && client._pollPending.kind === 'drive', '批次排空后 drive 恢复发送');
 }
 
 // ── 2. 响应到达：按类别排周期 + 状态写入 vstate ───────────────────
@@ -182,12 +189,14 @@ console.log('2. 响应调度与状态写入');
   client._hasSession = true;
   vstate.setLink('ready', '');
 
-  // 2a. charge 响应 → soc/charging/power 入快照，aux 周期重排 31s
+  // 2a. charge 响应 → soc/charging/power 入快照，批次周期保持不变
+  const auxAt = Date.now() + 12345;
+  client._nextAuxAt = auxAt;
   client._pollPending = freshPending('charge');
   openQueue = [buildChargeResponse(50, 62)];
   client._handleEncryptedResponse(fakeEncResponse());
   ok(client._pollPending === null, 'charge 响应后清空在途');
-  near(client._nextAuxAt, Date.now() + CFG.AUX_POLL_INTERVAL_MS, 120, 'charge 响应 → aux 周期重排 now+31s');
+  ok(client._nextAuxAt === auxAt, '单个辅助响应不会改动 30s 批次周期');
   ok(vstate.get().snap.batteryLevel === 50, 'batteryLevel=50');
   ok(vstate.get().snap.charging === true, 'charging=true');
   ok(vstate.get().snap.chargePowerKw === 62, 'chargePowerKw=62');
@@ -307,13 +316,13 @@ console.log('5. 会话建立首轮调度');
   });
   const before = Date.now();
   client._hasSession = false;
-  client._auxIdx = 3; // 模拟残留状态
+  client._auxQueue = [{ kind: 'tire', notBefore: 0 }]; // 模拟残留状态
   // 直接走 _handleHandshakeResponse 的成功路径太重，这里校验 reset + 手动置时序语义
   client._resetCryptoState();
-  ok(client._auxIdx === 0 && client._nextAuxAt === 0 && client._nextDriveAt === 0, 'reset 清空 aux/drive 时序');
+  ok(client._auxQueue.length === 0 && client._nextAuxAt === 0 && client._nextDriveAt === 0, 'reset 清空 aux/drive 时序');
   client._hasSession = true;
   client._nextDriveAt = before + 100;
-  client._auxIdx = 0;
+  client._auxQueue = [];
   client._nextAuxAt = before + 400;
   ok(client._nextAuxAt - client._nextDriveAt === 300, '辅助首轮晚于 Drive 首轮 300ms');
 }

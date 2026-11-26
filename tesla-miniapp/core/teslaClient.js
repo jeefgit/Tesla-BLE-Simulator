@@ -81,9 +81,10 @@ class TeslaClient {
 
     this._pollPending = null; // { reqTag, counter, uuid, kind, sentAt }
     this._nextDriveAt = 0;
-    // 辅助类别轮换：charge → climate → closures → tire，31s 一个类别
+    // 辅助数据批次：每 30s 一次性入队 charge/climate/closures/tire，
+    // 串行连续抓取（类别之间不再间隔一个轮询周期）
     this._auxKinds = ['charge', 'climate', 'closures', 'tire'];
-    this._auxIdx = 0;
+    this._auxQueue = []; // [{ kind, notBefore }]
     this._nextAuxAt = 0;
 
     this._notPaired = false;
@@ -139,7 +140,7 @@ class TeslaClient {
     this._parser.setHandshakeDone(false);
     this._hsTries = 0;
     this._nextHsAt = 0;
-    this._auxIdx = 0;
+    this._auxQueue = [];
     this._nextAuxAt = 0;
     this._notPaired = false;
     this._pairSends = 0;
@@ -227,13 +228,43 @@ class TeslaClient {
       this._logThrottled('轮询响应超时（' + this.stats.timeouts + ' 次）', 3000);
     }
     if (!this._pollPending) {
-      // Drive 高频轮询优先；辅助类别（charge/climate/closures/tire）31s 轮换
-      if (now >= this._nextDriveAt) {
+      // 辅助批次到点：一次性入队所有辅助类别
+      if (this._auxQueue.length === 0 && this._nextAuxAt && now >= this._nextAuxAt) {
+        this._startAuxBatch(now);
+      }
+      // 优先连续排空辅助批次（类别之间不等待 30s），排空后恢复 Drive 高频轮询
+      const aux = this._takeAuxJob(now);
+      if (aux) {
+        this._sendPoll(aux.kind);
+      } else if (now >= this._nextDriveAt) {
         this._sendPoll('drive');
-      } else if (this._nextAuxAt && now >= this._nextAuxAt) {
-        this._sendPoll(this._auxKinds[this._auxIdx]);
       }
     }
+  }
+
+  // ── 辅助批次调度 ──────────────────────────────────────────────────
+  // 每 30s 重启一批：charge / climate / closures / tire 全部重新抓取
+  _startAuxBatch(now) {
+    this._auxQueue = this._auxKinds.map((kind) => ({ kind: kind, notBefore: 0 }));
+    this._nextAuxAt = now + CFG.AUX_POLL_INTERVAL_MS;
+    this._log('辅助批次: ' + this._auxKinds.join(' / '));
+  }
+
+  // 取出一个已到发送时间的辅助任务；失败重排的任务按 notBefore 延后
+  _takeAuxJob(now) {
+    if (this._auxQueue.length === 0) return null;
+    const job = this._auxQueue[0];
+    if (job.notBefore > now) return null;
+    this._auxQueue.shift();
+    return job;
+  }
+
+  // 辅助类别失败：排到队尾，稍后重试（不影响同批次其他类别）
+  _requeueAux(kind, delayMs) {
+    for (let i = 0; i < this._auxQueue.length; i++) {
+      if (this._auxQueue[i].kind === kind) return;
+    }
+    this._auxQueue.push({ kind: kind, notBefore: nowMs() + (delayMs || CFG.POLL_RETRY_MS) });
   }
 
   // ── 握手 ──────────────────────────────────────────────────────────
@@ -261,8 +292,8 @@ class TeslaClient {
       this._parser.setHandshakeDone(true);
       this._pollPending = null;
       this._nextDriveAt = nowMs() + 100;
-      this._auxIdx = 0;
-      this._nextAuxAt = nowMs() + 400; // 会话建立后稍作停顿即发起首个辅助类别
+      this._auxQueue = [];
+      this._nextAuxAt = nowMs() + 400; // 会话建立后稍作停顿即发起首轮辅助批次
       this._log('握手成功 counter=' + res.counter + ' K=' + (res.keyFingerprint || 0).toString(16));
       this._emit({ type: 'session', ok: true });
     } else if (res.notPaired) {
@@ -324,7 +355,7 @@ class TeslaClient {
     }
   }
 
-  // ── 加密轮询（drive 高频 + 辅助类别轮换，共用串行化在途保护）───────
+  // ── 加密轮询（drive 高频 + 辅助批次，共用串行化在途保护）───────────
   _sendPoll(kind) {
     if (!this._priv) return;
     const plain = pb.buildGetVehicleDataAction(kind);
@@ -351,16 +382,16 @@ class TeslaClient {
       sentAt: nowMs(),
     };
     this.stats.cmdsSent++;
-    // 发送即排下一周期（响应正常到达时由 _handleEncryptedResponse 覆盖为完整周期）
+    // Drive 发送即排下一周期（正常响应到达时会再次重排）；
+    // 辅助批次的 30s 周期在入队时已排好，这里不再改动
     if (kind === 'drive') {
       this._nextDriveAt = nowMs() + CFG.DRIVE_POLL_INTERVAL_MS;
     } else {
-      this._nextAuxAt = nowMs() + CFG.AUX_POLL_INTERVAL_MS;
-      this._auxIdx = (this._auxIdx + 1) % this._auxKinds.length;
       this._log('辅助轮询: ' + kind);
     }
     this._send(pb.frameOf(body)).catch((e) => {
       this._pollPending = null;
+      this._scheduleNextPoll(kind, CFG.POLL_RETRY_MS);
       this._log('轮询发送失败: ' + e.message);
     });
   }
@@ -472,9 +503,10 @@ class TeslaClient {
       return;
     }
     this.stats.respOk++;
-    // 成功响应：drive 按高频周期排，辅助类别按 31s 周期排
-    this._scheduleNextPoll(pending.kind,
-      pending.kind === 'drive' ? CFG.DRIVE_POLL_INTERVAL_MS : CFG.AUX_POLL_INTERVAL_MS);
+    // 成功响应：只重排 Drive；辅助批次在入队时已排好 30s 周期
+    if (pending.kind === 'drive') {
+      this._nextDriveAt = nowMs() + CFG.DRIVE_POLL_INTERVAL_MS;
+    }
     this._applyVehicleData(plain);
   }
 
@@ -521,10 +553,10 @@ class TeslaClient {
   }
 
   // ── 发送与工具 ────────────────────────────────────────────────────
-  // 按类别排下一次轮询时间（drive 与辅助类别各自独立周期）
+  // 失败重排（drive 独立周期；辅助类别放回批次队列稍后重试）
   _scheduleNextPoll(kind, ms) {
     if (kind === 'drive') this._nextDriveAt = nowMs() + ms;
-    else this._nextAuxAt = nowMs() + ms;
+    else this._requeueAux(kind, ms);
   }
 
   _send(framed) {
