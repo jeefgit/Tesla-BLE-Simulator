@@ -3,7 +3,7 @@
 'use strict';
 
 const { UUID, CFG } = require('../config/index');
-const { advertisedNameFromVin } = require('./advertisedName');
+const { advertisedNamesFromVin } = require('./advertisedName');
 const { toHex } = require('../utils/bytes');
 
 const STATE = {
@@ -27,6 +27,27 @@ function wxp(fn, opts) {
 
 function uuidNorm(u) {
   return String(u || '').toUpperCase();
+}
+
+// 广播名比较：忽略大小写和空格（不同平台可能把 "Tesla 571213" 读成 "Tesla571213"）
+function nameNorm(n) {
+  return String(n || '').replace(/\s+/g, '').toUpperCase();
+}
+
+// 真车旧命名最后一位可能是 C/R/D/P，按前 17 位匹配
+function isLegacyName(n) {
+  return /^S[0-9A-F]{16}[CRDP]$/.test(n);
+}
+
+function nameMatches(name, targets) {
+  const n = nameNorm(name);
+  if (!n) return false;
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i];
+    if (n === t) return true;
+    if (isLegacyName(n) && isLegacyName(t) && n.slice(0, 17) === t.slice(0, 17)) return true;
+  }
+  return false;
 }
 
 class BleLink {
@@ -114,37 +135,58 @@ class BleLink {
     wxp(wx.stopBluetoothDevicesDiscovery).catch(() => {});
   }
 
-  async _scan(targetName, timeoutMs) {
-    try {
-      // services 过滤加速发现（iOS 上可能被忽略，仍需按名称匹配）
-      await wxp(wx.startBluetoothDevicesDiscovery, {
-        services: [UUID.SERVICE],
-        allowDuplicatesKey: false,
-      });
-    } catch (e) {
-      // 某些平台 services 过滤失败时降级为全量扫描
-      await wxp(wx.startBluetoothDevicesDiscovery, { allowDuplicatesKey: false });
-    }
+  async _scan(targetNames, timeoutMs) {
+    const targets = (Array.isArray(targetNames) ? targetNames : [targetNames])
+      .map(nameNorm).filter(Boolean);
+    const seen = Object.create(null);
+    this._log('[scan] 目标广播名: ' + targets.join(' 或 '));
+
+    const findMatch = (devices) => {
+      for (let i = 0; i < devices.length; i++) {
+        const d = devices[i];
+        const name = d.name || d.localName || '';
+        const key = nameNorm(name);
+        if (key && !seen[key]) seen[key] = true;
+        if (nameMatches(name, targets)) return d;
+      }
+      return null;
+    };
+
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let done = false;
+      const finish = (fn, arg) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
         wx.offBluetoothDeviceFound();
         this._stopScan();
-        reject(new Error('扫描超时（' + timeoutMs / 1000 + 's），未发现 ' + targetName));
+        fn(arg);
+      };
+      const timer = setTimeout(() => {
+        const nearby = Object.keys(seen).filter(Boolean).slice(0, 15);
+        const hint = nearby.length
+          ? '；附近设备广播名: ' + nearby.join(', ')
+          : '；未收到任何带名称的 BLE 广播（检查手机蓝牙/定位权限，或车辆是否在范围内）';
+        finish(reject, new Error('扫描超时（' + timeoutMs / 1000 + 's），未发现 '
+          + targets.join(' 或 ') + hint));
       }, timeoutMs);
+
+      // 先注册监听再开扫描，避免漏掉扫描启动瞬间上报的设备
       wx.onBluetoothDeviceFound((res) => {
-        const devices = (res && res.devices) || [];
-        for (let i = 0; i < devices.length; i++) {
-          const d = devices[i];
-          const name = d.name || d.localName || '';
-          if (name === targetName) {
-            clearTimeout(timer);
-            wx.offBluetoothDeviceFound();
-            this._stopScan();
-            resolve(d);
-            return;
-          }
-        }
+        const dev = findMatch((res && res.devices) || []);
+        if (dev) finish(resolve, dev);
       });
+
+      // 不做 services 过滤：真车通常不在广播包里携带 0211 服务 UUID，
+      // 只有模拟器（BLESS/Bumble）会把 0211 放进广播包，过滤会导致真车永远搜不到。
+      wxp(wx.startBluetoothDevicesDiscovery, { allowDuplicatesKey: true })
+        .then(() => wxp(wx.getBluetoothDevices).catch(() => null))
+        .then((res) => {
+          if (!res) return;
+          const dev = findMatch(res.devices || []);
+          if (dev) finish(resolve, dev);
+        })
+        .catch((e) => finish(reject, e));
     });
   }
 
@@ -203,12 +245,13 @@ class BleLink {
     this._wantDisconnect = false;
     const gen = ++this._gen;
     clearTimeout(this._reconnectTimer); // 取消挂起的重连，避免并发两条连接流程
+    vin = String(vin || '').trim().toUpperCase();
     this._vin = vin;
-    const targetName = advertisedNameFromVin(vin);
-    this._setState(STATE.SCANNING, '按广播名查找 ' + targetName);
+    const targetNames = advertisedNamesFromVin(vin);
+    this._setState(STATE.SCANNING, '按广播名查找 ' + targetNames.join(' / '));
     try {
       await this._ensureAdapter();
-      const dev = await this._scan(targetName, CFG.CONNECT_TIMEOUT_MS);
+      const dev = await this._scan(targetNames, CFG.CONNECT_TIMEOUT_MS);
       if (gen !== this._gen) return;
       this._deviceId = dev.deviceId;
       this._setState(STATE.CONNECTING, 'deviceId=' + dev.deviceId);
@@ -250,10 +293,10 @@ class BleLink {
 
   async _reconnectOnce() {
     const gen = ++this._gen;
-    const targetName = advertisedNameFromVin(this._vin);
-    this._setState(STATE.RECONNECTING, '重试扫描 ' + targetName);
+    const targetNames = advertisedNamesFromVin(this._vin);
+    this._setState(STATE.RECONNECTING, '重试扫描 ' + targetNames.join(' / '));
     await this._ensureAdapter();
-    const dev = await this._scan(targetName, CFG.CONNECT_TIMEOUT_MS);
+    const dev = await this._scan(targetNames, CFG.CONNECT_TIMEOUT_MS);
     if (gen !== this._gen) return;
     this._deviceId = dev.deviceId;
     await wxp(wx.createBLEConnection, { deviceId: dev.deviceId, timeout: 8000 });

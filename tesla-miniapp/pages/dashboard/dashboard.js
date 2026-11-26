@@ -34,7 +34,7 @@ Page({
   },
 
   onLoad() {
-    const vin = wx.getStorageSync('vin') || config.CFG.VIN;
+    const vin = String(wx.getStorageSync('vin') || config.CFG.VIN || '').trim().toUpperCase();
     this.setData({ vin });
     this.updateClock();
     this._clockTimer = setInterval(() => this.updateClock(), 1000);
@@ -182,7 +182,8 @@ Page({
   },
 
   tapConnect() {
-    const vin = this.data.vin;
+    const vin = String(this.data.vin || '').trim().toUpperCase();
+    if (vin !== this.data.vin) this.setData({ vin });
     if (!/^[A-HJ-NPR-Z0-9]{11,17}$/.test(vin)) {
       this.pushLog('VIN 格式不合法：' + vin);
       return;

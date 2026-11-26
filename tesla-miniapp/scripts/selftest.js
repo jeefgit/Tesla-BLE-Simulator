@@ -8,7 +8,7 @@ const {
   sha1, sha256, hmacSha256, gcmEncrypt, gcmDecrypt,
   derivePublicKey, ecdhSharedX,
 } = require('../core/crypto/index');
-const { advertisedNameFromVin } = require('../core/advertisedName');
+const { advertisedNameFromVin, advertisedNamesFromVin } = require('../core/advertisedName');
 const { toHex } = require('../utils/bytes');
 
 function rnd(n) {
@@ -109,6 +109,9 @@ assert.strictEqual(name.length, 18, 'name length');
 assert.strictEqual(name[0], 'S');
 assert.strictEqual(name[17], 'C');
 assert.ok(/^S[0-9a-f]{16}C$/.test(name), 'name pattern');
-console.log('advertisedName OK: ' + vin + ' -> ' + name);
+const names = advertisedNamesFromVin(vin);
+assert.deepStrictEqual(names, ['Tesla 571213', name], 'new + legacy names');
+assert.deepStrictEqual(advertisedNamesFromVin(vin.toLowerCase()), names, 'VIN case-insensitive');
+console.log('advertisedName OK: ' + vin + ' -> ' + names.join(' / '));
 
 console.log('\nALL SELFTESTS PASSED (' + passed + ' assertions)');
