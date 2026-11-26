@@ -243,6 +243,15 @@ console.log('3. UI 模型（ETA/门/胎压/温度）');
   ok(m2.tpms.values[0].low === false, '2.3 bar 不告警');
   ok(m2.climate.insideText === '21.5' && m2.climate.outsideText === '18.2', '温度文本保留 1 位小数');
 
+  const rangeState = new VehicleState();
+  rangeState.setLink('ready', '');
+  rangeState.applyPartial({ batteryRangeKm: 321 });
+  rangeState._ts.battery = Date.now() - CFG.DATA_STALE_MS - 1;
+  const rangeModel = uiModel.build(rangeState.get());
+  ok(rangeModel.drive.rangeText === '321', '里程在快频数据过期后仍保持有效');
+  rangeState._ts.battery = Date.now() - CFG.AUX_DATA_STALE_MS - 1;
+  ok(uiModel.build(rangeState.get()).drive.rangeText === '--', '辅助数据超过有效期后里程降级为 --');
+
   // 门全关 → anyOpen=false
   vstate.applyPartial({ doors: [false, false, false, false, false, false], locked: true });
   const m3 = uiModel.build(vstate.get());

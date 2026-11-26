@@ -1,25 +1,58 @@
 <view class="page">
-  <view class="statusbar">
-    <view class="weather">
-      <text class="weather-label">车外</text>
-      <text class="weather-value">{{model ? model.climate.outsideText : '--'}}°C</text>
+  <!-- 顶栏：车外/车内温度 · 行驶状态 · 时间 -->
+  <view class="topbar">
+    <view class="temps">
+      <view class="temp-item">
+        <text class="temp-label">车外</text>
+        <text class="temp-value">{{model ? model.climate.outsideText : '--'}}°<text class="temp-c">C</text></text>
+      </view>
+      <view class="temp-sep"></view>
+      <view class="temp-item">
+        <text class="temp-label">车内</text>
+        <text class="temp-value">{{model ? model.climate.insideText : '--'}}°<text class="temp-c">C</text></text>
+      </view>
     </view>
-    <view class="status-glyphs">
-      <view class="state-item"><view class="lamp-icon"></view></view>
-      <view class="state-item active"><view class="lamp-icon"></view></view>
-      <view class="state-item"><view class="lamp-icon"></view></view>
+
+    <view class="mode-status {{model && model.ready ? 'live' : ''}}">
+      <view class="mode-dot"></view>
+      <text class="mode-text">{{model && model.ready ? (model.page === 'charge' ? '充电中' : '行驶') : '未连接'}}</text>
     </view>
-    <view class="clock-group">
+
+    <view class="topbar-right">
       <text class="debug-toggle" bindtap="toggleDebug">{{showDebug ? '收起日志' : '日志'}}</text>
       <text class="clock">{{clock}}</text>
     </view>
   </view>
 
   <view class="cockpit">
-    <view class="side-panel left-panel">
-      <image class="car-image" src="../../assets/car-top.png" mode="aspectFit"></image>
+    <!-- 左：车辆俯视图 + 四轮胎压 -->
+    <view class="left-panel">
+      <view class="car-stage">
+        <view class="car-halo"></view>
+        <image class="car-image" src="../../assets/car-top.png" mode="aspectFit"></image>
+        <view class="car-floor"></view>
+        <block wx:if="{{model && model.tpms.values[0].text !== '--'}}">
+          <view class="tire-val fl {{model.tpms.values[0].low ? 'low' : ''}}">
+            <text class="tire-name">FL</text>
+            <text class="tire-num">{{model.tpms.values[0].text}}</text>
+          </view>
+          <view class="tire-val fr {{model.tpms.values[1].low ? 'low' : ''}}">
+            <text class="tire-name">FR</text>
+            <text class="tire-num">{{model.tpms.values[1].text}}</text>
+          </view>
+          <view class="tire-val rl {{model.tpms.values[2].low ? 'low' : ''}}">
+            <text class="tire-name">RL</text>
+            <text class="tire-num">{{model.tpms.values[2].text}}</text>
+          </view>
+          <view class="tire-val rr {{model.tpms.values[3].low ? 'low' : ''}}">
+            <text class="tire-name">RR</text>
+            <text class="tire-num">{{model.tpms.values[3].text}}</text>
+          </view>
+        </block>
+      </view>
     </view>
 
+    <!-- 中：车速环 -->
     <view class="center-panel">
       <view class="speed-ring">
         <view class="speed-inner">
@@ -30,48 +63,63 @@
       </view>
     </view>
 
-    <view class="side-panel right-panel">
-      <view class="vehicle-outline">
-        <view class="tire fl"></view>
-        <view class="tire fr"></view>
-        <view class="tire rl"></view>
-        <view class="tire rr"></view>
-        <text class="tire-value fl">{{model ? model.tpms.values[0].text : '--'}}</text>
-        <text class="tire-value fr">{{model ? model.tpms.values[1].text : '--'}}</text>
-        <text class="tire-value rl">{{model ? model.tpms.values[2].text : '--'}}</text>
-        <text class="tire-value rr">{{model ? model.tpms.values[3].text : '--'}}</text>
+    <!-- 右：车锁 + 电量/续航 -->
+    <view class="right-panel">
+      <view class="lock-block" bindtap="tapLock">
+        <text class="panel-cap">车锁</text>
+        <view class="lock-row">
+          <view class="lock-icon {{model && model.ready ? (model.locked === false ? 'unlocked' : 'locked') : 'offline'}}">
+            <view class="lock-shackle"></view>
+            <view class="lock-body"></view>
+          </view>
+          <view class="lock-copy">
+            <block wx:if="{{model && model.ready}}">
+              <text class="lock-title">{{model.locked === true ? '设备已锁定' : (model.locked === false ? '设备未锁定' : '设备已连接')}}</text>
+              <text class="lock-sub">轻触断开</text>
+            </block>
+            <block wx:elif="{{stateText === 'idle'}}">
+              <text class="lock-title">设备未连接</text>
+              <text class="lock-sub">轻触连接车辆</text>
+            </block>
+            <block wx:else>
+              <text class="lock-title compact">{{stateText}}</text>
+              <text class="lock-sub">正在建立链路</text>
+            </block>
+          </view>
+        </view>
       </view>
-      <view class="lock-status" wx:if="{{stateText === 'idle' || stateText.indexOf('error') === 0}}" bindtap="tapConnect">
-        <text>设备未连接</text>
-        <text class="touch-tip">轻触连接车辆</text>
-      </view>
-      <text class="link-status" wx:elif="{{stateText.indexOf('ready') !== 0}}">{{stateText}}</text>
-      <view class="lock-status" wx:else bindtap="tapDisconnect">
-        <text>{{model && model.locked === true ? '设备已锁定' : (model && model.locked === false ? '设备未锁定' : '设备已连接')}}</text>
-        <text class="touch-tip">轻触断开</text>
-      </view>
-    </view>
 
-    <view class="range">
-      <view class="range-main">
-        <text class="battery-chip">{{model ? model.charge.socText : '--'}}%</text>
+      <view class="right-divider"></view>
+
+      <view class="range-block">
+        <view class="range-head">
+          <text class="panel-cap">电量</text>
+          <view class="range-head-right">
+            <text class="charging-tag" wx:if="{{model && model.charge.charging}}">充电中</text>
+            <text class="soc-value">{{model ? model.charge.socText : '--'}}<text class="soc-unit">%</text></text>
+          </view>
+        </view>
         <view class="battery-track">
           <view class="battery-fill" style="{{model ? model.charge.socBarStyle : 'width: 0%'}}"></view>
         </view>
-      </view>
-      <view class="range-caption">
-        <text class="range-label">预估可行驶里程</text>
-        <text class="range-value">{{model ? model.charge.rangeText : '--'}} km</text>
+        <view class="range-foot">
+          <text class="range-label">预估可行驶</text>
+          <text class="range-value">{{model ? model.charge.rangeText : '--'}}<text class="range-unit"> km</text></text>
+        </view>
       </view>
     </view>
   </view>
 
+  <!-- 调试日志 -->
   <scroll-view class="logs" wx:if="{{showDebug}}" scroll-y>
-    <view class="stats-text">{{statsText}}</view>
+    <view class="logs-head">
+      <text class="stats-text">{{statsText}}</text>
+      <text class="logs-close" bindtap="toggleDebug">收起</text>
+    </view>
     <view class="log-line" wx:for="{{logs}}" wx:key="index">{{item}}</view>
   </scroll-view>
 
-  <!-- 配钥弹窗（微信 Modal 风格）：sending / waiting / ok / failed -->
+  <!-- 配钥弹窗：sending / waiting / ok / failed -->
   <view class="wx-mask" wx:if="{{pair.active}}">
     <view class="wx-modal">
       <view class="wx-modal-icon">
@@ -80,11 +128,13 @@
         <text class="icon-text good" wx:elif="{{pair.phase === 'ok'}}">✓</text>
         <text class="icon-text bad" wx:elif="{{pair.phase === 'failed'}}">!</text>
       </view>
-      <view class="wx-modal-title {{pair.phase === 'failed' ? 'bad' : (pair.phase === 'ok' ? 'good' : '')}}">{{pair.title}}</view>
-      <view class="wx-modal-body">{{pair.sub}}</view>
-      <view class="wx-modal-count" wx:if="{{pair.phase === 'waiting'}}">{{pair.countdown}}s</view>
-      <view class="wx-modal-progress" wx:if="{{pair.sends > 0}}">请求 {{pair.sends}}/{{pair.maxSends}}</view>
-      <view class="wx-modal-hint">模拟器验证：车端弹窗出现后轻点钥匙卡</view>
+      <view class="wx-modal-main">
+        <view class="wx-modal-title {{pair.phase === 'failed' ? 'bad' : (pair.phase === 'ok' ? 'good' : '')}}">{{pair.title}}</view>
+        <view class="wx-modal-body">{{pair.sub}}</view>
+        <view class="wx-modal-count" wx:if="{{pair.phase === 'waiting'}}">{{pair.countdown}}s</view>
+        <view class="wx-modal-progress" wx:if="{{pair.sends > 0}}">请求 {{pair.sends}}/{{pair.maxSends}}</view>
+        <view class="wx-modal-hint">模拟器验证：车端弹窗出现后轻点钥匙卡</view>
+      </view>
     </view>
   </view>
 </view>

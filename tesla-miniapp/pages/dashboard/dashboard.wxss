@@ -1,197 +1,290 @@
+/* Tesla 横屏驾驶舱 · 微信小程序
+ * 克制型深色仪表：顶栏信息 + 车辆 / 车速 / 车锁续航三栏
+ * 字号基准偏小，靠留白与细线分层，避免大色块卡片
+ */
+
 .page {
   position: relative;
   width: 100vw;
   height: 100vh;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   box-sizing: border-box;
-  padding: 4rpx 12rpx 8rpx;
-  color: #F5F7FB;
+  padding: 1vh 2.4vw 1.4vh;
+  padding-left: calc(2.4vw + constant(safe-area-inset-left));
+  padding-right: calc(2.4vw + constant(safe-area-inset-right));
+  padding-left: calc(2.4vw + env(safe-area-inset-left));
+  padding-right: calc(2.4vw + env(safe-area-inset-right));
+  color: #F3F6FB;
   background:
-    radial-gradient(ellipse at 50% 56%, rgba(37, 80, 112, 0.19), transparent 44%),
-    radial-gradient(ellipse at 50% 105%, rgba(22, 38, 61, 0.35), transparent 52%),
+    radial-gradient(ellipse at 50% 52%, rgba(31, 68, 96, 0.20), transparent 46%),
+    radial-gradient(ellipse at 50% 112%, rgba(18, 31, 50, 0.38), transparent 56%),
     #05070B;
 }
 
-.statusbar {
+/* ── 顶栏 ───────────────────────────────────────────────────────── */
+.topbar {
+  position: relative;
+  flex: 0 0 auto;
+  height: 11vh;
   display: flex;
   align-items: center;
-  height: 9vh;
-  min-height: 42rpx;
-  max-height: 72rpx;
-  padding: 0 20rpx;
-  box-sizing: border-box;
-  color: #D7DBE2;
+  justify-content: space-between;
 }
 
-.weather {
+.topbar::after {
+  content: '';
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: 0;
+  height: 1rpx;
+  background: linear-gradient(90deg, transparent, rgba(195, 211, 235, 0.10), transparent);
+}
+
+.temps {
+  display: flex;
+  align-items: center;
+}
+
+.temp-item {
   display: flex;
   align-items: baseline;
-  width: 23%;
-  white-space: nowrap;
 }
 
-.weather-label {
-  margin-right: 14rpx;
-  color: #A8AFBB;
+.temp-label {
+  margin-right: 8rpx;
+  color: #7C8593;
+  font-size: 14rpx;
+  letter-spacing: 2rpx;
 }
 
-.weather-label,
-.weather-value {
+.temp-value {
+  color: #E8EDF4;
   font-size: 20rpx;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.temp-c {
+  margin-left: 1rpx;
+  color: #7C8593;
+  font-size: 12rpx;
+}
+
+.temp-sep {
+  width: 1rpx;
+  height: 16rpx;
+  margin: 0 22rpx;
+  background: rgba(195, 211, 235, 0.16);
+}
+
+.mode-status {
+  display: flex;
+  align-items: center;
+  color: #6E7683;
+  font-size: 14rpx;
   letter-spacing: 1rpx;
 }
 
-.weather-value {
-  color: #F5F7FB;
-  font-variant-numeric: tabular-nums;
+.mode-dot {
+  width: 8rpx;
+  height: 8rpx;
+  margin-right: 8rpx;
+  border-radius: 50%;
+  background: #4E5662;
 }
 
-.status-glyphs {
+.mode-status.live {
+  color: #9FE9C0;
+}
+
+.mode-status.live .mode-dot {
+  background: #6EDB9A;
+  box-shadow: 0 0 10rpx rgba(110, 219, 154, 0.7);
+}
+
+.topbar-right {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-}
-
-.state-item {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 60rpx;
-  height: 52rpx;
-  color: #626B78;
-  opacity: 0.42;
-}
-
-.state-item.active {
-  color: #F3F6FB;
-  opacity: 0.9;
-}
-
-.lamp-icon {
-  position: relative;
-  width: 28rpx;
-  height: 30rpx;
-}
-
-.lamp-icon::before {
-  content: '';
-  position: absolute;
-  left: 3rpx;
-  top: 5rpx;
-  width: 13rpx;
-  height: 20rpx;
-  border-right: 4rpx solid currentColor;
-  border-radius: 0 70% 70% 0;
-}
-
-.lamp-icon::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  top: 6rpx;
-  width: 9rpx;
-  height: 2rpx;
-  background: currentColor;
-  box-shadow: 0 7rpx currentColor, 0 14rpx currentColor;
-}
-
-.clock-group {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  width: 23%;
+  align-items: baseline;
 }
 
 .debug-toggle {
-  margin-right: 20rpx;
-  color: #666E7B;
-  font-size: 16rpx;
+  margin-right: 18rpx;
+  color: #5F6773;
+  font-size: 14rpx;
+  letter-spacing: 1rpx;
 }
 
 .clock {
-  color: #F6F7FA;
-  font-size: 24rpx;
-  font-weight: 600;
-  letter-spacing: 3rpx;
+  color: #F2F4F8;
+  font-size: 26rpx;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 2rpx;
   font-variant-numeric: tabular-nums;
 }
 
+/* ── 三栏 ───────────────────────────────────────────────────────── */
 .cockpit {
   position: relative;
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
-  width: 100%;
-  height: calc(91vh - 12rpx);
-  min-height: 0;
 }
 
 .cockpit::before {
   content: '';
   position: absolute;
   z-index: 0;
-  left: 17%;
-  right: 19%;
-  top: 49%;
+  left: 22%;
+  right: 23%;
+  top: 50%;
   height: 1rpx;
-  background: linear-gradient(90deg, transparent, rgba(151, 221, 246, 0.22), transparent);
-  box-shadow: 0 0 28rpx 8rpx rgba(92, 178, 212, 0.10);
+  background: linear-gradient(90deg, transparent, rgba(151, 221, 246, 0.16), transparent);
+  box-shadow: 0 0 24rpx 6rpx rgba(92, 178, 212, 0.08);
 }
 
-.side-panel {
+/* 左：车辆俯视图 */
+.left-panel {
   position: relative;
   z-index: 1;
+  width: 26%;
+  height: 100%;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 72%;
-  min-height: 0;
-  box-sizing: border-box;
 }
 
-.left-panel {
-  width: 19%;
-  border-right: 1rpx solid rgba(195, 211, 235, 0.11);
-  background: linear-gradient(90deg, transparent, rgba(17, 26, 42, 0.20));
+.left-panel::after {
+  content: '';
+  position: absolute;
+  top: 16%;
+  right: 0;
+  bottom: 16%;
+  width: 1rpx;
+  background: linear-gradient(180deg, transparent, rgba(195, 211, 235, 0.12), transparent);
+}
+
+.car-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.car-halo {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  width: 144%;
+  height: 62%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(90, 178, 212, 0.14), transparent 68%);
 }
 
 .car-image {
-  display: block;
-  width: 8.2vw;
-  min-width: 58px;
-  max-width: 116px;
-  height: 60vh;
-  max-height: 310px;
-  transform: scale(1.8);
-  filter: drop-shadow(0 5rpx 16rpx rgba(195, 219, 242, 0.13));
+  position: relative;
+  z-index: 1;
+  width: 96%;
+  height: 76%;
 }
 
+.car-floor {
+  position: absolute;
+  z-index: 0;
+  left: 50%;
+  bottom: 11%;
+  width: 54%;
+  height: 6rpx;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(169, 234, 255, 0.20), transparent 72%);
+}
+
+.tire-val {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.tire-val.fl,
+.tire-val.rl {
+  left: 1.5%;
+  align-items: flex-end;
+}
+
+.tire-val.fr,
+.tire-val.rr {
+  right: 1.5%;
+  align-items: flex-start;
+}
+
+.tire-val.fl { top: 26%; }
+.tire-val.fr { top: 26%; }
+.tire-val.rl { top: 62%; }
+.tire-val.rr { top: 62%; }
+
+.tire-name {
+  color: #59616D;
+  font-size: 9rpx;
+  letter-spacing: 1rpx;
+}
+
+.tire-num {
+  color: #9AA3B0;
+  font-size: 12rpx;
+  font-variant-numeric: tabular-nums;
+}
+
+.tire-val.low .tire-num {
+  color: #FF777B;
+}
+
+/* 中：车速环 */
 .center-panel {
   position: relative;
   z-index: 1;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 1;
-  height: 100%;
-  min-width: 0;
+}
+
+.center-panel::before {
+  content: '';
+  position: absolute;
+  width: 76%;
+  height: 82%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(55, 128, 168, 0.11), transparent 70%);
 }
 
 .speed-ring {
   position: relative;
+  z-index: 1;
+  width: 68vh;
+  height: 68vh;
+  max-width: 43vw;
+  max-height: 43vw;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 68vh;
-  height: 68vh;
-  max-width: 42vw;
-  max-height: 76%;
   border-radius: 50%;
   background:
-    radial-gradient(circle, #020306 0%, #020306 53%, transparent 54%),
-    radial-gradient(circle, rgba(160, 191, 203, 0.66) 0%, #35434A 12%, #172027 22%, #0A0D11 34%, transparent 39%);
-  box-shadow: 0 0 28rpx rgba(160, 221, 241, 0.14), inset 0 0 25rpx rgba(185, 225, 238, 0.12);
+    radial-gradient(circle at 50% 50%, #020306 0%, #020306 53%, rgba(2, 3, 6, 0) 54%),
+    radial-gradient(circle at 50% 50%, rgba(160, 191, 203, 0.62) 0%, #35434A 12%, #172027 22%, #0A0D11 34%, rgba(10, 13, 17, 0) 39%);
+  box-shadow:
+    0 0 30rpx rgba(160, 221, 241, 0.10),
+    inset 0 0 22rpx rgba(185, 225, 238, 0.08);
 }
 
 .speed-ring::before {
@@ -201,187 +294,211 @@
   right: 3.5%;
   bottom: 3.5%;
   left: 3.5%;
-  border: 1rpx solid rgba(214, 235, 247, 0.20);
+  border: 1rpx solid rgba(214, 235, 247, 0.18);
   border-radius: 50%;
-  box-shadow: 0 0 24rpx rgba(170, 223, 239, 0.13);
 }
 
 .speed-inner {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 54%;
-  height: 54%;
+  width: 60%;
+  height: 60%;
   margin-top: -1%;
   border-radius: 50%;
   background:
-    radial-gradient(ellipse at 70% 35%, rgba(48, 80, 100, 0.20), transparent 42%),
-    radial-gradient(circle, #020306 55%, #06090E 100%);
+    radial-gradient(ellipse at 70% 35%, rgba(48, 80, 100, 0.16), transparent 42%),
+    radial-gradient(circle at 50% 50%, #020306 55%, #06090E 100%);
 }
 
 .speed {
   color: #FFFFFF;
-  font-size: 6vw;
-  font-weight: 350;
+  font-size: 48rpx;
+  font-weight: 300;
   line-height: 1;
-  letter-spacing: -4rpx;
+  letter-spacing: -2rpx;
   font-variant-numeric: tabular-nums;
 }
 
 .unit {
-  margin-top: 8rpx;
-  color: #868C96;
-  font-size: 18rpx;
-  letter-spacing: 2rpx;
+  margin-top: 3rpx;
+  color: #7C8593;
+  font-size: 12rpx;
   font-weight: 300;
+  letter-spacing: 2rpx;
 }
 
 .gear {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 8vh;
-  height: 8vh;
-  min-width: 36px;
-  min-height: 36px;
-  max-width: 66px;
-  max-height: 66px;
-  margin-top: 3vh;
-  border: 1rpx solid rgba(116, 214, 239, 0.72);
+  width: 36rpx;
+  height: 36rpx;
+  margin-top: 7rpx;
+  border: 1rpx solid rgba(116, 214, 239, 0.58);
   border-radius: 50%;
   background: radial-gradient(circle at 35% 25%, #1A414C, #071014 70%);
-  box-shadow: 0 0 16rpx rgba(90, 211, 234, 0.22), inset 0 0 9rpx rgba(119, 227, 244, 0.16);
-  color: #F7F9FC;
-  font-size: 4.5vh;
-  font-weight: 600;
+  box-shadow:
+    0 0 12rpx rgba(90, 211, 234, 0.18),
+    inset 0 0 8rpx rgba(119, 227, 244, 0.12);
+  color: #EAF4F8;
+  font-size: 17rpx;
+  font-weight: 500;
 }
 
+/* 右：车锁 + 电量续航 */
 .right-panel {
-  width: 21%;
-  border-left: 1rpx solid rgba(195, 211, 235, 0.11);
-  background: linear-gradient(270deg, transparent, rgba(17, 26, 42, 0.20));
-  gap: 2vh;
-}
-
-.vehicle-outline {
   position: relative;
-  width: 7vw;
-  min-width: 52px;
-  max-width: 82px;
-  height: 27.2vh;
-  min-height: 99px;
-  max-height: 184px;
-  border: 4rpx solid rgba(192, 194, 203, 0.78);
-  border-top-width: 5rpx;
-  border-bottom-width: 5rpx;
-  border-radius: 48% / 19%;
-  filter: drop-shadow(0 0 9rpx rgba(218, 223, 239, 0.08));
-}
-
-.vehicle-outline::before {
-  content: '';
-  position: absolute;
-  left: 22%;
-  right: 22%;
-  top: 25%;
-  bottom: 25%;
-  border-left: 2rpx solid rgba(170, 173, 185, 0.36);
-  border-right: 2rpx solid rgba(170, 173, 185, 0.36);
-}
-
-.tire {
-  position: absolute;
   z-index: 1;
-  width: 12rpx;
-  min-width: 8px;
-  height: 6vh;
-  min-height: 21px;
-  max-height: 40px;
-  border-radius: 3rpx;
-  background: #9799A3;
-  box-shadow: 0 0 0 5rpx #11131A;
-}
-
-.tire.fl { left: -9rpx; top: 15%; }
-.tire.fr { right: -9rpx; top: 15%; }
-.tire.rl { left: -9rpx; bottom: 15%; }
-.tire.rr { right: -9rpx; bottom: 15%; }
-
-.tire-value {
-  position: absolute;
-  color: #ABB0BC;
-  font-size: 14rpx;
-  letter-spacing: 1rpx;
-  white-space: nowrap;
-}
-
-.tire-value.fl { left: -42rpx; top: 19%; }
-.tire-value.fr { right: -42rpx; top: 19%; }
-.tire-value.rl { left: -42rpx; bottom: 19%; }
-.tire-value.rr { right: -42rpx; bottom: 19%; }
-
-.lock-status {
+  width: 23%;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  color: #F5F7FB;
-  font-size: 21rpx;
-  font-weight: 550;
-  white-space: nowrap;
-}
-
-.touch-tip {
-  margin-top: 5rpx;
-  color: #768091;
-  font-size: 14rpx;
-  font-weight: 400;
-}
-
-.link-status {
-  color: #C2C8D2;
-  font-size: 18rpx;
-  white-space: nowrap;
-}
-
-.range {
-  position: absolute;
-  z-index: 2;
-  left: 6%;
-  right: 1%;
-  bottom: 2.5%;
-}
-
-.range-main {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.battery-chip {
-  display: flex;
-  align-items: center;
   justify-content: center;
-  width: 5vw;
-  min-width: 37px;
-  max-width: 58px;
-  height: 4vh;
-  min-height: 22px;
-  max-height: 30px;
-  border-radius: 8rpx;
-  background: #C1C3C9;
-  color: #30343B;
-  font-size: 18rpx;
-  font-weight: 700;
+}
+
+.right-panel::before {
+  content: '';
+  position: absolute;
+  top: 16%;
+  left: 0;
+  bottom: 16%;
+  width: 1rpx;
+  background: linear-gradient(180deg, transparent, rgba(195, 211, 235, 0.12), transparent);
+}
+
+.panel-cap {
+  color: #59616D;
+  font-size: 11rpx;
+  letter-spacing: 3rpx;
+}
+
+.lock-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.lock-row {
+  display: flex;
+  align-items: center;
+  margin-top: 10rpx;
+}
+
+.lock-icon {
+  position: relative;
+  flex: 0 0 auto;
+  width: 40rpx;
+  height: 40rpx;
+  margin-right: 14rpx;
+  color: #59616D;
+}
+
+.lock-shackle {
+  position: absolute;
+  left: 9rpx;
+  top: 1rpx;
+  width: 22rpx;
+  height: 19rpx;
+  box-sizing: border-box;
+  border: 2rpx solid currentColor;
+  border-bottom: none;
+  border-radius: 11rpx 11rpx 0 0;
+  opacity: 0.92;
+}
+
+.lock-body {
+  position: absolute;
+  left: 4rpx;
+  bottom: 3rpx;
+  width: 32rpx;
+  height: 21rpx;
+  border-radius: 5rpx;
+  background: currentColor;
+}
+
+.lock-icon.unlocked .lock-shackle {
+  transform: translateX(3rpx) rotate(16deg);
+  transform-origin: 70% 100%;
+}
+
+.lock-icon.locked { color: #6EDB9A; }
+.lock-icon.unlocked { color: #FFA033; }
+.lock-icon.offline { color: #4E5662; }
+
+.lock-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.lock-title {
+  color: #E8EDF4;
+  font-size: 17rpx;
+  font-weight: 400;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.lock-title.compact {
+  max-width: 100%;
+  overflow: hidden;
+  color: #B7BEC9;
+  font-size: 14rpx;
+  text-overflow: ellipsis;
+}
+
+.lock-sub {
+  margin-top: 2rpx;
+  color: #5F6773;
+  font-size: 12rpx;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.right-divider {
+  height: 1rpx;
+  margin: 18rpx 0;
+  background: linear-gradient(90deg, rgba(195, 211, 235, 0.13), transparent);
+}
+
+.range-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.range-head-right {
+  display: flex;
+  align-items: baseline;
+}
+
+.charging-tag {
+  margin-right: 8rpx;
+  color: #6EDB9A;
+  font-size: 11rpx;
+  letter-spacing: 1rpx;
+}
+
+.soc-value {
+  color: #F2F4F8;
+  font-size: 22rpx;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.soc-unit {
+  margin-left: 2rpx;
+  color: #7C8593;
+  font-size: 12rpx;
 }
 
 .battery-track {
-  flex: 1;
-  height: 1.5vh;
-  min-height: 7px;
-  max-height: 12px;
+  height: 6rpx;
+  margin-top: 11rpx;
   border-radius: 999rpx;
-  background: #292B31;
+  background: #22262C;
   overflow: hidden;
 }
 
@@ -389,171 +506,169 @@
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #85D9A4, #49BC7D);
-  box-shadow: 0 0 12rpx rgba(91, 220, 147, 0.3);
+  box-shadow: 0 0 10rpx rgba(91, 220, 147, 0.30);
   transition: width 0.4s ease;
 }
 
-.range-caption {
+.range-foot {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  margin-top: 7rpx;
+  margin-top: 9rpx;
 }
 
 .range-label {
-  color: #C6C9D0;
-  font-size: 18rpx;
-  letter-spacing: 1rpx;
+  color: #6E7683;
+  font-size: 12rpx;
 }
 
 .range-value {
-  color: #F5F7FB;
-  font-size: 20rpx;
-  font-weight: 600;
+  color: #E8EDF4;
+  font-size: 18rpx;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
 
+.range-unit {
+  color: #7C8593;
+  font-size: 12rpx;
+}
+
+/* ── 调试日志 ───────────────────────────────────────────────────── */
 .logs {
   position: fixed;
-  z-index: 20;
-  left: 12rpx;
-  bottom: 12rpx;
+  z-index: 30;
+  left: 3vw;
+  bottom: 2vh;
   width: 44vw;
-  max-height: 42vh;
+  max-height: 44vh;
   box-sizing: border-box;
   padding: 12rpx 16rpx;
-  border: 1rpx solid rgba(195, 211, 235, 0.12);
+  border: 1rpx solid rgba(195, 211, 235, 0.10);
   border-radius: 12rpx;
-  background: rgba(8, 11, 17, 0.94);
+  background: rgba(8, 11, 17, 0.95);
+}
+
+.logs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6rpx;
 }
 
 .stats-text {
-  margin-bottom: 6rpx;
   color: #43D9F5;
-  font-size: 16rpx;
+  font-size: 13rpx;
+}
+
+.logs-close {
+  color: #5F6773;
+  font-size: 13rpx;
 }
 
 .log-line {
-  color: #A5ADBA;
-  font-size: 16rpx;
-  line-height: 1.6;
+  color: #9AA3B0;
+  font-size: 13rpx;
+  line-height: 1.55;
   word-break: break-all;
 }
 
+/* ── 配钥弹窗（横屏横向排版） ────────────────────────────────────── */
 .wx-mask {
   position: fixed;
+  z-index: 100;
   left: 0;
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(4, 5, 6, 0.78);
-  backdrop-filter: blur(8rpx);
+  background: rgba(4, 5, 6, 0.80);
 }
 
 .wx-modal {
-  position: relative;
-  width: 600rpx;
+  display: flex;
+  align-items: center;
+  width: 520rpx;
+  max-width: 66vw;
+  max-height: 84vh;
   box-sizing: border-box;
-  padding: 52rpx 44rpx 40rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.09);
-  border-radius: 32rpx;
+  padding: 22rpx 28rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
   background: linear-gradient(145deg, #1A1E23, #111417);
-  text-align: center;
-  box-shadow: 0 24rpx 80rpx rgba(0, 0, 0, 0.48);
+  box-shadow: 0 18rpx 54rpx rgba(0, 0, 0, 0.48);
+  overflow: hidden;
 }
 
-.wx-modal-icon { margin-bottom: 20rpx; }
+.wx-modal-icon {
+  flex: 0 0 auto;
+  margin-right: 22rpx;
+}
 
 .icon-text {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 112rpx;
-  height: 112rpx;
+  width: 72rpx;
+  height: 72rpx;
   border-radius: 50%;
   background: linear-gradient(145deg, #2D78FF, #1559D6);
   color: #FFFFFF;
-  font-size: 48rpx;
-  box-shadow: 0 10rpx 28rpx rgba(45, 120, 255, 0.28);
+  font-size: 32rpx;
+  box-shadow: 0 6rpx 20rpx rgba(45, 120, 255, 0.26);
 }
 
 .icon-text.good {
   background: linear-gradient(145deg, #21C15E, #168C43);
-  box-shadow: 0 10rpx 28rpx rgba(33, 193, 94, 0.24);
+  box-shadow: 0 6rpx 20rpx rgba(33, 193, 94, 0.22);
 }
 
 .icon-text.bad {
   background: linear-gradient(145deg, #FF453A, #C71F24);
-  box-shadow: 0 10rpx 28rpx rgba(232, 33, 39, 0.24);
+  box-shadow: 0 6rpx 20rpx rgba(232, 33, 39, 0.22);
+}
+
+.wx-modal-main {
+  flex: 1;
+  min-width: 0;
 }
 
 .wx-modal-title {
-  margin-bottom: 14rpx;
+  margin-bottom: 5rpx;
   color: #F7F9FC;
-  font-size: 34rpx;
-  font-weight: 700;
+  font-size: 24rpx;
+  font-weight: 600;
 }
 
 .wx-modal-title.good { color: #69E9A0; }
 .wx-modal-title.bad { color: #FF777B; }
 
 .wx-modal-body {
-  color: #AEB5C0;
-  font-size: 24rpx;
-  line-height: 1.7;
+  color: #9AA3B0;
+  font-size: 17rpx;
+  line-height: 1.5;
 }
 
 .wx-modal-count {
-  margin-top: 24rpx;
+  margin-top: 6rpx;
   color: #43D9F5;
-  font-size: 76rpx;
-  font-weight: 700;
+  font-size: 36rpx;
+  font-weight: 600;
   line-height: 1;
 }
 
 .wx-modal-progress {
-  margin-top: 18rpx;
-  color: #737C89;
-  font-size: 20rpx;
+  margin-top: 6rpx;
+  color: #5F6773;
+  font-size: 14rpx;
 }
 
 .wx-modal-hint {
-  margin-top: 22rpx;
-  padding-top: 18rpx;
-  border-top: 1rpx solid rgba(255, 255, 255, 0.07);
-  color: #69717D;
-  font-size: 20rpx;
-}
-
-@media (max-height: 420px) {
-  .statusbar {
-    height: 8vh;
-    min-height: 36rpx;
-  }
-
-  .cockpit {
-    height: calc(92vh - 12rpx);
-  }
-
-  .side-panel {
-    height: 76%;
-  }
-
-  .car-image {
-    max-height: 70%;
-  }
-
-  .speed-ring {
-    width: 64vh;
-    height: 64vh;
-    max-width: 38vw;
-  }
-
-  .range {
-    bottom: 1%;
-  }
+  margin-top: 8rpx;
+  padding-top: 7rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.06);
+  color: #59616D;
+  font-size: 13rpx;
 }

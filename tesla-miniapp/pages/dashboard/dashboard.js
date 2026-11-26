@@ -174,6 +174,13 @@ Page({
   },
 
   // ── 连接控制 ──────────────────────────────────────────────────────
+  // 右侧车锁卡片：已就绪时断开，否则发起连接
+  tapLock() {
+    const model = this.data.model;
+    if (model && model.ready) this.tapDisconnect();
+    else this.tapConnect();
+  },
+
   tapConnect() {
     const vin = this.data.vin;
     if (!/^[A-HJ-NPR-Z0-9]{11,17}$/.test(vin)) {

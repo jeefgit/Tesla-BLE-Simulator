@@ -1,4 +1,4 @@
-// 车辆状态快照：分组时效（DATA_STALE_MS 过期判定）+ 发布订阅
+// 车辆状态快照：按轮询频率判定分组时效 + 发布订阅
 'use strict';
 
 const { CFG } = require('../config/index');
@@ -93,7 +93,12 @@ class VehicleState {
   get() {
     const now = Date.now();
     const fresh = {};
-    for (const g of GROUPS) fresh[g] = (now - (this._ts[g] || 0)) < CFG.DATA_STALE_MS;
+    for (const g of GROUPS) {
+      const staleMs = g === 'drive' || g === 'gear'
+        ? CFG.DATA_STALE_MS
+        : CFG.AUX_DATA_STALE_MS;
+      fresh[g] = (now - (this._ts[g] || 0)) < staleMs;
+    }
     return { snap: this._snap, fresh, link: this._link };
   }
 }
