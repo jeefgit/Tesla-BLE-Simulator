@@ -245,10 +245,14 @@ class BleLink {
     const findMatch = (devices) => {
       for (let i = 0; i < devices.length; i++) {
         const d = devices[i];
-        const name = d.name || d.localName || '';
-        const key = nameNorm(name);
-        if (key && !seen[key]) seen[key] = true;
-        if (nameMatches(name, targets)) return d;
+        // 微信的 name 可能是缓存/车机自定义名，localName 才是广播名，两者都要检查
+        const name = d.name || '';
+        const localName = d.localName || '';
+        const k1 = nameNorm(name);
+        const k2 = nameNorm(localName);
+        if (k1 && !seen[k1]) seen[k1] = true;
+        if (k2 && !seen[k2]) seen[k2] = true;
+        if (nameMatches(name, targets) || nameMatches(localName, targets)) return d;
       }
       return null;
     };
