@@ -79,7 +79,7 @@
             </block>
             <block wx:elif="{{stateText === 'idle'}}">
               <text class="lock-title">设备未连接</text>
-              <text class="lock-sub">轻触连接车辆</text>
+              <text class="lock-sub">轻触选择设备</text>
             </block>
             <block wx:else>
               <text class="lock-title compact">{{stateText}}</text>
@@ -118,6 +118,48 @@
     </view>
     <view class="log-line" wx:for="{{logs}}" wx:key="index">{{item}}</view>
   </scroll-view>
+
+  <!-- 设备选择弹窗：列出扫描到的 BLE 设备，手动选择连接 -->
+  <view class="wx-mask" wx:if="{{scan.active}}">
+    <view class="scan-modal">
+      <view class="scan-head">
+        <view class="scan-head-main">
+          <text class="scan-title">选择要连接的车辆</text>
+          <text class="scan-vin">VIN {{vin}}</text>
+          <text class="scan-vin">目标名 {{scan.targetsText}}</text>
+        </view>
+        <text class="scan-close" bindtap="tapCancelScan">取消</text>
+      </view>
+
+      <scroll-view class="scan-list" scroll-y>
+        <view
+          class="scan-item {{item.suggested ? 'suggested' : ''}}"
+          wx:for="{{scan.devices}}"
+          wx:key="deviceId"
+          data-id="{{item.deviceId}}"
+          bindtap="tapPickDevice"
+        >
+          <view class="scan-item-main">
+            <view class="scan-item-title">
+              <text class="scan-name">{{item.title}}</text>
+              <text class="scan-badge" wx:if="{{item.suggested}}">VIN 匹配</text>
+            </view>
+            <text class="scan-meta">{{item.meta}}</text>
+          </view>
+          <text class="scan-rssi">{{item.rssiText}}</text>
+        </view>
+
+        <view class="scan-empty" wx:if="{{scan.devices.length === 0}}">
+          <text class="scan-empty-text">{{scan.hint}}</text>
+        </view>
+      </scroll-view>
+
+      <view class="scan-foot">
+        <text class="scan-foot-hint" wx:if="{{scan.devices.length > 0}}">{{scan.hint}}</text>
+        <text class="scan-rescan" bindtap="tapRescan">重新扫描</text>
+      </view>
+    </view>
+  </view>
 
   <!-- 配钥弹窗：sending / waiting / ok / failed -->
   <view class="wx-mask" wx:if="{{pair.active}}">

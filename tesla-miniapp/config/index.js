@@ -10,6 +10,9 @@ const UUID = {
 // 与 ESP32 端 BackendConfig.h 对齐
 const CFG = {
   VIN: 'LRWYGCFJ8RC571213', // 出厂默认 VIN，可被设置页存储值覆盖
+  // 手动指定的广播名（留空则只用 VIN 推导名）。真车若广播的是车机自定义名称，
+  // 填这里可以让界面把它标成“VIN 匹配”；不填也能在设备列表里手动选择。
+  BLE_NAME: '',
   DATA_STALE_MS: 3000,
   SCAN_SECONDS: 1,
   RECONNECT_INTERVAL_MS: 3000,

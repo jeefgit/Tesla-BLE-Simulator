@@ -19,6 +19,20 @@ function loadPrivKeyHex() {
   }
 }
 
+// BLE 设备 → 列表项。WeChat 的 name 可能是缓存/车机自定义名，localName 才是广播名，
+// 两个都展示，方便确认真车到底广播了什么。
+function formatScanDevice(d) {
+  const primary = d.localName || d.name || '';
+  const secondary = d.name && d.localName && d.name !== d.localName ? d.name : '';
+  return {
+    deviceId: d.deviceId,
+    title: primary || '(未命名设备)',
+    meta: [secondary, d.deviceId].filter(Boolean).join(' · '),
+    rssiText: typeof d.RSSI === 'number' && d.RSSI > -127 ? d.RSSI + ' dBm' : '',
+    suggested: !!d.suggested,
+  };
+}
+
 Page({
   data: {
     vin: '',
@@ -31,6 +45,8 @@ Page({
     model: null,
     // 配钥浮层：phase = sending|waiting|ok|failed
     pair: { active: false, phase: '', title: '', sub: '', countdown: 0, sends: 0, maxSends: 0 },
+    // 设备选择浮层：扫描到的 BLE 设备列表，由用户手动选择要连接的车
+    scan: { active: false, devices: [], hint: '', targetsText: '' },
   },
 
   onLoad() {
@@ -47,6 +63,7 @@ Page({
     this._link.on('state', (s) => {
       this._vstate.setLink(s.state, s.detail);
       this.setData({ stateText: s.state + (s.detail ? ' · ' + s.detail : '') });
+      if (s.state === 'ready' && this.data.scan.active) this.setData({ 'scan.active': false });
       this.pushLog('→ ' + s.state + ' ' + s.detail);
     });
 
@@ -76,6 +93,8 @@ Page({
   onUnload() {
     clearInterval(this._redrawTimer);
     clearInterval(this._clockTimer);
+    this._scanSeq = (this._scanSeq || 0) + 1;
+    this._link.stopScanNow();
     this._client.stop();
     this._link.disconnect();
   },
@@ -174,21 +193,94 @@ Page({
   },
 
   // ── 连接控制 ──────────────────────────────────────────────────────
-  // 右侧车锁卡片：已就绪时断开，否则发起连接
+  // 右侧车锁卡片：已就绪时断开，否则打开设备选择列表
   tapLock() {
     const model = this.data.model;
     if (model && model.ready) this.tapDisconnect();
     else this.tapConnect();
   },
 
-  tapConnect() {
+  normalizedVin() {
     const vin = String(this.data.vin || '').trim().toUpperCase();
     if (vin !== this.data.vin) this.setData({ vin });
     if (!/^[A-HJ-NPR-Z0-9]{11,17}$/.test(vin)) {
       this.pushLog('VIN 格式不合法：' + vin);
-      return;
+      return '';
     }
-    this._link.connect(vin).catch((e) => this.pushLog('连接失败: ' + e.message));
+    return vin;
+  },
+
+  tapConnect() {
+    const vin = this.normalizedVin();
+    if (!vin) return;
+    this.startScan();
+  },
+
+  // 扫描所有 BLE 设备并列出，由用户手动选择要连接的车
+  startScan() {
+    const vin = this.normalizedVin();
+    if (!vin) return;
+    const seq = (this._scanSeq || 0) + 1;
+    this._scanSeq = seq;
+    this._scanning = true;
+    const targets = this._link.targetNamesFor(vin);
+    this.setData({
+      scan: { active: true, devices: [], hint: '正在扫描附近的 BLE 设备…', targetsText: targets.join(' / ') },
+    });
+    this._link.scanDevices(vin, 10000, (list) => {
+      if (this._scanSeq !== seq) return;
+      this.setData({
+        'scan.devices': list.map(formatScanDevice),
+        'scan.hint': '扫描中… 已发现 ' + list.length + ' 个设备',
+      });
+    }).then((list) => {
+      if (this._scanSeq !== seq) return;
+      this._scanning = false;
+      const devices = list.map(formatScanDevice);
+      let hint;
+      if (!devices.length) {
+        hint = '没有扫描到带名称的 BLE 设备。请确认手机蓝牙已开启、定位权限已允许，车辆在附近并已唤醒。';
+      } else if (devices.some((d) => d.suggested)) {
+        hint = '已找到与 VIN 匹配的设备（标记“VIN 匹配”），轻触即可连接。';
+      } else {
+        hint = '未发现与 VIN 推导名称一致的设备。若列表中有你的车，直接轻触它连接即可。';
+      }
+      this.setData({ scan: { active: true, devices, hint, targetsText: targets.join(' / ') } });
+    }).catch((e) => {
+      if (this._scanSeq !== seq) return;
+      this._scanning = false;
+      this.setData({ 'scan.hint': '扫描失败：' + e.message });
+    });
+  },
+
+  tapRescan() {
+    this._scanSeq = (this._scanSeq || 0) + 1;
+    this._link.stopScanNow();
+    this.setData({ 'scan.hint': '正在重新扫描…' });
+    setTimeout(() => {
+      if (this.data.scan.active) this.startScan();
+    }, 300);
+  },
+
+  tapCancelScan() {
+    this._scanSeq = (this._scanSeq || 0) + 1;
+    this._scanning = false;
+    this._link.stopScanNow();
+    this.setData({ 'scan.active': false });
+  },
+
+  tapPickDevice(e) {
+    const deviceId = e.currentTarget.dataset.id;
+    const vin = this.normalizedVin();
+    if (!deviceId || !vin) return;
+    const dev = (this.data.scan.devices || []).find((d) => d.deviceId === deviceId);
+    this._scanSeq = (this._scanSeq || 0) + 1;
+    this._scanning = false;
+    this._link.stopScanNow();
+    this.setData({ 'scan.active': false });
+    this.pushLog('手动连接：' + (dev ? dev.title : deviceId));
+    this._link.connectDevice(deviceId, vin)
+      .catch((err) => this.pushLog('连接失败: ' + err.message));
   },
 
   tapDisconnect() {

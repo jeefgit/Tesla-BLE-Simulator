@@ -67,6 +67,8 @@ class BleLink {
     this._txBytes = 0;
     this._rxFrames = 0;
     this._txFrames = 0;
+    this._scanCancel = null;
+    this._manualDeviceId = null; // 用户手动选择的设备，断线重连时优先直连
   }
 
   on(event, cb) {
@@ -135,6 +137,105 @@ class BleLink {
     wxp(wx.stopBluetoothDevicesDiscovery).catch(() => {});
   }
 
+  // 当前 VIN 对应的候选广播名（VIN 推导名 + 可选的 BLE_NAME 手动名）
+  _targetNamesFor(vin) {
+    const names = advertisedNamesFromVin(vin);
+    const extra = String(CFG.BLE_NAME || '').trim();
+    if (extra) {
+      const n = nameNorm(extra);
+      if (!names.some((x) => nameNorm(x) === n)) names.unshift(extra);
+    }
+    return names;
+  }
+
+  // 供界面展示“正在找哪些广播名”
+  targetNamesFor(vin) {
+    return this._targetNamesFor(vin);
+  }
+
+  // 扫描所有 BLE 设备供界面手动选择（不按名称过滤）。
+  // onUpdate(list) 会在扫描过程中反复回调，list 项：
+  // { deviceId, name, localName, displayName, RSSI, suggested }
+  async scanDevices(vin, timeoutMs, onUpdate) {
+    await this._ensureAdapter();
+    const targets = this._targetNamesFor(vin);
+    const found = new Map();
+    let lastEmit = 0;
+
+    const sortList = () => Array.from(found.values()).sort(
+      (a, b) => (b.suggested ? 1 : 0) - (a.suggested ? 1 : 0) || b.RSSI - a.RSSI);
+
+    const emit = (force) => {
+      if (!onUpdate) return;
+      const now = Date.now();
+      if (!force && now - lastEmit < 400) return;
+      lastEmit = now;
+      onUpdate(sortList());
+    };
+
+    const collect = (devices) => {
+      let changed = false;
+      for (let i = 0; i < devices.length; i++) {
+        const d = devices[i];
+        if (!d || !d.deviceId) continue;
+        if (d.connectable === false) continue;
+        const prev = found.get(d.deviceId);
+        // 后续广播可能只带其中一项，合并而不是覆盖，避免名字闪一下又消失
+        const name = d.name || (prev && prev.name) || '';
+        const localName = d.localName || (prev && prev.localName) || '';
+        if (!name && !localName) continue; // 未命名设备无法在界面上识别
+        const suggested = nameMatches(name, targets) || nameMatches(localName, targets);
+        found.set(d.deviceId, {
+          deviceId: d.deviceId,
+          name: name,
+          localName: localName,
+          displayName: localName || name,
+          RSSI: typeof d.RSSI === 'number' ? d.RSSI : -127,
+          suggested: suggested || !!(prev && prev.suggested),
+        });
+        changed = true;
+      }
+      if (changed) emit(false);
+    };
+
+    this._log('[scan] 扫描所有 BLE 设备（目标名 ' + targets.join(' / ') + '）');
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const finish = (fn, arg) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        this._scanCancel = null;
+        wx.offBluetoothDeviceFound();
+        this._stopScan();
+        fn(arg);
+      };
+      const timer = setTimeout(() => {
+        emit(true);
+        finish(resolve, sortList());
+      }, timeoutMs);
+
+      this._scanCancel = () => finish(resolve, sortList());
+
+      wx.onBluetoothDeviceFound((res) => {
+        collect((res && res.devices) || []);
+      });
+
+      wxp(wx.startBluetoothDevicesDiscovery, { allowDuplicatesKey: true })
+        .then(() => wxp(wx.getBluetoothDevices).catch(() => null))
+        .then((res) => {
+          if (res) collect(res.devices || []);
+        })
+        .catch((e) => finish(reject, e));
+    });
+  }
+
+  // 界面取消/选中设备时立即结束扫描
+  stopScanNow() {
+    if (this._scanCancel) this._scanCancel();
+    else this._stopScan();
+  }
+
   async _scan(targetNames, timeoutMs) {
     const targets = (Array.isArray(targetNames) ? targetNames : [targetNames])
       .map(nameNorm).filter(Boolean);
@@ -164,9 +265,16 @@ class BleLink {
       };
       const timer = setTimeout(() => {
         const nearby = Object.keys(seen).filter(Boolean).slice(0, 15);
-        const hint = nearby.length
+        let hint = nearby.length
           ? '；附近设备广播名: ' + nearby.join(', ')
           : '；未收到任何带名称的 BLE 广播（检查手机蓝牙/定位权限，或车辆是否在范围内）';
+        // 收到疑似特斯拉广播名但与 VIN 推导名不一致 → 基本可以判定 VIN 配置不是这辆车
+        const teslaLike = nearby.filter((n) => /^TESLA/.test(n) || /^S[0-9A-F]{17}$/.test(n));
+        if (teslaLike.length) {
+          hint += '；检测到疑似特斯拉广播名 ' + teslaLike.join(', ')
+            + '，但与当前 VIN 推导的 ' + targets.join(' / ')
+            + ' 不一致，请确认 VIN 是这辆真车的 VIN';
+        }
         finish(reject, new Error('扫描超时（' + timeoutMs / 1000 + 's），未发现 '
           + targets.join(' 或 ') + hint));
       }, timeoutMs);
@@ -247,7 +355,8 @@ class BleLink {
     clearTimeout(this._reconnectTimer); // 取消挂起的重连，避免并发两条连接流程
     vin = String(vin || '').trim().toUpperCase();
     this._vin = vin;
-    const targetNames = advertisedNamesFromVin(vin);
+    this._manualDeviceId = null;
+    const targetNames = this._targetNamesFor(vin);
     this._setState(STATE.SCANNING, '按广播名查找 ' + targetNames.join(' / '));
     try {
       await this._ensureAdapter();
@@ -262,6 +371,42 @@ class BleLink {
       await this._subscribe();
       if (gen !== this._gen) return;
       this._setState(STATE.READY, '分片=' + this._chunkSize + 'B');
+    } catch (e) {
+      if (gen !== this._gen) return;
+      this._cleanupDevice();
+      this._setState(STATE.ERROR, e.message);
+      throw e;
+    }
+  }
+
+  // 直接连接界面上选中的设备（跳过按广播名扫描）。
+  // 真车广播名可能被系统替换成车机自定义名称，按名匹配不可靠时用这条路径。
+  async connectDevice(deviceId, vin) {
+    if (!deviceId) throw new Error('未选择设备');
+    if (this._state === STATE.READY || this._state === STATE.CONNECTING) {
+      throw new Error('当前已在连接流程中');
+    }
+    this.stopScanNow(); // 结束可能仍在进行的扫描
+    // 部分 Android ROM 在 stopBluetoothDevicesDiscovery 尚未完成时发起连接会报错，
+    // 留一点时间让扫描真正停止。
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    this._wantDisconnect = false;
+    const gen = ++this._gen;
+    clearTimeout(this._reconnectTimer);
+    this._vin = String(vin || '').trim().toUpperCase();
+    this._manualDeviceId = deviceId;
+    this._deviceId = deviceId;
+    this._setState(STATE.CONNECTING, 'deviceId=' + deviceId);
+    try {
+      await this._ensureAdapter();
+      if (gen !== this._gen) return;
+      await wxp(wx.createBLEConnection, { deviceId: deviceId, timeout: 8000 });
+      if (gen !== this._gen) return;
+      await this._discover();
+      await this._negotiateMtu();
+      await this._subscribe();
+      if (gen !== this._gen) return;
+      this._setState(STATE.READY, '手动选择 分片=' + this._chunkSize + 'B');
     } catch (e) {
       if (gen !== this._gen) return;
       this._cleanupDevice();
@@ -293,7 +438,28 @@ class BleLink {
 
   async _reconnectOnce() {
     const gen = ++this._gen;
-    const targetNames = advertisedNamesFromVin(this._vin);
+    // 手动选择过设备时优先直连（真车广播名可能不是 VIN 推导名，按名扫描会失败）
+    if (this._manualDeviceId) {
+      this._setState(STATE.RECONNECTING, '重连上次选择的设备');
+      try {
+        await this._ensureAdapter();
+        if (gen !== this._gen) return;
+        this._deviceId = this._manualDeviceId;
+        await wxp(wx.createBLEConnection, { deviceId: this._manualDeviceId, timeout: 8000 });
+        if (gen !== this._gen) return;
+        await this._discover();
+        await this._negotiateMtu();
+        await this._subscribe();
+        if (gen !== this._gen) return;
+        this._setState(STATE.READY, '重连成功 分片=' + this._chunkSize + 'B');
+        return;
+      } catch (e) {
+        if (gen !== this._gen) return;
+        this._log('[reconnect] 直连失败，改为按广播名扫描: ' + e.message);
+        this._deviceId = null;
+      }
+    }
+    const targetNames = this._targetNamesFor(this._vin);
     this._setState(STATE.RECONNECTING, '重试扫描 ' + targetNames.join(' / '));
     await this._ensureAdapter();
     const dev = await this._scan(targetNames, CFG.CONNECT_TIMEOUT_MS);
@@ -349,6 +515,7 @@ class BleLink {
     this._wantDisconnect = true;
     this._gen++;
     clearTimeout(this._reconnectTimer);
+    this._manualDeviceId = null;
     const id = this._deviceId;
     this._deviceId = null;
     if (id) {
